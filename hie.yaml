@@ -1,0 +1,12 @@
+cradle:
+  cabal:
+    - path: "./src"
+      component: "lib:cuintet"
+    - path: "./tests/doctests.hs"
+      component: "cuintet:doctests"
+    - path: "./tests"
+      component: "cuintet:unittests"
+    - path: "./bin/Clash.hs"
+      component: "cuintet:exe:clash"
+    - path: "./bin/Clashi.hs"
+      component: "cuintet:exe:clashi"

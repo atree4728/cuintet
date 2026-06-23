@@ -1,0 +1,109 @@
+cabal-version:      3.8
+name:               cuintet
+version:            0.1
+synopsis:           A RISC-V CPU written in Clash
+license:            BSD-3-Clause
+license-file:       LICENSE
+author:             atree4728
+maintainer:         atree.public@gmail.com
+build-type:         Simple
+extra-doc-files:
+    README.md
+
+common common-options
+    default-language: Haskell2010
+    default-extensions:
+        BangPatterns
+        BinaryLiterals
+        ConstraintKinds
+        DataKinds
+        DefaultSignatures
+        DeriveAnyClass
+        DeriveDataTypeable
+        DeriveFoldable
+        DeriveFunctor
+        DeriveGeneric
+        DeriveLift
+        DeriveTraversable
+        DerivingStrategies
+        FlexibleContexts
+        InstanceSigs
+        KindSignatures
+        LambdaCase
+        NamedFieldPuns
+        NoStarIsType
+        PolyKinds
+        RankNTypes
+        RecordWildCards
+        ScopedTypeVariables
+        StandaloneDeriving
+        TupleSections
+        TypeApplications
+        TypeFamilies
+        TypeOperators
+        ViewPatterns
+        TemplateHaskell
+        QuasiQuotes
+        NoImplicitPrelude
+    ghc-options:
+        -Wall -Wcompat
+        -haddock
+        -fplugin GHC.TypeLits.Extra.Solver
+        -fplugin GHC.TypeLits.Normalise
+        -fplugin GHC.TypeLits.KnownNat.Solver
+        -fexpose-all-unfoldings
+        -fno-worker-wrapper
+        -fno-unbox-small-strict-fields
+        -fno-unbox-strict-fields
+    build-depends:
+        base,
+        clash-prelude >=1.10.0 && <1.12,
+        ghc-typelits-natnormalise,
+        ghc-typelits-extra,
+        ghc-typelits-knownnat
+
+library
+    import:          common-options
+    hs-source-dirs:  src
+    exposed-modules: Cuintet.Cpu
+
+executable clash
+    main-is:          bin/Clash.hs
+    default-language: Haskell2010
+    build-depends:    base, clash-ghc, cuintet
+    if !os(windows)
+        ghc-options: -dynamic
+
+executable clashi
+    main-is:          bin/Clashi.hs
+    default-language: Haskell2010
+    build-depends:    base, clash-ghc, cuintet
+    if !os(windows)
+        ghc-options: -dynamic
+
+test-suite doctests
+    type:             exitcode-stdio-1.0
+    default-language: Haskell2010
+    main-is:          doctests.hs
+    hs-source-dirs:   tests
+    ghc-options:      -Wall -Wcompat -threaded
+    build-depends:
+        base,
+        cuintet,
+        doctest-parallel >=0.2 && <0.5
+
+test-suite unittests
+    import:           common-options
+    type:             exitcode-stdio-1.0
+    main-is:          unittests.hs
+    hs-source-dirs:   tests
+    ghc-options:      -threaded
+    other-modules:    Tests.Cuintet.Cpu
+    build-depends:
+        cuintet,
+        QuickCheck,
+        clash-prelude-hedgehog,
+        hedgehog,
+        tasty >=1.2 && <1.6,
+        tasty-hedgehog,
+        tasty-th
