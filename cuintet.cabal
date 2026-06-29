@@ -65,7 +65,7 @@ common common-options
 library
     import:          common-options
     hs-source-dirs:  src
-    exposed-modules: Cuintet.Cpu
+    exposed-modules: Cuintet
 
 executable clash
     main-is:          bin/Clash.hs
@@ -98,7 +98,7 @@ test-suite unittests
     main-is:          unittests.hs
     hs-source-dirs:   tests
     ghc-options:      -threaded
-    other-modules:    Tests.Cuintet.Cpu
+    other-modules:    Tests.Cuintet.Core
     build-depends:
         cuintet,
         QuickCheck,

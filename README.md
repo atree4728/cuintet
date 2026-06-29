@@ -28,7 +28,7 @@ cabal run clashi
 To compile the project to SystemVerilog, run:
 
 ```bash
-cabal run clash -- Cuintet.Cpu --systemverilog
+cabal run clash -- Cuintet --systemverilog
 ```
 
 You can find the SystemVerilog files in `systemverilog/`.
