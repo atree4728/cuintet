@@ -110,4 +110,5 @@ test-suite unittests
         hedgehog,
         tasty >=1.2 && <1.6,
         tasty-hedgehog,
+        tasty-hunit,
         tasty-th
