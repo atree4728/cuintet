@@ -13,7 +13,7 @@ type Addr = Unsigned XLen
 
 type Inst = Unsigned ILen
 
-data MemBusReq dataWidth addrWidth = MemoryReq
+data MemBusReq dataWidth addrWidth = MemBusReq
   { valid :: Bool
   -- ^ Whether to request memory access.
   , addr :: Unsigned addrWidth
@@ -25,7 +25,7 @@ data MemBusReq dataWidth addrWidth = MemoryReq
   }
   deriving (Generic, NFDataX)
 
-data MemBusResp dataWidth = MemoryResp
+data MemBusResp dataWidth = MemBusResp
   { ready :: Bool
   -- ^ Whether to accept a memory access request.
   , rvalid :: Bool
@@ -35,5 +35,8 @@ data MemBusResp dataWidth = MemoryResp
   }
   deriving (Generic, NFDataX)
 
-type MemDataWidth = Unsigned 32
-type MemAddrWidth = Unsigned 20
+type MemDataWidth = 32
+type MemAddrWidth = 20
+
+addrToMemAddr :: Addr -> Unsigned MemAddrWidth
+addrToMemAddr = unpack . slice d21 d2 . pack

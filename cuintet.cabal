@@ -65,7 +65,11 @@ common common-options
 library
     import:          common-options
     hs-source-dirs:  src
-    exposed-modules: Cuintet
+    exposed-modules:
+        Cuintet
+        Cuintet.Core
+        Cuintet.Eei
+        Cuintet.Memory
 
 executable clash
     main-is:          bin/Clash.hs
