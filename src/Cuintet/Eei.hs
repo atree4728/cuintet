@@ -39,4 +39,4 @@ type MemDataWidth = 32
 type MemAddrWidth = 20
 
 addrToMemAddr :: Addr -> Unsigned MemAddrWidth
-addrToMemAddr = unpack . slice d21 d2 . pack
+addrToMemAddr a = truncateB (a `shiftR` natToNum @(CLog 2 (MemDataWidth `Div` 8)))
