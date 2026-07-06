@@ -31,7 +31,9 @@ common common-options
         KindSignatures
         LambdaCase
         NamedFieldPuns
+        NoFieldSelectors
         NoStarIsType
+        OverloadedRecordDot
         PolyKinds
         RankNTypes
         RecordWildCards
@@ -69,6 +71,7 @@ library
         Cuintet
         Cuintet.Core
         Cuintet.Eei
+        Cuintet.Fifo
         Cuintet.Memory
 
 executable clash

@@ -15,10 +15,15 @@ memory ::
   ) ->
   Signal dom (MemBusReq dataWidth addrWidth) ->
   Signal dom (MemBusResp dataWidth)
-memory ram req = MemBusResp True <$> rvalid <*> rdata
+memory ram req = MemBusResp True <$> rdata
  where
-  rvalid = register False (valid <$> req)
-  rdata = ram (addr <$> req) (write <$> req)
   write MemBusReq{..}
-    | valid && wen = Just (addr, wdata)
+    | valid, Just wd <- wdata = Just (addr, wd)
     | otherwise = Nothing
+  mkRdata valid v
+    | valid = Just v
+    | otherwise = Nothing
+
+  r = ram ((.addr) <$> req) (write <$> req)
+  -- The read data is valid one cycle after the request, matching the ram delay.
+  rdata = mkRdata <$> register False ((.valid) <$> req) <*> r

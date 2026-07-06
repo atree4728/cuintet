@@ -11,16 +11,14 @@ type ILen = 32
 
 type Addr = Unsigned XLen
 
-type Inst = Unsigned ILen
+type Inst = BitVector ILen
 
 data MemBusReq dataWidth addrWidth = MemBusReq
   { valid :: Bool
   -- ^ Whether to request memory access.
   , addr :: Unsigned addrWidth
   -- ^ The address to access.
-  , wen :: Bool
-  -- ^ Write enable.
-  , wdata :: BitVector dataWidth
+  , wdata :: Maybe (BitVector dataWidth)
   -- ^ Data to write.
   }
   deriving (Generic, NFDataX)
@@ -28,9 +26,7 @@ data MemBusReq dataWidth addrWidth = MemBusReq
 data MemBusResp dataWidth = MemBusResp
   { ready :: Bool
   -- ^ Whether to accept a memory access request.
-  , rvalid :: Bool
-  -- ^ Whether processing of an accepted request has been completed.
-  , rdata :: BitVector dataWidth
+  , rdata :: Maybe (BitVector dataWidth)
   -- ^ Data read.
   }
   deriving (Generic, NFDataX)

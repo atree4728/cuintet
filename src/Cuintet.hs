@@ -3,7 +3,7 @@
 module Cuintet where
 
 import Clash.Prelude
-import Cuintet.Core (core)
+import Cuintet.Core (FifoEntry, core)
 import Cuintet.Eei
 import Cuintet.Memory (memory)
 
@@ -15,7 +15,7 @@ system ::
     Signal dom (Maybe (Unsigned MemAddrWidth, BitVector ILen)) ->
     Signal dom (BitVector ILen)
   ) ->
-  Signal dom (Maybe (Addr, BitVector ILen))
+  Signal dom (Maybe FifoEntry)
 system ram = fetched
  where
   (coreReq, fetched) = unbundle $ core memResp
@@ -24,16 +24,15 @@ system ram = fetched
     MemBusReq
       { valid
       , addr = addrToMemAddr addr
-      , wen = False
-      , wdata = errorX "wdata is invalid for instruction fetch."
+      , wdata
       }
 
 topEntity ::
   Clock Dom50 ->
   Reset Dom50 ->
   Enable Dom50 ->
-  Signal Dom50 (Maybe (Addr, BitVector ILen))
-topEntity = exposeClockResetEnable $ system $ blockRam1 NoClearOnReset (SNat @(2 ^ MemAddrWidth)) 0
+  Signal Dom50 (Maybe FifoEntry)
+topEntity = exposeClockResetEnable $ system $ blockRamU NoClearOnReset (SNat @(2 ^ MemAddrWidth))
 {-# ANN
   topEntity
   ( Synthesize

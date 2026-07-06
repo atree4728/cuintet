@@ -2,16 +2,26 @@ module Cuintet.Core where
 
 import Clash.Prelude
 import Cuintet.Eei
+import Cuintet.Fifo (FifoReq (..), FifoResp (..), fifo)
+import Data.Maybe (isJust, isNothing)
+
+data FifoEntry = FifoEntry
+  { addr :: Addr
+  -- ^ The address of @bits@.
+  , bits :: Inst
+  -- ^ Fetched instruction.
+  }
+  deriving (Generic, NFDataX, Eq, Show)
 
 -- | "if" is a shorthand of instruction fetch.
 data CoreState
   = CoreState
   { ifPc :: Addr
   -- ^ Program counter.
-  , ifIsRequested :: Bool
-  -- ^ Whether to be fetching.
-  , ifPcRequested :: Addr
+  , ifRequested :: Maybe Addr
   -- ^ Address being fetched.
+  , ifFifoWdata :: Maybe FifoEntry
+  -- ^ The instruction waiting to be written.
   }
   deriving (Generic, NFDataX)
 
@@ -19,19 +29,52 @@ data CoreState
 core ::
   (HiddenClockResetEnable dom) =>
   Signal dom (MemBusResp ILen) ->
-  Signal dom (MemBusReq ILen XLen, Maybe (Addr, BitVector ILen))
-core = mealy coreT initS
+  Signal dom (MemBusReq ILen XLen, Maybe FifoEntry)
+core memResp = bundle (memReq, inst)
  where
-  initS = CoreState{ifPc = 0, ifIsRequested = False, ifPcRequested = 0}
-  coreT s@CoreState{..} MemBusResp{..} = (s', (req, fetched))
+  coreState =
+    register
+      CoreState
+        { ifPc = 0
+        , ifRequested = Nothing
+        , ifFifoWdata = Nothing
+        }
+      (coreT <$> coreState <*> memResp <*> fifoResp)
+
+  fifoReq = mkFifoReq <$> coreState
+  mkFifoReq CoreState{ifFifoWdata} =
+    FifoReq
+      { wvalid = isJust ifFifoWdata
+      , wdata = fromJustX ifFifoWdata
+      , rready = True
+      }
+  fifoResp = fifo d3 fifoReq
+
+  -- Fetch only when the FIFO has room for both the pending write and this fetch.
+  memReq = mkMemReq <$> coreState <*> fifoResp
+  mkMemReq CoreState{ifPc} FifoResp{wready_two} =
+    MemBusReq
+      { valid = wready_two
+      , addr = ifPc
+      , wdata = Nothing
+      }
+
+  inst = (\FifoResp{rvalid, rdata} -> if rvalid then Just rdata else Nothing) <$> fifoResp
+
+  coreT s@CoreState{..} MemBusResp{..} FifoResp{wready, wready_two} =
+    s
+      { ifPc = if accepted then ifPc + 4 else ifPc
+      , ifRequested = ifRequested'
+      , ifFifoWdata = ifFifoWdata'
+      }
    where
-    req = MemBusReq{valid, addr = ifPc, wen = False, wdata = errorX "wdata is invalid for instruction fetch."}
-    fetched
-      | ifIsRequested && rvalid = Just (ifPcRequested, rdata)
-      | otherwise = Nothing
-    valid = True
-    busFree = not ifIsRequested || rvalid
-    accepted = valid && ready && busFree
-    s'
-      | accepted = CoreState{ifPc = ifPc + 4, ifIsRequested = True, ifPcRequested = ifPc}
-      | otherwise = s{ifIsRequested = ifIsRequested && not rvalid}
+    fetched = (,) <$> ifRequested <*> rdata
+    busFree = isNothing ifRequested || isJust rdata
+    accepted = wready_two && ready && busFree
+    ifRequested'
+      | accepted = Just ifPc
+      | otherwise = ifRequested
+    ifFifoWdata'
+      | Just (addr, bits) <- fetched = Just FifoEntry{addr, bits}
+      | wready = Nothing
+      | otherwise = ifFifoWdata
