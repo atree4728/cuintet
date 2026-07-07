@@ -74,6 +74,7 @@ library
         Cuintet.Fifo
         Cuintet.Memory
         Cuintet.Util
+        Cuintet.Corectrl
 
 executable clash
     main-is:          bin/Clash.hs
