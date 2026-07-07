@@ -2,8 +2,11 @@
 module Cuintet.Core where
 
 import Clash.Prelude
+import Cuintet.Corectrl (InstCtrl)
 import Cuintet.Eei
 import Cuintet.Fifo (FifoReq (..), FifoResp (..), fifo)
+import Cuintet.InstDecoder (instDecode)
+import Cuintet.Util
 import Data.Function (applyWhen)
 import Data.Maybe (isJust, isNothing)
 
@@ -14,7 +17,7 @@ data FifoEntry = FifoEntry
   , bits :: Inst
   -- ^ Fetched instruction.
   }
-  deriving (Generic, NFDataX, Eq, Show)
+  deriving (Generic, NFDataX)
 
 -- | core state. "if" is a shorthand of instruction fetch.
 data CoreState
@@ -32,8 +35,8 @@ data CoreState
 core ::
   (HiddenClockResetEnable dom) =>
   Signal dom (MemBusResp ILen) ->
-  Signal dom (MemBusReq ILen XLen, Maybe FifoEntry)
-core memResp = bundle (memReq, inst)
+  Signal dom (MemBusReq ILen XLen, Maybe (Addr, InstCtrl, BitVector XLen))
+core memResp = bundle (memReq, instInfo)
  where
   coreState =
     register
@@ -61,9 +64,14 @@ core memResp = bundle (memReq, inst)
       , wdata = Nothing
       }
 
-  inst = (.rdata) <$> fifoResp
+  fifoEntry = (.rdata) <$> fifoResp
+  instPc = (.addr) <$$> fifoEntry
+  instBits = (.bits) <$$> fifoEntry
+  decoded = instDecode <$$> instBits
+  instInfo = liftAA2 (\addr (ctrl, imm) -> (addr, ctrl, imm)) instPc decoded
 
   -- TODO: non-redundant state machine
+  -- TODO: @deepErrorX@ for unexpected situation
   coreT CoreState{..} MemBusResp{..} FifoResp{wready, wreadyTwo} =
     CoreState
       { ifPc = applyWhen accepted (+ 4) ifPc

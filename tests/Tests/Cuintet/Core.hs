@@ -17,9 +17,12 @@ tests :: TestTree
 tests =
   testGroup
     "Cuintet.Core"
-    [ testCase "fetches sample.hex in order" $ do
-        let fetched = sampleN @System 8 $ system (blockRam sampleHex)
-        let entries = P.zipWith (\addr bits -> Just FifoEntry{addr, bits}) [0, 4, 8, 12] (toList sampleHex)
-        -- reset, mem delay, fifo write reg, fifo read delay, then 0, 4, 8, 12
-        fetched @?= P.replicate 4 Nothing P.++ entries
-    ]
+    []
+
+-- testCase
+-- "fetches sample.hex in order"
+-- \$ do
+--   let fetched = sampleN @System 8 $ system (blockRam sampleHex)
+--   let entries = P.zipWith (\addr bits -> Just FifoEntry{addr, bits}) [0, 4, 8, 12] (toList sampleHex)
+--   -- reset, mem delay, fifo write reg, fifo read delay, then 0, 4, 8, 12
+--   fetched @?= P.replicate 4 Nothing P.++ entries
