@@ -1,10 +1,13 @@
+-- | Core.
 module Cuintet.Core where
 
 import Clash.Prelude
 import Cuintet.Eei
 import Cuintet.Fifo (FifoReq (..), FifoResp (..), fifo)
+import Data.Function (applyWhen)
 import Data.Maybe (isJust, isNothing)
 
+-- | Pair of fetched instruction and its address.
 data FifoEntry = FifoEntry
   { addr :: Addr
   -- ^ The address of @bits@.
@@ -13,7 +16,7 @@ data FifoEntry = FifoEntry
   }
   deriving (Generic, NFDataX, Eq, Show)
 
--- | "if" is a shorthand of instruction fetch.
+-- | core state. "if" is a shorthand of instruction fetch.
 data CoreState
   = CoreState
   { ifPc :: Addr
@@ -44,37 +47,37 @@ core memResp = bundle (memReq, inst)
   fifoReq = mkFifoReq <$> coreState
   mkFifoReq CoreState{ifFifoWdata} =
     FifoReq
-      { wvalid = isJust ifFifoWdata
-      , wdata = fromJustX ifFifoWdata
+      { wdata = ifFifoWdata
       , rready = True
       }
   fifoResp = fifo d3 fifoReq
 
   -- Fetch only when the FIFO has room for both the pending write and this fetch.
   memReq = mkMemReq <$> coreState <*> fifoResp
-  mkMemReq CoreState{ifPc} FifoResp{wready_two} =
+  mkMemReq CoreState{ifPc} FifoResp{wreadyTwo} =
     MemBusReq
-      { valid = wready_two
+      { valid = wreadyTwo
       , addr = ifPc
       , wdata = Nothing
       }
 
-  inst = (\FifoResp{rvalid, rdata} -> if rvalid then Just rdata else Nothing) <$> fifoResp
+  inst = (.rdata) <$> fifoResp
 
-  coreT s@CoreState{..} MemBusResp{..} FifoResp{wready, wready_two} =
-    s
-      { ifPc = if accepted then ifPc + 4 else ifPc
+  -- TODO: non-redundant state machine
+  coreT CoreState{..} MemBusResp{..} FifoResp{wready, wreadyTwo} =
+    CoreState
+      { ifPc = applyWhen accepted (+ 4) ifPc
       , ifRequested = ifRequested'
       , ifFifoWdata = ifFifoWdata'
       }
    where
     fetched = (,) <$> ifRequested <*> rdata
-    busFree = isNothing ifRequested || isJust rdata
-    accepted = wready_two && ready && busFree
+    busFree = isNothing ifRequested || isJust rdata -- not pending, or pending but fetched now
+    accepted = wreadyTwo && ready && busFree -- fifo & memory & core available
     ifRequested'
       | accepted = Just ifPc
       | otherwise = ifRequested
     ifFifoWdata'
-      | Just (addr, bits) <- fetched = Just FifoEntry{addr, bits}
-      | wready = Nothing
-      | otherwise = ifFifoWdata
+      | Just (addr, bits) <- fetched = Just FifoEntry{addr, bits} -- @ifFifoWdata@ is to be Nothing, because instruction fetch is enabled only when @wreadyTwo@.
+      | wready = Nothing -- @ifFifoWdata@ was writtern at the previous clock.
+      | otherwise = ifFifoWdata -- pending

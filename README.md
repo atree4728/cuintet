@@ -23,6 +23,12 @@ To open the REPL, use:
 cabal run clashi
 ```
 
+To see the document, use:
+
+```
+cabal haddock --open
+```
+
 ## Compiling to HDL
 
 To compile the project to SystemVerilog, run:

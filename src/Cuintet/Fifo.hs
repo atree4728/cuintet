@@ -2,38 +2,37 @@
 module Cuintet.Fifo where
 
 import Clash.Prelude
-import Data.Function (applyWhen)
+import Data.Maybe (isJust, isNothing)
 
+-- | FIFO Request.
 data FifoReq dat = FifoReq
-  { wvalid :: Bool
-  -- ^ Whether to write @wdata@.
-  , wdata :: dat
+  { wdata :: Maybe dat
   -- ^ Data to write.
   , rready :: Bool
   -- ^ Whether to consume @rdata@.
   }
-  deriving (Generic, NFDataX)
+  deriving (Generic, NFDataX, Show)
 
+-- | FIFO Response.
 data FifoResp dat = FifoResp
   { wready :: Bool
   -- ^ Whether the FIFO can accept a write.
-  , wready_two :: Bool
+  , wreadyTwo :: Bool
   -- ^ Whether the FIFO can accept two consecutive writes.
-  , rvalid :: Bool
-  -- ^ Whether @rdata@ is valid.
-  , rdata :: dat
+  , rdata :: Maybe dat
   -- ^ The oldest element.
   }
-  deriving (Generic, NFDataX)
+  deriving (Generic, NFDataX, Show)
 
 {- | FIFO with a capacity of 2^@width@ - 1 elements.
 
 A write is accepted when @wready && wvalid@, and the oldest element is
 consumed when @rvalid && rready@, both in the same cycle if needed.
+Supplied @wdata@ when not writable is ignored, but this is not expected situation.
 -}
 fifo ::
   forall dom width dat.
-  (HiddenClockResetEnable dom, KnownNat width, NFDataX dat) =>
+  (HiddenClockResetEnable dom, KnownNat width, 1 <= width, NFDataX dat) =>
   SNat width ->
   Signal dom (FifoReq dat) ->
   Signal dom (FifoResp dat)
@@ -43,30 +42,45 @@ fifo width = case compareSNat width d1 of
 
 {- | Single-entry FIFO, the @width == 1@ case of 'fifo'.
 
-Unlike 'fifoMany', it accepts a write even when full if the stored
-element is consumed in the same cycle.
+Unlike 'fifoMany', it accepts a write even when full if the stored element is consumed in the same cycle.
+-}
+
+{- |
+>>> import Prelude
+>>> import Clash.Prelude
+>>> reqs = (\(wdata, rready) -> FifoReq {wdata, rready}) <$> [(Just 1, True), (Just 2, False), (Just 3, True), (Just 4, False), (Just 5, False), (Just 6, True), (Just 7, True)]
+>>> (.rdata) <$> simulateN @System (Prelude.length reqs) (fifo d1) reqs
+[Just 1,Nothing,Just 2,Nothing,Nothing,Just 4,Just 7]
 -}
 fifoOne ::
   forall dom dat.
   (HiddenClockResetEnable dom, NFDataX dat) =>
   Signal dom (FifoReq dat) ->
   Signal dom (FifoResp dat)
-fifoOne = mealy step initS
+fifoOne = mealy step Nothing
  where
-  initS = (False, deepErrorX "fifoOne: empty")
-  step (prevRvalid, prevRdata) FifoReq{..} = ((rvalid, rdata), resp)
+  step buf FifoReq{..} = (buf', FifoResp{wready, wreadyTwo, rdata})
    where
-    resp = FifoResp{wready, wready_two, rvalid, rdata}
-    wready = not prevRvalid || rready
-    wready_two = False
-    (rvalid, rdata)
-      | wready && wvalid = (True, wdata)
-      | rready = (False, deepErrorX "fifoOne: empty")
-      | otherwise = (prevRvalid, prevRdata)
+    -- accept write when the buffer is either already empty or going to be emptied by read.
+    wready = isNothing buf || rready
+    wreadyTwo = False
+    (rdata, buf')
+      | rready && isJust buf = (buf, Nothing) -- consume buf
+      | rready = (wdata, Nothing) -- consume wdata, or nothing to consume
+      | otherwise = (Nothing, buf <|> wdata) -- keep buf and ignore wdata, or keep wdata as buf
 
 {- | Ring-buffer FIFO, the @width >= 2@ case of 'fifo'.
 
 One of the 2^@width@ slots is kept unused to distinguish full from empty.
+@rdata@ is at least one-cycle delayed.
+-}
+
+{- |
+>>> import Prelude
+>>> import Clash.Prelude
+>>> reqs = (\(wdata, rready) -> FifoReq {wdata, rready}) <$> [(Just 1, True), (Just 2, False), (Just 3, True), (Just 4, False), (Just 5, False), (Just 6, True), (Just 7, True)]
+>>> (.rdata) <$> simulateN @System (Prelude.length reqs) (fifo d3) reqs
+[Nothing,Nothing,Just 1,Nothing,Nothing,Just 2,Just 3]
 -}
 fifoMany ::
   forall dom width dat.
@@ -77,14 +91,16 @@ fifoMany ::
 fifoMany SNat = mealy step initS
  where
   initS :: (Unsigned width, Unsigned width, Vec (2 ^ width) dat)
-  initS = (0, 0, deepErrorX "fifoMany: empty")
+  initS = (0, 0, deepErrorX "fifoMany: uninitialized")
 
-  step (hd, tl, mem) FifoReq{..} = ((hd', tl', mem'), FifoResp{..})
+  step (hd, tl, buf) FifoReq{..} = ((hd', tl', buf'), FifoResp{..})
    where
     wready = tl + 1 /= hd
-    wready_two = wready && tl + 2 /= hd
+    wreadyTwo = wready && tl + 2 /= hd
     rvalid = hd /= tl
-    rdata = mem !! hd
-    hd' = applyWhen (rready && rvalid) (+ 1) hd
-    tl' = applyWhen (wready && wvalid) (+ 1) tl
-    mem' = applyWhen (wready && wvalid) (replace tl wdata) mem
+    (hd', rdata)
+      | rready && rvalid = (hd + 1, Just (buf !! hd))
+      | otherwise = (hd, Nothing)
+    (tl', buf')
+      | wready, Just entry <- wdata = (tl + 1, replace tl entry buf)
+      | otherwise = (tl, buf)

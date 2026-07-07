@@ -73,6 +73,7 @@ library
         Cuintet.Eei
         Cuintet.Fifo
         Cuintet.Memory
+        Cuintet.Util
 
 executable clash
     main-is:          bin/Clash.hs
