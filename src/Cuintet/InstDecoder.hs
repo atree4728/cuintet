@@ -21,9 +21,9 @@ instDecode bits = (ctrl op, imm op)
   --
   immI = fill (msb bits) ++# immIG
   immS = fill (msb bits) ++# immSG
-  immB = fill (msb bits) ++# immBG ++# (1 :: BitVector 1)
+  immB = fill (msb bits) ++# immBG ++# (0 :: BitVector 1)
   immU = fill (msb bits) ++# immUG ++# (0 :: BitVector 12)
-  immJ = fill (msb bits) ++# immJG
+  immJ = fill (msb bits) ++# immJG ++# (0 :: BitVector 1)
 
   imm :: OpCode -> BitVector XLen
   imm Lui = immU

@@ -2,7 +2,7 @@
 module Cuintet.Core where
 
 import Clash.Prelude
-import Cuintet.Corectrl (InstCtrl)
+import Cuintet.Debug (InstLog)
 import Cuintet.Eei
 import Cuintet.Fifo (FifoReq (..), FifoResp (..), fifo)
 import Cuintet.InstDecoder (instDecode)
@@ -28,6 +28,8 @@ data CoreState
   -- ^ Address being fetched.
   , ifFifoWdata :: Maybe FifoEntry
   -- ^ The instruction waiting to be written.
+  , regFile :: Vec 32 (BitVector XLen)
+  -- ^ Register file.
   }
   deriving (Generic, NFDataX)
 
@@ -35,8 +37,8 @@ data CoreState
 core ::
   (HiddenClockResetEnable dom) =>
   Signal dom (MemBusResp ILen) ->
-  Signal dom (MemBusReq ILen XLen, Maybe (Addr, InstCtrl, BitVector XLen))
-core memResp = bundle (memReq, instInfo)
+  Signal dom (MemBusReq ILen XLen, Maybe InstLog)
+core memResp = bundle (memReq, instLog)
  where
   coreState =
     register
@@ -44,6 +46,7 @@ core memResp = bundle (memReq, instInfo)
         { ifPc = 0
         , ifRequested = Nothing
         , ifFifoWdata = Nothing
+        , regFile = generate d32 (+ 1) (-1 :: BitVector XLen)
         }
       (coreT <$> coreState <*> memResp <*> fifoResp)
 
@@ -64,11 +67,21 @@ core memResp = bundle (memReq, instInfo)
       , wdata = Nothing
       }
 
+  -- decode fetched instruction
   fifoEntry = (.rdata) <$> fifoResp
-  instPc = (.addr) <$$> fifoEntry
-  instBits = (.bits) <$$> fifoEntry
-  decoded = instDecode <$$> instBits
-  instInfo = liftAA2 (\addr (ctrl, imm) -> (addr, ctrl, imm)) instPc decoded
+  instPc = (.addr) <<$>> fifoEntry
+  instBits = (.bits) <<$>> fifoEntry
+  decoded = instDecode <<$>> instBits
+
+  rs1Addr = slice d19 d15 <<$>> instBits
+  rs2Addr = slice d24 d20 <<$>> instBits
+
+  reg = (.regFile) <$> coreState
+
+  rs1Data = (!!) <<$>> (pure <$> reg) <<*>> rs1Addr
+  rs2Data = (!!) <<$>> (pure <$> reg) <<*>> rs2Addr
+
+  instLog = (,,,,,,) <<$>> instPc <<*>> instBits <<*>> decoded <<*>> rs1Addr <<*>> rs2Addr <<*>> rs1Data <<*>> rs2Data
 
   -- TODO: non-redundant state machine
   -- TODO: @deepErrorX@ for unexpected situation
@@ -77,6 +90,7 @@ core memResp = bundle (memReq, instInfo)
       { ifPc = applyWhen accepted (+ 4) ifPc
       , ifRequested = ifRequested'
       , ifFifoWdata = ifFifoWdata'
+      , regFile
       }
    where
     fetched = (,) <$> ifRequested <*> rdata

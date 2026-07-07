@@ -76,6 +76,7 @@ library
         Cuintet.Util
         Cuintet.Corectrl
         Cuintet.InstDecoder
+        Cuintet.Debug
 
 executable clash
     main-is:          bin/Clash.hs
