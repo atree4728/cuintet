@@ -2,7 +2,8 @@
 module Cuintet.Core where
 
 import Clash.Prelude
-import Cuintet.Debug (InstLog)
+import Cuintet.Alu (alu)
+import Cuintet.Corectrl (InstCtrl (..), InstType (..))
 import Cuintet.Eei
 import Cuintet.Fifo (FifoReq (..), FifoResp (..), fifo)
 import Cuintet.InstDecoder (instDecode)
@@ -32,6 +33,20 @@ data CoreState
   -- ^ Register file.
   }
   deriving (Generic, NFDataX)
+
+type InstLog =
+  ( Addr
+  , Inst
+  , ( InstCtrl
+    , BitVector XLen
+    )
+  , BitVector 5
+  , BitVector 5
+  , BitVector XLen
+  , BitVector XLen
+  , (BitVector XLen, BitVector XLen)
+  , BitVector XLen
+  )
 
 -- | Outputs the memory request and the fetched instruction (if completed).
 core ::
@@ -81,7 +96,19 @@ core memResp = bundle (memReq, instLog)
   rs1Data = (!!) <<$>> (pure <$> reg) <<*>> rs1Addr
   rs2Data = (!!) <<$>> (pure <$> reg) <<*>> rs2Addr
 
-  instLog = (,,,,,,) <<$>> instPc <<*>> instBits <<*>> decoded <<*>> rs1Addr <<*>> rs2Addr <<*>> rs1Data <<*>> rs2Data
+  ops = mkOps <<$>> decoded <<*>> rs1Data <<*>> rs2Data <<*>> instPc
+  mkOps :: (InstCtrl, BitVector XLen) -> BitVector XLen -> BitVector XLen -> Addr -> (BitVector XLen, BitVector XLen)
+  mkOps (InstCtrl{itype}, imm) rs1d rs2d pc =
+    case itype of
+      RType -> (rs1d, rs2d)
+      BType -> (rs1d, rs2d)
+      IType -> (rs1d, imm)
+      SType -> (rs1d, imm)
+      UType -> (bitCoerce pc, imm)
+      JType -> (bitCoerce pc, imm)
+
+  aluResult = (\(ctrl, _) (op1, op2) -> alu ctrl op1 op2) <<$>> decoded <<*>> ops
+  instLog = (,,,,,,,,) <<$>> instPc <<*>> instBits <<*>> decoded <<*>> rs1Addr <<*>> rs2Addr <<*>> rs1Data <<*>> rs2Data <<*>> ops <<*>> aluResult
 
   -- TODO: non-redundant state machine
   -- TODO: @deepErrorX@ for unexpected situation

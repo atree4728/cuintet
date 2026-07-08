@@ -1,4 +1,4 @@
--- | FIFO that stores up to 2^@width@ - 1 elements of type @dataT@.
+-- | FIFO that stores up to 2^@width@ - 1 elements of type @dat@.
 module Cuintet.Fifo where
 
 import Clash.Prelude
@@ -43,9 +43,7 @@ fifo width = case compareSNat width d1 of
 {- | Single-entry FIFO, the @width == 1@ case of 'fifo'.
 
 Unlike 'fifoMany', it accepts a write even when full if the stored element is consumed in the same cycle.
--}
 
-{- |
 >>> import Prelude
 >>> import Clash.Prelude
 >>> reqs = (\(wdata, rready) -> FifoReq {wdata, rready}) <$> [(Just 1, True), (Just 2, False), (Just 3, True), (Just 4, False), (Just 5, False), (Just 6, True), (Just 7, True)]
@@ -73,9 +71,7 @@ fifoOne = mealy step Nothing
 
 One of the 2^@width@ slots is kept unused to distinguish full from empty.
 @rdata@ is at least one-cycle delayed.
--}
 
-{- |
 >>> import Prelude
 >>> import Clash.Prelude
 >>> reqs = (\(wdata, rready) -> FifoReq {wdata, rready}) <$> [(Just 1, True), (Just 2, False), (Just 3, True), (Just 4, False), (Just 5, False), (Just 6, True), (Just 7, True)]

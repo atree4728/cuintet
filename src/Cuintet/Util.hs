@@ -14,3 +14,6 @@ liftAA2 = liftA2 . liftA2
 
 (<<*>>) :: (Applicative f, Applicative g) => f (g (a -> b)) -> f (g a) -> f (g b)
 (<<*>>) = liftAA2 id
+
+fill :: forall n. (KnownNat n) => Bit -> BitVector n
+fill b = pack $ replicate (SNat :: SNat n) b

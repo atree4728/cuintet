@@ -1,7 +1,7 @@
 cabal-version:      3.8
 name:               cuintet
 version:            0.1
-synopsis:           A RISC-V CPU written in Clash
+synopsis:           A RISC-V CPU written in Clash.
 license:            BSD-3-Clause
 license-file:       LICENSE
 author:             atree4728
@@ -77,6 +77,7 @@ library
         Cuintet.Corectrl
         Cuintet.InstDecoder
         Cuintet.Debug
+        Cuintet.Alu
 
 executable clash
     main-is:          bin/Clash.hs

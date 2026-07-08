@@ -3,14 +3,12 @@ module Cuintet.InstDecoder where
 import Clash.Prelude
 import Cuintet.Corectrl (InstCtrl (..), InstType (..))
 import Cuintet.Eei (Inst, OpCode (..), XLen, opDecode)
+import Cuintet.Util (fill)
 
 instDecode :: Inst -> (InstCtrl, BitVector XLen)
 instDecode bits = (ctrl op, imm op)
  where
   op = opDecode $ slice d6 d0 bits
-
-  fill :: forall n. (KnownNat n) => Bit -> BitVector n
-  fill b = pack $ replicate (SNat :: SNat n) b
 
   immIG = slice d31 d20 bits
   immSG = slice d31 d25 bits ++# slice d11 d7 bits
@@ -18,7 +16,6 @@ instDecode bits = (ctrl op, imm op)
   immUG = slice d31 d12 bits
   immJG = slice d31 d31 bits ++# slice d19 d12 bits ++# slice d20 d20 bits ++# slice d30 d21 bits
 
-  --
   immI = fill (msb bits) ++# immIG
   immS = fill (msb bits) ++# immSG
   immB = fill (msb bits) ++# immBG ++# (0 :: BitVector 1)

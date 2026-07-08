@@ -4,17 +4,15 @@ import Clash.Prelude
 
 -- | RISC-V instruction type
 data InstType
-  = XType -- undefined instruction
-  | RType
+  = RType
   | IType
   | SType
   | BType
   | UType
   | JType
-  deriving (Generic, NFDataX, Show)
+  deriving (Generic, NFDataX, Eq)
 
 instCode :: InstType -> BitVector 6
-instCode XType = 0b000000
 instCode RType = 0b000001
 instCode IType = 0b000010
 instCode SType = 0b000100
@@ -41,4 +39,4 @@ data InstCtrl = InstCtrl
   , funct7 :: BitVector 7
   -- ^ @funct7@ field.
   }
-  deriving (Generic, NFDataX, Show)
+  deriving (Generic, NFDataX)

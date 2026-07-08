@@ -3,8 +3,7 @@
 module Cuintet where
 
 import Clash.Prelude
-import Cuintet.Core (core)
-import Cuintet.Debug (InstLog)
+import Cuintet.Core (InstLog, core)
 import Cuintet.Eei
 import Cuintet.Memory (memory)
 
