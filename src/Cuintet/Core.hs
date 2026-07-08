@@ -2,6 +2,7 @@
 module Cuintet.Core where
 
 import Clash.Prelude
+import Control.Monad (join)
 import Cuintet.Alu (alu)
 import Cuintet.Corectrl (InstCtrl (..), InstType (..))
 import Cuintet.Eei
@@ -46,6 +47,7 @@ type InstLog =
   , BitVector XLen
   , (BitVector XLen, BitVector XLen)
   , BitVector XLen
+  , Maybe (BitVector 5, BitVector XLen)
   )
 
 -- | Outputs the memory request and the fetched instruction (if completed).
@@ -63,7 +65,7 @@ core memResp = bundle (memReq, instLog)
         , ifFifoWdata = Nothing
         , regFile = generate d32 (+ 1) (-1 :: BitVector XLen)
         }
-      (coreT <$> coreState <*> memResp <*> fifoResp)
+      (coreT <$> coreState <*> memResp <*> fifoResp <*> wbReq')
 
   fifoReq = mkFifoReq <$> coreState
   mkFifoReq CoreState{ifFifoWdata} =
@@ -108,16 +110,29 @@ core memResp = bundle (memReq, instLog)
       JType -> (bitCoerce pc, imm)
 
   aluResult = (\(ctrl, _) (op1, op2) -> alu ctrl op1 op2) <<$>> decoded <<*>> ops
-  instLog = (,,,,,,,,) <<$>> instPc <<*>> instBits <<*>> decoded <<*>> rs1Addr <<*>> rs2Addr <<*>> rs1Data <<*>> rs2Data <<*>> ops <<*>> aluResult
+
+  wbReq' = join <$> (mkWbReq <<$>> decoded <<*>> instBits <<*>> aluResult)
+  mkWbReq :: (InstCtrl, BitVector XLen) -> BitVector XLen -> BitVector XLen -> Maybe (BitVector 5, BitVector XLen)
+  mkWbReq (InstCtrl{isLui, rwbEn}, imm) bits aluRes = orNothing rwbEn (rdAddr, wbData)
+   where
+    rdAddr = slice d11 d7 bits
+    wbData
+      | isLui = imm
+      | otherwise = aluRes
+
+  instLog = addWbReq <$> presence <*> wbReq'
+  presence = (,,,,,,,,) <<$>> instPc <<*>> instBits <<*>> decoded <<*>> rs1Addr <<*>> rs2Addr <<*>> rs1Data <<*>> rs2Data <<*>> ops <<*>> aluResult
+  addWbReq mTuple wbReq =
+    (\(pc, bits, dec, rs1a, rs2a, rs1d, rs2d, o, aluRes) -> (pc, bits, dec, rs1a, rs2a, rs1d, rs2d, o, aluRes, wbReq)) <$> mTuple
 
   -- TODO: non-redundant state machine
   -- TODO: @deepErrorX@ for unexpected situation
-  coreT CoreState{..} MemBusResp{..} FifoResp{wready, wreadyTwo} =
+  coreT CoreState{..} MemBusResp{..} FifoResp{wready, wreadyTwo} wbReq =
     CoreState
       { ifPc = applyWhen accepted (+ 4) ifPc
       , ifRequested = ifRequested'
       , ifFifoWdata = ifFifoWdata'
-      , regFile
+      , regFile = regFile'
       }
    where
     fetched = (,) <$> ifRequested <*> rdata
@@ -130,3 +145,4 @@ core memResp = bundle (memReq, instLog)
       | Just (addr, bits) <- fetched = Just FifoEntry{addr, bits} -- @ifFifoWdata@ is to be Nothing, because instruction fetch is enabled only when @wreadyTwo@.
       | wready = Nothing -- @ifFifoWdata@ was writtern at the previous clock.
       | otherwise = ifFifoWdata -- pending
+    regFile' = maybe regFile (\(addr, dat) -> replace addr dat regFile) wbReq
