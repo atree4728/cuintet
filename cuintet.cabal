@@ -78,6 +78,7 @@ library
         Cuintet.InstDecoder
         Cuintet.Debug
         Cuintet.Alu
+        Cuintet.MemUnit
 
 executable clash
     main-is:          bin/Clash.hs

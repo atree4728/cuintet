@@ -40,3 +40,9 @@ data InstCtrl = InstCtrl
   -- ^ @funct7@ field.
   }
   deriving (Generic, NFDataX)
+
+isMemOp :: InstCtrl -> Bool
+isMemOp InstCtrl{itype, isLoad} = itype == SType || isLoad
+
+isStoreOp :: InstCtrl -> Bool
+isStoreOp InstCtrl{itype} = itype == SType
