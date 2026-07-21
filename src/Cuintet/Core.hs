@@ -54,7 +54,7 @@ type InstLog =
 core ::
   (HiddenClockResetEnable dom) =>
   Signal dom (MemBusResp ILen) ->
-  Signal dom (MemBusReq ILen XLen, Maybe InstLog)
+  Signal dom (Maybe (MemBusReq ILen XLen), Maybe InstLog)
 core memResp = bundle (memReq, instLog)
  where
   coreState =
@@ -78,11 +78,7 @@ core memResp = bundle (memReq, instLog)
   -- Fetch only when the FIFO has room for both the pending write and this fetch.
   memReq = mkMemReq <$> coreState <*> fifoResp
   mkMemReq CoreState{ifPc} FifoResp{wreadyTwo} =
-    MemBusReq
-      { valid = wreadyTwo
-      , addr = ifPc
-      , wdata = Nothing
-      }
+    orNothing wreadyTwo MemBusReq{addr = ifPc, wdata = Nothing}
 
   -- decode fetched instruction
   fifoEntry = (.rdata) <$> fifoResp

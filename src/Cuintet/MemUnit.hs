@@ -16,16 +16,21 @@ import Cuintet.Eei (Addr, MemBusReq (..), MemBusResp (..), MemDataWidth, XLen)
 import Cuintet.Util (orNothing)
 import Data.Maybe (isJust, isNothing)
 
-data MemUnitReq = MemUnitReq
-  { valid :: Bool
-  -- ^ Whether a valid instruction is supplied.
-  , isNew :: Bool
+-- | The instruction supplied to the memory unit.
+data InstInfo = InstInfo
+  { isNew :: Bool
   -- ^ Whether the instruction is newly supplied this cycle.
   , ctrl :: InstCtrl
   , addr :: Addr
   -- ^ The access address computed by the ALU.
   , rs2 :: BitVector XLen
   -- ^ Data to store.
+  }
+  deriving (Generic, NFDataX)
+
+data MemUnitReq = MemUnitReq
+  { inst :: Maybe InstInfo
+  -- ^ The instruction being executed, if any.
   , memresp :: MemBusResp XLen
   }
   deriving (Generic, NFDataX)
@@ -34,7 +39,7 @@ data MemUnitResp = MemUnitResp
   { rdata :: Maybe (BitVector XLen)
   , stall :: Bool
   -- ^ Whether the core must stall for an access in flight
-  , memreq :: MemBusReq MemDataWidth XLen
+  , memreq :: Maybe (MemBusReq MemDataWidth XLen)
   }
   deriving (Generic, NFDataX)
 
@@ -45,17 +50,17 @@ data State
     WaitReady Addr (Maybe (BitVector MemDataWidth))
   | -- | Wait until the access completes, then move back to 'Init'.
     WaitValid
-  deriving (Generic, NFDataX, Eq)
+  deriving (Generic, NFDataX)
 
 memUnit :: (HiddenClockResetEnable dom) => Signal dom MemUnitReq -> Signal dom MemUnitResp
 memUnit = mealy memUnitT Init
  where
   memUnitT :: State -> MemUnitReq -> (State, MemUnitResp)
-  memUnitT state MemUnitReq{..} = (memUnitState, memUnitResp)
+  memUnitT state MemUnitReq{inst, memresp} = (memUnitState, memUnitResp)
    where
-    isNewMemOp = isNew && isMemOp ctrl
+    isNewMemOp InstInfo{isNew, ctrl} = isNew && isMemOp ctrl
     memUnitState = case state of
-      Init | isNewMemOp -> WaitReady addr (orNothing (isStoreOp ctrl) rs2)
+      Init | Just i <- inst, isNewMemOp i -> WaitReady i.addr (orNothing (isStoreOp i.ctrl) i.rs2)
       WaitReady _ _ | memresp.ready -> WaitValid
       WaitValid | isJust memresp.rdata -> Init
       _ -> state
@@ -65,12 +70,12 @@ memUnit = mealy memUnitT Init
         , -- in 'Init' when a new memory instruction arrives,
           -- in 'WaitReady' always,
           -- in 'WaitValid' until the response arrives.
-          stall =
-            valid && case state of
-              Init -> isNewMemOp
-              WaitReady _ _ -> True
-              WaitValid -> isNothing memresp.rdata
+          stall = case (inst, state) of
+            (Nothing, _) -> False
+            (Just i, Init) -> isNewMemOp i
+            (Just _, WaitReady _ _) -> True
+            (Just _, WaitValid) -> isNothing memresp.rdata
         , memreq = case state of
-            WaitReady reqAddr reqWdata -> MemBusReq{valid = True, addr = reqAddr, wdata = reqWdata}
-            _ -> MemBusReq{valid = False, addr = undefined, wdata = undefined}
+            WaitReady reqAddr reqWdata -> Just MemBusReq{addr = reqAddr, wdata = reqWdata}
+            _ -> Nothing
         }

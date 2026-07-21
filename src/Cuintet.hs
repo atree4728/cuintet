@@ -19,13 +19,8 @@ system ::
 system ram = instInfo
  where
   (coreReq, instInfo) = unbundle $ core memResp
-  memResp = memory ram $ toMemReq <$> coreReq
-  toMemReq MemBusReq{..} =
-    MemBusReq
-      { valid
-      , addr = addrToMemAddr addr
-      , wdata
-      }
+  memResp = memory ram $ fmap toMemReq <$> coreReq
+  toMemReq MemBusReq{..} = MemBusReq{addr = addrToMemAddr addr, wdata}
 
 topEntity ::
   Clock Dom50 ->

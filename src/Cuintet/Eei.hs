@@ -13,13 +13,14 @@ type Addr = Unsigned XLen
 
 type Inst = BitVector ILen
 
+{- | Memory access request, carried on the bus as @Maybe (MemBusReq ...)@;
+@Nothing@ means no access.
+-}
 data MemBusReq dataWidth addrWidth = MemBusReq
-  { valid :: Bool
-  -- ^ Whether to request memory access.
-  , addr :: Unsigned addrWidth
+  { addr :: Unsigned addrWidth
   -- ^ The address to access.
   , wdata :: Maybe (BitVector dataWidth)
-  -- ^ Data to write.
+  -- ^ 'Just' the data to write for stores, 'Nothing' for loads.
   }
   deriving (Generic, NFDataX)
 
