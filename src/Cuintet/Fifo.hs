@@ -2,6 +2,8 @@
 module Cuintet.Fifo where
 
 import Clash.Prelude
+import Cuintet.Util (orNothing)
+import Data.Function (applyWhen)
 import Data.Maybe (isJust, isNothing)
 
 -- | FIFO Request.
@@ -48,7 +50,7 @@ Unlike 'fifoMany', it accepts a write even when full if the stored element is co
 >>> import Clash.Prelude
 >>> reqs = (\(wdata, rready) -> FifoReq {wdata, rready}) <$> [(Just 1, True), (Just 2, False), (Just 3, True), (Just 4, False), (Just 5, False), (Just 6, True), (Just 7, True)]
 >>> (.rdata) <$> simulateN @System (Prelude.length reqs) (fifo d1) reqs
-[Just 1,Nothing,Just 2,Nothing,Nothing,Just 4,Just 7]
+[Nothing,Just 1,Just 1,Just 3,Just 3,Just 3,Just 6]
 -}
 fifoOne ::
   forall dom dat.
@@ -62,10 +64,11 @@ fifoOne = mealy step Nothing
     -- accept write when the buffer is either already empty or going to be emptied by read.
     wready = isNothing buf || rready
     wreadyTwo = False
-    (rdata, buf')
-      | rready && isJust buf = (buf, Nothing) -- consume buf
-      | rready = (wdata, Nothing) -- consume wdata, or nothing to consume
-      | otherwise = (Nothing, buf <|> wdata) -- keep buf and ignore wdata, or keep wdata as buf
+    rdata = buf
+    buf'
+      | wready && isJust wdata = wdata
+      | rready = Nothing
+      | otherwise = buf
 
 {- | Ring-buffer FIFO, the @width >= 2@ case of 'fifo'.
 
@@ -76,7 +79,7 @@ One of the 2^@width@ slots is kept unused to distinguish full from empty.
 >>> import Clash.Prelude
 >>> reqs = (\(wdata, rready) -> FifoReq {wdata, rready}) <$> [(Just 1, True), (Just 2, False), (Just 3, True), (Just 4, False), (Just 5, False), (Just 6, True), (Just 7, True)]
 >>> (.rdata) <$> simulateN @System (Prelude.length reqs) (fifo d3) reqs
-[Nothing,Nothing,Just 1,Nothing,Nothing,Just 2,Just 3]
+[Nothing,Just 1,Just 1,Just 2,Just 2,Just 2,Just 3]
 -}
 fifoMany ::
   forall dom width dat.
@@ -94,9 +97,8 @@ fifoMany SNat = mealy step initS
     wready = tl + 1 /= hd
     wreadyTwo = wready && tl + 2 /= hd
     rvalid = hd /= tl
-    (hd', rdata)
-      | rready && rvalid = (hd + 1, Just (buf !! hd))
-      | otherwise = (hd, Nothing)
+    rdata = orNothing rvalid (buf !! hd)
+    hd' = applyWhen (rready && rvalid) (+ 1) hd
     (tl', buf')
       | wready, Just entry <- wdata = (tl + 1, replace tl entry buf)
       | otherwise = (tl, buf)
