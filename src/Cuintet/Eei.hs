@@ -36,6 +36,11 @@ type MemDataWidth = 32
 type MemAddrWidth = 20
 type MemAddr = Unsigned MemAddrWidth
 
+type InstResp = MemBusResp ILen
+type DataResp = MemBusResp MemDataWidth
+type InstReq = MemBusReq ILen XLen
+type DataReq = MemBusReq MemDataWidth XLen
+
 addrToMemAddr :: Addr -> MemAddr
 addrToMemAddr a = truncateB (a `shiftR` natToNum @(CLog 2 (MemDataWidth `Div` 8)))
 

@@ -21,8 +21,19 @@ data FifoEntry = FifoEntry
   }
   deriving (Generic, NFDataX)
 
+data CoreIn = CoreIn
+  { iResp :: InstResp
+  , dResp :: DataResp
+  }
+
+data CoreOut = CoreOut
+  { iReq :: Maybe InstReq
+  , dReq :: Maybe DataReq
+  , instLog :: Maybe InstLog
+  }
+
 -- | core state. "if" is a shorthand of instruction fetch.
-data CoreState
+data State
   = CoreState
   { ifPc :: Addr
   -- ^ Program counter.

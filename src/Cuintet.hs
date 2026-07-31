@@ -18,9 +18,9 @@ system ::
   Signal dom (Maybe InstLog)
 system ram = instInfo
  where
-  (coreReq, instInfo) = unbundle $ core memResp
-  memResp = memory ram $ fmap toMemReq <$> coreReq
-  toMemReq MemBusReq{..} = MemBusReq{addr = addrToMemAddr addr, wdata}
+  (coreReq, instInfo) = unbundle $ core imemResp
+  imemResp = memory ram $ fmap toIMemReq <$> coreReq
+  toIMemReq MemBusReq{..} = MemBusReq{addr = addrToMemAddr addr, wdata}
 
 topEntity ::
   Clock Dom50 ->
