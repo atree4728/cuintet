@@ -41,6 +41,9 @@ type DataResp = MemBusResp MemDataWidth
 type InstReq = MemBusReq ILen XLen
 type DataReq = MemBusReq MemDataWidth XLen
 
+-- | Physical request form accepted by the memory.
+type MemReq = MemBusReq MemDataWidth MemAddrWidth
+
 addrToMemAddr :: Addr -> MemAddr
 addrToMemAddr a = truncateB (a `shiftR` natToNum @(CLog 2 (MemDataWidth `Div` 8)))
 

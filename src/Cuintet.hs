@@ -3,8 +3,9 @@
 module Cuintet where
 
 import Clash.Prelude
-import Cuintet.Core (InstLog, core)
+import Cuintet.Core (CoreIn (..), CoreOut (..), InstLog, core)
 import Cuintet.Eei
+import Cuintet.MemArbiter (MemArbiterReq (..), MemArbiterResp (..), memArbiter)
 import Cuintet.Memory (memory)
 
 createDomain vSystem{vName = "Dom50", vPeriod = hzToPeriod 50e6}
@@ -16,11 +17,18 @@ system ::
     Signal dom Inst
   ) ->
   Signal dom (Maybe InstLog)
-system ram = instInfo
+system ram = (.instLog) <$> coreOut
  where
-  (coreReq, instInfo) = unbundle $ core imemResp
-  imemResp = memory ram $ fmap toIMemReq <$> coreReq
-  toIMemReq MemBusReq{..} = MemBusReq{addr = addrToMemAddr addr, wdata}
+  coreOut = core coreIn
+  coreIn = mkCoreIn <$> arbResp
+  mkCoreIn MemArbiterResp{iResp, dResp} = CoreIn{iResp, dResp}
+
+  arbReq = mkArbReq <$> coreOut <*> memResp
+  mkArbReq CoreOut{iReq, dReq} mr = MemArbiterReq{iReq, dReq, memResp = mr}
+  arbResp = memArbiter arbReq
+
+  memReq = (.memReq) <$> arbResp
+  memResp = memory ram memReq
 
 topEntity ::
   Clock Dom50 ->

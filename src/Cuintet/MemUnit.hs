@@ -8,7 +8,7 @@ during which the core must stall (no write back, no instruction fetch).
 The memory ignores the low 2 bits of the address, so misaligned LW/SW
 do not work yet; all accesses are assumed to be 4-byte aligned.
 -}
-module Cuintet.MemUnit (MemUnitReq, MemUnitResp, memUnit) where
+module Cuintet.MemUnit (InstInfo (..), MemUnitReq (..), MemUnitResp (..), memUnit) where
 
 import Clash.Prelude
 import Cuintet.Corectrl (InstCtrl, isMemOp, isStoreOp)
