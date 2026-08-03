@@ -1,59 +1,48 @@
 module Tests.Cuintet.Core where
 
 import Clash.Prelude
+import qualified Prelude as P
 
-import Cuintet (system)
-import Cuintet.Debug (showInstLogs)
-import Cuintet.Eei
+import Cuintet.Core (InstLog (..))
+import Cuintet.Eei (Inst)
 import Test.Tasty
 import Test.Tasty.HUnit
+import Tests.Cuintet.Sim (finalRegs, runProgram)
 
--- | Contents of sample.hex.
-sampleHex :: Vec 3 (BitVector ILen)
-sampleHex =
-  0x02000093 -- addi x1, x0, 32
-    :> 0x00100117 -- auipc x2, 256
-    :> 0x002081b3 -- add x3, x1, x2
-    :> Nil
+-- | ALU 命令のみ。フェッチ順序の検査に使う。
+aluProg :: [Inst]
+aluProg =
+  [ 0x02000093 -- addi x1, x0, 32
+  , 0x00100117 -- auipc x2, 256
+  , 0x002081b3 -- add  x3, x1, x2
+  ]
+
+{- | store した値を load で読み戻し、その次の命令で使う。
+アドレス 0x100 はフェッチが到達しない位置にあるので、書き込んだデータを命令として
+取り込むことはない。
+-}
+loadStoreProg :: [Inst]
+loadStoreProg =
+  [ 0x02a00093 -- addi x1, x0, 42
+  , 0x10102023 -- sw   x1, 256(x0)
+  , 0x10002103 -- lw   x2, 256(x0)
+  , 0x00110193 -- addi x3, x2, 1
+  ]
 
 tests :: TestTree
 tests =
   testGroup
     "Cuintet.Core"
-    [ testCase
-        "fetches sample.hex in order"
-        $ do
-          -- reset, mem delay, fifo write reg, fifo read delay, then 0, 4, 8
-          showInstLogs (sampleN @System 7 $ system (blockRam sampleHex))
-            @?= "(Nothing)\n\
-                \(Nothing)\n\
-                \(Nothing)\n\
-                \(Nothing)\n\
-                \00000000 : 02000093\n\
-                \  itype   : 000010\n\
-                \  imm     : 00000020\n\
-                \  rs1[ 0] : 00000000\n\
-                \  rs2[ 0] : 00000000\n\
-                \  op1     : 00000000\n\
-                \  op2     : 00000020\n\
-                \  alu res : 00000020\n\
-                \  reg[ 1] <= 00000020\n\
-                \00000004 : 00100117\n\
-                \  itype   : 010000\n\
-                \  imm     : 00100000\n\
-                \  rs1[ 0] : 00000000\n\
-                \  rs2[ 1] : 00000020\n\
-                \  op1     : 00000004\n\
-                \  op2     : 00100000\n\
-                \  alu res : 00100004\n\
-                \  reg[ 2] <= 00100004\n\
-                \00000008 : 002081b3\n\
-                \  itype   : 000001\n\
-                \  imm     : 00000000\n\
-                \  rs1[ 1] : 00000020\n\
-                \  rs2[ 2] : 00100004\n\
-                \  op1     : 00000020\n\
-                \  op2     : 00100004\n\
-                \  alu res : 00100024\n\
-                \  reg[ 3] <= 00100024"
+    [ testCase "命令を順に 1 回ずつ commit する" $ do
+        let logs = runProgram 3 aluProg
+        P.length logs @?= 3
+        ((.pc) <$> logs) @?= [0, 4, 8]
+        (finalRegs 3 aluProg !! (3 :: Int)) @?= 0x00100024
+    , testCase "store した値を load で読み戻し、次の命令で使える" $ do
+        let logs = runProgram 4 loadStoreProg
+            regs = finalRegs 4 loadStoreProg
+        P.length logs @?= 4
+        ((.pc) <$> logs) @?= [0, 4, 8, 12]
+        (regs !! (2 :: Int)) @?= 42
+        (regs !! (3 :: Int)) @?= 43
     ]

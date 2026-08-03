@@ -131,7 +131,9 @@ test-suite unittests
   main-is: unittests.hs
   hs-source-dirs: tests
   ghc-options: -threaded
-  other-modules: Tests.Cuintet.Core
+  other-modules:
+    Tests.Cuintet.Core
+    Tests.Cuintet.Sim
   build-depends:
     clash-prelude-hedgehog,
     cuintet,
