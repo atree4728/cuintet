@@ -34,15 +34,17 @@ tests =
   testGroup
     "Cuintet.Core"
     [ testCase "命令を順に 1 回ずつ commit する" $ do
-        let logs = runProgram 3 aluProg
-        P.length logs @?= 3
-        ((.pc) <$> logs) @?= [0, 4, 8]
-        (finalRegs 3 aluProg !! (3 :: Int)) @?= 0x00100024
-    , testCase "store した値を load で読み戻し、次の命令で使える" $ do
-        let logs = runProgram 4 loadStoreProg
-            regs = finalRegs 4 loadStoreProg
+        -- プログラム末尾の 1 命令先（NOP パディング）まで見て、最後の命令が
+        -- 二重 commit されていない（pc が 12 に進む）ことを検査する。
+        let logs = runProgram 4 aluProg
         P.length logs @?= 4
         ((.pc) <$> logs) @?= [0, 4, 8, 12]
+        (finalRegs 3 aluProg !! (3 :: Int)) @?= 0x00100024
+    , testCase "store した値を load で読み戻し、次の命令で使える" $ do
+        let logs = runProgram 5 loadStoreProg
+            regs = finalRegs 4 loadStoreProg
+        P.length logs @?= 5
+        ((.pc) <$> logs) @?= [0, 4, 8, 12, 16]
         (regs !! (2 :: Int)) @?= 42
         (regs !! (3 :: Int)) @?= 43
     ]
