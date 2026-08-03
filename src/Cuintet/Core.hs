@@ -1,15 +1,31 @@
--- | Core.
+{- |
+Core. 本の @core.veryl@ に対応する。
+
+@core.veryl@ の @always_comb@ 一括記述に対応するのが 'coreT' で、1 サイクル分の
+組合せロジックと次状態を 1 つの純粋関数として書き下している。'Signal' が現れるのは
+'core' の配線層だけである。
+
+本と意図的に変えた点:
+
+* バスの有無を valid ビットではなく 'Maybe' で表す。
+* FIFO を 'moore' で書き、出力が状態のみから決まることを型で保証している
+  ('Cuintet.Fifo.fifoOutput')。これが core ↔ FIFO の組合せ循環を構造的に断ち切る。
+* @memunit.veryl@ は module だが、ここでは 'Cuintet.MemUnit.memUnitStep' という
+  純粋関数として呼び、状態は 'CoreState' が保持する。
+
+'coreT' が守るべき不変条件: @iReq@ と @dReq@ は @iResp@ / @dResp@ に組合せ依存して
+はならない。依存させると @memArbiter@ との間に組合せループができる。
+-}
 module Cuintet.Core where
 
 import Clash.Prelude
-import Control.Monad (join)
 import Cuintet.Alu (alu)
 import Cuintet.Corectrl (InstCtrl (..), InstType (..))
 import Cuintet.Eei
 import Cuintet.Fifo (FifoReq (..), FifoResp (..), fifo)
 import Cuintet.InstDecoder (instDecode)
-import Cuintet.MemUnit (InstInfo (..), MemUnitReq (..), MemUnitResp (..), memUnit)
-import Cuintet.Util
+import Cuintet.MemUnit (InstInfo (..), MemUnitReq (..), MemUnitResp (..), MemUnitState (..), memUnitStep)
+import Cuintet.Util (orNothing)
 import Data.Function (applyWhen)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 
@@ -37,19 +53,6 @@ data CoreOut = CoreOut
   , instLog :: Maybe InstLog
   }
 
--- | core state. "if" is a shorthand of instruction fetch.
-data State = State
-  { ifPc :: Addr
-  -- ^ Program counter.
-  , ifRequested :: Maybe Addr
-  -- ^ Address being fetched.
-  , ifFifoWdata :: Maybe FifoEntry
-  -- ^ The instruction waiting to be written.
-  , regFile :: Vec 32 (BitVector XLen)
-  -- ^ Register file.
-  }
-  deriving (Generic, NFDataX)
-
 -- | 1 命令分の実行記録。commit したサイクルにだけ出力される。
 data InstLog = InstLog
   { pc :: Addr
@@ -67,145 +70,137 @@ data InstLog = InstLog
   }
   deriving (Generic, NFDataX)
 
--- | Outputs the memory requests and the fetched instruction (if completed).
+-- | core state. "if" is a shorthand of instruction fetch.
+data CoreState = CoreState
+  { ifPc :: Addr
+  -- ^ Program counter.
+  , ifRequested :: Maybe Addr
+  -- ^ Address being fetched.
+  , ifFifoWdata :: Maybe FifoEntry
+  -- ^ The instruction waiting to be written.
+  , isNew :: Bool
+  -- ^ Whether the instruction at the FIFO's head is newly presented this cycle.
+  , regFile :: Vec 32 (BitVector XLen)
+  -- ^ Register file.
+  , memu :: MemUnitState
+  -- ^ Memory unit's FSM.
+  }
+  deriving (Generic, NFDataX)
+
+initState :: CoreState
+initState =
+  CoreState
+    { ifPc = 0
+    , ifRequested = Nothing
+    , ifFifoWdata = Nothing
+    , isNew = True
+    , regFile = replicate d32 0
+    , memu = Init
+    }
+
+-- | ALU に渡す 2 つのオペランドを命令形式から選ぶ。
+operands ::
+  InstCtrl ->
+  BitVector XLen ->
+  BitVector XLen ->
+  BitVector XLen ->
+  Addr ->
+  (BitVector XLen, BitVector XLen)
+operands InstCtrl{itype} imm rs1Data rs2Data pc = case itype of
+  RType -> (rs1Data, rs2Data)
+  BType -> (rs1Data, rs2Data)
+  IType -> (rs1Data, imm)
+  SType -> (rs1Data, imm)
+  UType -> (bitCoerce pc, imm)
+  JType -> (bitCoerce pc, imm)
+
+{- | Outputs the memory requests and the fetched instruction (if completed).
+
+配線層。'mealy' を使うのは 'mealyB' が @Bundle@ インスタンスを要求するためで、
+'mealy' なら制約なしで同じことができる。
+-}
 core ::
   (HiddenClockResetEnable dom) =>
   Signal dom CoreIn ->
   Signal dom CoreOut
-core coreIn = CoreOut <$> iReqOut <*> dReqOut <*> instLog
+core coreIn = coreOut
  where
-  iResp' = (.iResp) <$> coreIn
-  dResp' = (.dResp) <$> coreIn
-
-  state =
-    register
-      State
-        { ifPc = 0
-        , ifRequested = Nothing
-        , ifFifoWdata = Nothing
-        , regFile = replicate d32 0
-        }
-      (coreT <$> state <*> iResp' <*> fifoResp <*> commit <*> wbReq')
-
-  fifoReq = mkFifoReq <$> state <*> rready
-  mkFifoReq State{ifFifoWdata} rdy =
-    FifoReq
-      { wdata = ifFifoWdata
-      , rready = rdy
-      }
+  out = mealy coreT initState ((,) <$> coreIn <*> fifoResp)
+  coreOut = fst <$> out
+  fifoReq = snd <$> out
   fifoResp = fifo d3 fifoReq
 
-  -- Fetch only when the FIFO has room for both the pending write and this fetch.
-  iReqOut = mkIReq <$> state <*> fifoResp
-  mkIReq State{ifPc} FifoResp{wreadyTwo} =
-    orNothing wreadyTwo MemBusReq{addr = ifPc, wdata = Nothing}
+-- | 1 サイクル分の組合せロジックと次状態。本の @core.veryl@ の @always_comb@ に対応する。
+coreT ::
+  CoreState ->
+  (CoreIn, FifoResp FifoEntry) ->
+  (CoreState, (CoreOut, FifoReq FifoEntry))
+-- @CoreIn@ を遅延パターンで受けるのは必須。正格に受けると @iReq@ / @dReq@ を WHNF に
+-- するだけで @iResp@ / @dResp@ を要求してしまい、'Cuintet.MemArbiter.memArbiter' との間で
+-- 評価が循環する。
+coreT CoreState{..} (~CoreIn{iResp, dResp}, fifoResp) = (state', (coreOut, fifoReq))
+ where
+  -- FIFO 先頭の命令。空のサイクルでは X が入るが、@commit@ でゲートされるので届かない。
+  instValid = isJust fifoResp.rdata
+  FifoEntry{addr = pc, bits} = fromMaybe (deepErrorX "coreT: FIFO is empty") fifoResp.rdata
 
-  fifoEntry = (.rdata) <$> fifoResp
-  instPc = (.addr) <<$>> fifoEntry
-  instBits = (.bits) <<$>> fifoEntry
-  decoded = instDecode <<$>> instBits
+  -- データパス。有効性に関わらず無条件に計算する。
+  (ctrl, imm) = instDecode bits
+  rs1Addr = slice d19 d15 bits
+  rs2Addr = slice d24 d20 bits
+  rs1Data = regFile !! rs1Addr
+  rs2Data = regFile !! rs2Addr
+  (op1, op2) = operands ctrl imm rs1Data rs2Data pc
+  aluResult = alu ctrl op1 op2
 
-  rs1Addr = slice d19 d15 <<$>> instBits
-  rs2Addr = slice d24 d20 <<$>> instBits
+  (memu', memuOut) =
+    memUnitStep
+      memu
+      MemUnitReq
+        { inst = orNothing instValid InstInfo{isNew, ctrl, addr = bitCoerce aluResult, rs2 = rs2Data}
+        , memresp = dResp
+        }
 
-  reg = (.regFile) <$> state
+  -- FIFO の先頭を消費するのは、メモリアクセスが飛んでいない間だけ。
+  rready = not memuOut.stall
+  commit = instValid && rready
 
-  rs1Data = (!!) <<$>> (pure <$> reg) <<*>> rs1Addr
-  rs2Data = (!!) <<$>> (pure <$> reg) <<*>> rs2Addr
+  -- load が commit するとき @memuOut.rdata@ は必ず 'Just'（memUnit の不変条件）。
+  wbData
+    | ctrl.isLui = imm
+    | ctrl.isLoad = fromMaybe (deepErrorX "coreT: load committed without data") memuOut.rdata
+    | otherwise = aluResult
+  rdAddr = slice d11 d7 bits
+  wbReq = orNothing (commit && ctrl.rwbEn && rdAddr /= 0) (rdAddr, wbData)
 
-  ops = mkOps <<$>> decoded <<*>> rs1Data <<*>> rs2Data <<*>> instPc
-  mkOps :: (InstCtrl, BitVector XLen) -> BitVector XLen -> BitVector XLen -> Addr -> (BitVector XLen, BitVector XLen)
-  mkOps (InstCtrl{itype}, imm) rs1d rs2d pc =
-    case itype of
-      RType -> (rs1d, rs2d)
-      BType -> (rs1d, rs2d)
-      IType -> (rs1d, imm)
-      SType -> (rs1d, imm)
-      UType -> (bitCoerce pc, imm)
-      JType -> (bitCoerce pc, imm)
+  -- 命令フェッチ。FIFO に保留中の書き込みと今回の分の両方の空きがあるときだけ出す。
+  fetched = (,) <$> ifRequested <*> iResp.rdata
+  busFree = isNothing ifRequested || isJust iResp.rdata -- not pending, or pending but fetched now
+  accepted = fifoResp.wreadyTwo && iResp.ready && busFree -- fifo & memory & core available
+  ifFifoWdata'
+    | Just (a, b) <- fetched = Just FifoEntry{addr = a, bits = b}
+    | fifoResp.wready = Nothing -- @ifFifoWdata@ was written at the previous clock.
+    | otherwise = ifFifoWdata -- pending
 
-  aluResult = (\(ctrl, _) (op1, op2) -> alu ctrl op1 op2) <<$>> decoded <<*>> ops
+  fifoReq = FifoReq{wdata = ifFifoWdata, rready}
 
-  -- Whether the instruction at the FIFO's head is newly presented this cycle,
-  -- i.e. was not already seen (and possibly stalled on) last cycle.
-  isNew = register True nextIsNew
-  nextIsNew = mkNextIsNew <$> fifoEntry <*> rready
-  mkNextIsNew entry rr = maybe True (const rr) entry
-
-  instInfo = mkInstInfo <$> isNew <*> decoded <*> aluResult <*> rs2Data
-  mkInstInfo isNew' mDec mAluRes mRs2 = do
-    (ctrl, _) <- mDec
-    aluRes <- mAluRes
-    rs2 <- mRs2
-    pure InstInfo{isNew = isNew', ctrl, addr = bitCoerce aluRes, rs2}
-
-  memuReq = mkMemuReq <$> instInfo <*> dResp'
-  mkMemuReq inst memresp = MemUnitReq{inst, memresp}
-  memuResp = memUnit memuReq
-  memuRdata = (.rdata) <$> memuResp
-  dReqOut = (.memreq) <$> memuResp
-
-  -- Stall the FIFO (stop consuming) while the memory unit has an access in flight.
-  stall = (.stall) <$> memuResp
-  rready = not <$> stall
-
-  -- The FIFO's head is committed (consumed, and its effects take place) exactly
-  -- when it is present and consumed this cycle.
-  commit = mkCommit <$> fifoEntry <*> rready
-  mkCommit entry rr = isJust entry && rr
-
-  wbReqPre = join <$> (mkWbReqPre <<$>> decoded <<*>> instBits <<*>> aluResult)
-  mkWbReqPre :: (InstCtrl, BitVector XLen) -> Inst -> BitVector XLen -> Maybe (BitVector 5, Bool, BitVector XLen)
-  mkWbReqPre (InstCtrl{isLui, isLoad, rwbEn}, imm) bits aluRes = orNothing (rwbEn && rdAddr /= 0) (rdAddr, isLoad, wbData)
-   where
-    rdAddr = slice d11 d7 bits
-    wbData
-      | isLui = imm
-      | otherwise = aluRes
-
-  -- Loads override the ALU-computed value with the data read from memory,
-  -- which only becomes available on the commit cycle.
-  wbReq' = combineWb <$> wbReqPre <*> memuRdata
-  combineWb mPre mMemuRd = do
-    (rdAddr, isLoad, wbDataAlu) <- mPre
-    pure (rdAddr, if isLoad then fromMaybe wbDataAlu mMemuRd else wbDataAlu)
-
-  instLog = mkInstLog <$> commit <*> instPc <*> instBits <*> decoded
-              <*> rs1Addr <*> rs2Addr <*> rs1Data <*> rs2Data <*> ops <*> aluResult <*> wbReq'
-  mkInstLog c mPc mBits mDec mR1a mR2a mR1d mR2d mOps mAlu wb
-    | not c = Nothing
-    | otherwise = do
-        pc <- mPc
-        inst <- mBits
-        (ctrl, imm) <- mDec
-        rs1Addr <- mR1a
-        rs2Addr <- mR2a
-        rs1Data <- mR1d
-        rs2Data <- mR2d
-        (op1, op2) <- mOps
-        aluResult <- mAlu
-        pure InstLog{pc, inst, ctrl, imm, rs1Addr, rs2Addr, rs1Data, rs2Data, op1, op2, aluResult, wbReq = wb}
-
-  -- TODO: non-redundant state machine
-  -- TODO: @deepErrorX@ for unexpected situation
-  coreT State{..} MemBusResp{..} FifoResp{wready, wreadyTwo} isCommit wbReq =
-    State
-      { ifPc = applyWhen accepted (+ 4) ifPc
-      , ifRequested = ifRequested'
-      , ifFifoWdata = ifFifoWdata'
-      , regFile = regFile'
+  coreOut =
+    CoreOut
+      { iReq = orNothing fifoResp.wreadyTwo MemBusReq{addr = ifPc, wdata = Nothing}
+      , dReq = memuOut.memreq
+      , instLog =
+          orNothing
+            commit
+            InstLog{pc, inst = bits, ctrl, imm, rs1Addr, rs2Addr, rs1Data, rs2Data, op1, op2, aluResult, wbReq}
       }
-   where
-    fetched = (,) <$> ifRequested <*> rdata
-    busFree = isNothing ifRequested || isJust rdata -- not pending, or pending but fetched now
-    accepted = wreadyTwo && ready && busFree -- fifo & memory & core available
-    ifRequested'
-      | accepted = Just ifPc
-      | otherwise = ifRequested
-    ifFifoWdata'
-      | Just (addr, bits) <- fetched = Just FifoEntry{addr, bits} -- @ifFifoWdata@ is to be Nothing, because instruction fetch is enabled only when @wreadyTwo@.
-      | wready = Nothing -- @ifFifoWdata@ was writtern at the previous clock.
-      | otherwise = ifFifoWdata -- pending
-    regFile'
-      | isCommit = maybe regFile (\(addr, dat) -> replace addr dat regFile) wbReq
-      | otherwise = regFile
+
+  state' =
+    CoreState
+      { ifPc = applyWhen accepted (+ 4) ifPc
+      , ifRequested = if accepted then Just ifPc else ifRequested
+      , ifFifoWdata = ifFifoWdata'
+      , -- 消費したなら次に見えるのは新しい命令。先頭が空なら次は必ず新しい。
+        isNew = if instValid then rready else True
+      , regFile = maybe regFile (\(a, d) -> replace a d regFile) wbReq
+      , memu = memu'
+      }
