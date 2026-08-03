@@ -1,4 +1,4 @@
--- | FIFO that stores up to 2^@width@ - 1 elements of type @dat@.
+-- | FIFO that stores up to 2^@width@ - 1 elements of type @dat@. 本の @fifo.veryl@ に対応する。
 module Cuintet.Fifo where
 
 import Clash.Prelude
@@ -70,17 +70,6 @@ fifoOne = mealy step Nothing
       | rready = Nothing
       | otherwise = buf
 
-{- | Ring-buffer FIFO, the @width >= 2@ case of 'fifo'.
-
-One of the 2^@width@ slots is kept unused to distinguish full from empty.
-@rdata@ is at least one-cycle delayed.
-
->>> import Prelude
->>> import Clash.Prelude
->>> reqs = (\(wdata, rready) -> FifoReq {wdata, rready}) <$> [(Just 1, True), (Just 2, False), (Just 3, True), (Just 4, False), (Just 5, False), (Just 6, True), (Just 7, True)]
->>> (.rdata) <$> simulateN @System (Prelude.length reqs) (fifo d3) reqs
-[Nothing,Just 1,Just 1,Just 2,Just 2,Just 2,Just 3]
--}
 -- | 'fifoMany' の状態。
 data FifoState width dat = FifoState
   { hd :: Unsigned width
@@ -110,6 +99,17 @@ fifoUpdate s@FifoState{hd, tl, buf} FifoReq{wdata, rready} = FifoState{hd = hd',
     | wready, Just entry <- wdata = (tl + 1, replace tl entry buf)
     | otherwise = (tl, buf)
 
+{- | Ring-buffer FIFO, the @width >= 2@ case of 'fifo'.
+
+One of the 2^@width@ slots is kept unused to distinguish full from empty.
+@rdata@ is at least one-cycle delayed.
+
+>>> import Prelude
+>>> import Clash.Prelude
+>>> reqs = (\(wdata, rready) -> FifoReq {wdata, rready}) <$> [(Just 1, True), (Just 2, False), (Just 3, True), (Just 4, False), (Just 5, False), (Just 6, True), (Just 7, True)]
+>>> (.rdata) <$> simulateN @System (Prelude.length reqs) (fifo d3) reqs
+[Nothing,Just 1,Just 1,Just 2,Just 2,Just 2,Just 3]
+-}
 fifoMany ::
   forall dom width dat.
   (HiddenClockResetEnable dom, KnownNat width, 2 <= width, NFDataX dat) =>

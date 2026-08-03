@@ -1,5 +1,6 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
+-- | Top. 本の @top.veryl@ に対応する。メモリの調停は 'Cuintet.MemArbiter.memArbiter' に分けてある。
 module Cuintet where
 
 import Clash.Prelude

@@ -130,14 +130,17 @@ core coreIn = coreOut
   fifoReq = snd <$> out
   fifoResp = fifo d3 fifoReq
 
--- | 1 サイクル分の組合せロジックと次状態。本の @core.veryl@ の @always_comb@ に対応する。
+{- | 1 サイクル分の組合せロジックと次状態。本の @core.veryl@ の @always_comb@ に対応する。
+
+@CoreIn@ を遅延パターンで受けるのは必須である。正格に受けると、@coreOut@ を WHNF まで
+評価するだけで @CoreIn@ のコンストラクタが要求され、それは 'Cuintet.MemArbiter.memArbiter'
+の正格な @MemArbiterReq@ パターンの評価に波及し、そこは @mkArbReq CoreOut{iReq, dReq}@
+（@Cuintet.hs@）経由でまた 'coreT' に戻ってくる ── 評価が循環してハングする。
+-}
 coreT ::
   CoreState ->
   (CoreIn, FifoResp FifoEntry) ->
   (CoreState, (CoreOut, FifoReq FifoEntry))
--- @CoreIn@ を遅延パターンで受けるのは必須。正格に受けると @iReq@ / @dReq@ を WHNF に
--- するだけで @iResp@ / @dResp@ を要求してしまい、'Cuintet.MemArbiter.memArbiter' との間で
--- 評価が循環する。
 coreT CoreState{..} (~CoreIn{iResp, dResp}, fifoResp) = (state', (coreOut, fifoReq))
  where
   -- FIFO 先頭の命令。空のサイクルでは X が入るが、@commit@ でゲートされるので届かない。
@@ -165,7 +168,8 @@ coreT CoreState{..} (~CoreIn{iResp, dResp}, fifoResp) = (state', (coreOut, fifoR
   rready = not memuOut.stall
   commit = instValid && rready
 
-  -- load が commit するとき @memuOut.rdata@ は必ず 'Just'（memUnit の不変条件）。
+  -- 不変条件 memu == 'Init' → isNew == True （core と memUnit にまたがる）により、
+  -- load が commit するとき @memuOut.rdata@ は必ず 'Just'。
   wbData
     | ctrl.isLui = imm
     | ctrl.isLoad = fromMaybe (deepErrorX "coreT: load committed without data") memuOut.rdata

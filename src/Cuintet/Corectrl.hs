@@ -1,3 +1,4 @@
+-- | 本の @corectrl.veryl@ に対応する。
 module Cuintet.Corectrl where
 
 import Clash.Prelude

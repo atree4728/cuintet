@@ -7,6 +7,9 @@ during which the core must stall (no write back, no instruction fetch).
 
 The memory ignores the low 2 bits of the address, so misaligned LW/SW
 do not work yet; all accesses are assumed to be 4-byte aligned.
+
+本の @memunit.veryl@ に対応する。ただし Veryl では module、ここでは
+'Cuintet.Core.coreT' から呼ばれる純粋な step 関数である。
 -}
 module Cuintet.MemUnit (
   InstInfo (..),
@@ -85,6 +88,25 @@ memUnitStep state MemUnitReq{inst, memresp} = (memUnitState, memUnitResp)
           _ -> Nothing
       }
 
--- | 単体シミュレーション用の薄いラッパ。core は 'memUnitStep' を直接使う。
+{- | 単体シミュレーション用の薄いラッパ。core は 'memUnitStep' を直接使う。
+
+1 回の load を 'Init' → 'WaitReady' → 'WaitValid' → 'Init' と一巡させる例:
+
+>>> import Prelude
+>>> import Clash.Prelude
+>>> import Cuintet.Corectrl (InstCtrl (..), InstType (..))
+>>> import Cuintet.Eei (MemBusReq (..), MemBusResp (..))
+>>> ctrl = InstCtrl{itype = IType, rwbEn = True, isLui = False, isAluOp = False, isJump = False, isLoad = True, funct3 = 0, funct7 = 0}
+>>> info isNew = InstInfo{isNew, ctrl, addr = 100, rs2 = 0}
+>>> mkReq inst ready rdata = MemUnitReq{inst, memresp = MemBusResp{ready, rdata}}
+>>> reqs = [mkReq (Just (info True)) False Nothing, mkReq (Just (info False)) True Nothing, mkReq (Just (info False)) True Nothing, mkReq (Just (info False)) True (Just 0xdeadbeef), mkReq Nothing True Nothing]
+>>> resps = simulateN @System (Prelude.length reqs) memUnit reqs
+>>> (.stall) <$> resps
+[True,True,True,False,False]
+>>> (fmap (\r -> (r.addr, r.wdata)) . (.memreq)) <$> resps
+[Nothing,Just (100,Nothing),Nothing,Nothing,Nothing]
+>>> (.rdata) <$> resps
+[Nothing,Nothing,Nothing,Just 0b1101_1110_1010_1101_1011_1110_1110_1111,Nothing]
+-}
 memUnit :: (HiddenClockResetEnable dom) => Signal dom MemUnitReq -> Signal dom MemUnitResp
 memUnit = mealy memUnitStep Init
