@@ -50,20 +50,22 @@ data State = State
   }
   deriving (Generic, NFDataX)
 
-type InstLog =
-  ( Addr
-  , Inst
-  , ( InstCtrl
-    , BitVector XLen
-    )
-  , BitVector 5
-  , BitVector 5
-  , BitVector XLen
-  , BitVector XLen
-  , (BitVector XLen, BitVector XLen)
-  , BitVector XLen
-  , Maybe (BitVector 5, BitVector XLen)
-  )
+-- | 1 命令分の実行記録。commit したサイクルにだけ出力される。
+data InstLog = InstLog
+  { pc :: Addr
+  , inst :: Inst
+  , ctrl :: InstCtrl
+  , imm :: BitVector XLen
+  , rs1Addr :: BitVector 5
+  , rs2Addr :: BitVector 5
+  , rs1Data :: BitVector XLen
+  , rs2Data :: BitVector XLen
+  , op1 :: BitVector XLen
+  , op2 :: BitVector XLen
+  , aluResult :: BitVector XLen
+  , wbReq :: Maybe (BitVector 5, BitVector XLen)
+  }
+  deriving (Generic, NFDataX)
 
 -- | Outputs the memory requests and the fetched instruction (if completed).
 core ::
@@ -168,14 +170,21 @@ core coreIn = CoreOut <$> iReqOut <*> dReqOut <*> instLog
     (rdAddr, isLoad, wbDataAlu) <- mPre
     pure (rdAddr, if isLoad then fromMaybe wbDataAlu mMemuRd else wbDataAlu)
 
-  logAll = addWbReq <$> presence <*> wbReq'
-  presence = (,,,,,,,,) <<$>> instPc <<*>> instBits <<*>> decoded <<*>> rs1Addr <<*>> rs2Addr <<*>> rs1Data <<*>> rs2Data <<*>> ops <<*>> aluResult
-  addWbReq mTuple wbReq =
-    (\(pc, bits, dec, rs1a, rs2a, rs1d, rs2d, o, aluRes) -> (pc, bits, dec, rs1a, rs2a, rs1d, rs2d, o, aluRes, wbReq)) <$> mTuple
-
-  -- Only report an instruction once, on the cycle it commits.
-  instLog = gateLog <$> commit <*> logAll
-  gateLog c l = if c then l else Nothing
+  instLog = mkInstLog <$> commit <*> instPc <*> instBits <*> decoded
+              <*> rs1Addr <*> rs2Addr <*> rs1Data <*> rs2Data <*> ops <*> aluResult <*> wbReq'
+  mkInstLog c mPc mBits mDec mR1a mR2a mR1d mR2d mOps mAlu wb
+    | not c = Nothing
+    | otherwise = do
+        pc <- mPc
+        inst <- mBits
+        (ctrl, imm) <- mDec
+        rs1Addr <- mR1a
+        rs2Addr <- mR2a
+        rs1Data <- mR1d
+        rs2Data <- mR2d
+        (op1, op2) <- mOps
+        aluResult <- mAlu
+        pure InstLog{pc, inst, ctrl, imm, rs1Addr, rs2Addr, rs1Data, rs2Data, op1, op2, aluResult, wbReq = wb}
 
   -- TODO: non-redundant state machine
   -- TODO: @deepErrorX@ for unexpected situation
