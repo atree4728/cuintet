@@ -81,24 +81,42 @@ One of the 2^@width@ slots is kept unused to distinguish full from empty.
 >>> (.rdata) <$> simulateN @System (Prelude.length reqs) (fifo d3) reqs
 [Nothing,Just 1,Just 1,Just 2,Just 2,Just 2,Just 3]
 -}
+-- | 'fifoMany' の状態。
+data FifoState width dat = FifoState
+  { hd :: Unsigned width
+  , tl :: Unsigned width
+  , buf :: Vec (2 ^ width) dat
+  }
+  deriving (Generic, NFDataX)
+
+{- | 状態のみから決まる出力。
+
+この関数が @FifoReq@ を受け取らないことが、core との組合せ循環が存在しないことの
+保証になっている。'moore' の出力関数として使うので型でも強制される。
+-}
+fifoOutput :: (KnownNat width) => FifoState width dat -> FifoResp dat
+fifoOutput FifoState{hd, tl, buf} = FifoResp{wready, wreadyTwo, rdata}
+ where
+  wready = tl + 1 /= hd
+  wreadyTwo = wready && tl + 2 /= hd
+  rdata = orNothing (hd /= tl) (buf !! hd)
+
+fifoUpdate :: (KnownNat width) => FifoState width dat -> FifoReq dat -> FifoState width dat
+fifoUpdate s@FifoState{hd, tl, buf} FifoReq{wdata, rready} = FifoState{hd = hd', tl = tl', buf = buf'}
+ where
+  FifoResp{wready, rdata} = fifoOutput s
+  hd' = applyWhen (rready && isJust rdata) (+ 1) hd
+  (tl', buf')
+    | wready, Just entry <- wdata = (tl + 1, replace tl entry buf)
+    | otherwise = (tl, buf)
+
 fifoMany ::
   forall dom width dat.
   (HiddenClockResetEnable dom, KnownNat width, 2 <= width, NFDataX dat) =>
   SNat width ->
   Signal dom (FifoReq dat) ->
   Signal dom (FifoResp dat)
-fifoMany SNat = mealy step initS
+fifoMany SNat = moore fifoUpdate fifoOutput initS
  where
-  initS :: (Unsigned width, Unsigned width, Vec (2 ^ width) dat)
-  initS = (0, 0, deepErrorX "fifoMany: uninitialized")
-
-  step (hd, tl, buf) FifoReq{..} = ((hd', tl', buf'), FifoResp{..})
-   where
-    wready = tl + 1 /= hd
-    wreadyTwo = wready && tl + 2 /= hd
-    rvalid = hd /= tl
-    rdata = orNothing rvalid (buf !! hd)
-    hd' = applyWhen (rready && rvalid) (+ 1) hd
-    (tl', buf')
-      | wready, Just entry <- wdata = (tl + 1, replace tl entry buf)
-      | otherwise = (tl, buf)
+  initS :: FifoState width dat
+  initS = FifoState{hd = 0, tl = 0, buf = deepErrorX "fifoMany: uninitialized"}
