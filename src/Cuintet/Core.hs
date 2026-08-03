@@ -156,7 +156,7 @@ core coreIn = CoreOut <$> iReqOut <*> dReqOut <*> instLog
 
   wbReqPre = join <$> (mkWbReqPre <<$>> decoded <<*>> instBits <<*>> aluResult)
   mkWbReqPre :: (InstCtrl, BitVector XLen) -> Inst -> BitVector XLen -> Maybe (BitVector 5, Bool, BitVector XLen)
-  mkWbReqPre (InstCtrl{isLui, isLoad, rwbEn}, imm) bits aluRes = orNothing rwbEn (rdAddr, isLoad, wbData)
+  mkWbReqPre (InstCtrl{isLui, isLoad, rwbEn}, imm) bits aluRes = orNothing (rwbEn && rdAddr /= 0) (rdAddr, isLoad, wbData)
    where
     rdAddr = slice d11 d7 bits
     wbData

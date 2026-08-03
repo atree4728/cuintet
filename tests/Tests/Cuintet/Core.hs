@@ -29,6 +29,13 @@ loadStoreProg =
   , 0x00110193 -- addi x3, x2, 1
   ]
 
+-- | x0 に書こうとする命令。x0 は常に 0 でなければならない。
+x0Prog :: [Inst]
+x0Prog =
+  [ 0x00500013 -- addi x0, x0, 5
+  , 0x000000b3 -- add  x1, x0, x0
+  ]
+
 tests :: TestTree
 tests =
   testGroup
@@ -47,4 +54,8 @@ tests =
         ((.pc) <$> logs) @?= [0, 4, 8, 12, 16]
         (regs !! (2 :: Int)) @?= 42
         (regs !! (3 :: Int)) @?= 43
+    , testCase "x0 への書き戻しは無視される" $ do
+        let regs = finalRegs 2 x0Prog
+        (regs !! (0 :: Int)) @?= 0
+        (regs !! (1 :: Int)) @?= 0
     ]
