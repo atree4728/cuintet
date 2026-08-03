@@ -1,7 +1,6 @@
 module Tests.Cuintet.Core where
 
 import Clash.Prelude
-import qualified Prelude as P
 
 import Cuintet.Core (InstLog (..))
 import Cuintet.Eei (Inst)
@@ -41,20 +40,20 @@ tests =
   testGroup
     "Cuintet.Core"
     [ testCase "命令を順に 1 回ずつ commit する" $ do
-        -- プログラム末尾の 1 命令先（NOP パディング）まで見て、最後の命令が
-        -- 二重 commit されていない（pc が 12 に進む）ことを検査する。
-        let logs = runProgram 4 aluProg
-        P.length logs @?= 4
-        ((.pc) <$> logs) @?= [0, 4, 8, 12]
+        -- プログラム末尾を越えた NOP パディングまで見て、二重 commit で pc が
+        -- 停滞していないことを検査する。
+        ((.pc) <$> runProgram 8 aluProg) @?= [0, 4, 8, 12, 16, 20, 24, 28]
         (finalRegs 3 aluProg !! (3 :: Int)) @?= 0x00100024
     , testCase "store した値を load で読み戻し、次の命令で使える" $ do
-        let logs = runProgram 5 loadStoreProg
-            regs = finalRegs 4 loadStoreProg
-        P.length logs @?= 5
-        ((.pc) <$> logs) @?= [0, 4, 8, 12, 16]
+        -- load/store の直後はフェッチとデータアクセスがバスを取り合う。
+        -- そこで pc が重複しないことまで見る。
+        ((.pc) <$> runProgram 8 loadStoreProg) @?= [0, 4, 8, 12, 16, 20, 24, 28]
+        let regs = finalRegs 4 loadStoreProg
         (regs !! (2 :: Int)) @?= 42
         (regs !! (3 :: Int)) @?= 43
     , testCase "x0 への書き戻しは無視される" $ do
+        -- pc を見ないと、2 命令目が commit されなくても x1 == 0 で通ってしまう。
+        ((.pc) <$> runProgram 2 x0Prog) @?= [0, 4]
         let regs = finalRegs 2 x0Prog
         (regs !! (0 :: Int)) @?= 0
         (regs !! (1 :: Int)) @?= 0

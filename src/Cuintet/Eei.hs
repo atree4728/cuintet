@@ -1,5 +1,5 @@
 {- | RISC-V execution environment interface. 本の @eei.veryl@ と @membus_if.veryl@ に対応する。
-@membus_if@ は Veryl では @interface@ だが、ここでは @MemBusReq@ / @MemBusResp@ のレコードで表す。
+@membus_if@ は Veryl では @interface@ だが、ここでは t'MemBusReq' / t'MemBusResp' のレコードで表す。
 -}
 module Cuintet.Eei where
 

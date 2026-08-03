@@ -1,3 +1,4 @@
+-- | 'Cuintet.Core.InstLog' の整形。将来の Konata ログ出力の土台にする。
 module Cuintet.Debug where
 
 import Clash.Prelude
@@ -6,6 +7,37 @@ import Cuintet.Corectrl
 import qualified Data.List as L
 import Text.Printf (printf)
 
+{- | 1 命令分のログを人間可読な複数行テキストにする。書き戻しのある命令では
+最後に @reg[rd] <= data@ の行が付く。
+
+>>> import Prelude
+>>> import Cuintet.Core (InstLog (..))
+>>> import Cuintet.Corectrl (InstCtrl (..), InstType (..))
+>>> ctrl = InstCtrl{itype = IType, rwbEn = True, isLui = False, isAluOp = True, isJump = False, isLoad = False, funct3 = 0, funct7 = 0}
+>>> l = InstLog{pc = 12, inst = 0x00110193, ctrl, imm = 1, rs1Addr = 2, rs2Addr = 1, rs1Data = 42, rs2Data = 0, op1 = 42, op2 = 1, aluResult = 43, wbReq = Just (3, 43)}
+>>> putStrLn (showInstLog l)
+0000000c : 00110193
+  itype   : 000010
+  imm     : 00000001
+  rs1[ 2] : 0000002a
+  rs2[ 1] : 00000000
+  op1     : 0000002a
+  op2     : 00000001
+  alu res : 0000002b
+  reg[ 3] <= 0000002b
+
+@wbReq@ が 'Nothing' なら、その行は出ない:
+
+>>> putStrLn (showInstLog l{wbReq = Nothing})
+0000000c : 00110193
+  itype   : 000010
+  imm     : 00000001
+  rs1[ 2] : 0000002a
+  rs2[ 1] : 00000000
+  op1     : 0000002a
+  op2     : 00000001
+  alu res : 0000002b
+-}
 showInstLog :: InstLog -> String
 showInstLog l =
   L.intercalate

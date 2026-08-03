@@ -11,7 +11,7 @@ Core. 本の @core.veryl@ に対応する。
 * FIFO を 'moore' で書き、出力が状態のみから決まることを型で保証している
   ('Cuintet.Fifo.fifoOutput')。これが core ↔ FIFO の組合せ循環を構造的に断ち切る。
 * @memunit.veryl@ は module だが、ここでは 'Cuintet.MemUnit.memUnitStep' という
-  純粋関数として呼び、状態は 'CoreState' が保持する。
+  純粋関数として呼び、状態は t'CoreState' が保持する。
 
 'coreT' が守るべき不変条件: @iReq@ と @dReq@ は @iResp@ / @dResp@ に組合せ依存して
 はならない。依存させると @memArbiter@ との間に組合せループができる。
@@ -27,7 +27,7 @@ import Cuintet.InstDecoder (instDecode)
 import Cuintet.MemUnit (InstInfo (..), MemUnitReq (..), MemUnitResp (..), MemUnitState (..), memUnitStep)
 import Cuintet.Util (orNothing)
 import Data.Function (applyWhen)
-import Data.Maybe (fromMaybe, isJust, isNothing)
+import Data.Maybe (fromMaybe, isJust)
 
 -- | Pair of fetched instruction and its address.
 data FifoEntry = FifoEntry
@@ -179,11 +179,15 @@ coreT CoreState{..} (~CoreIn{iResp, dResp}, fifoResp) = (state', (coreOut, fifoR
 
   -- 命令フェッチ。FIFO に保留中の書き込みと今回の分の両方の空きがあるときだけ出す。
   fetched = (,) <$> ifRequested <*> iResp.rdata
-  busFree = isNothing ifRequested || isJust iResp.rdata -- not pending, or pending but fetched now
-  accepted = fifoResp.wreadyTwo && iResp.ready && busFree -- fifo & memory & core available
+  -- @iReq@ が出ていて（@wreadyTwo@）、かつ @dReq@ に阻まれていない（@ready@）なら
+  -- メモリが受理した。arbiter は受理に必ず応答を返すので、これで @ifPc@ と
+  -- @ifRequested@ が同期する。
+  accepted = fifoResp.wreadyTwo && iResp.ready
   ifFifoWdata'
     | Just (a, b) <- fetched = Just FifoEntry{addr = a, bits = b}
-    | fifoResp.wready = Nothing -- @ifFifoWdata@ was written at the previous clock.
+    -- 前クロックで書き込み済み。フェッチは @wreadyTwo@ のときしか出さないので、
+    -- 保留が残っていることはなく Nothing でよい。
+    | fifoResp.wready = Nothing
     | otherwise = ifFifoWdata -- pending
 
   fifoReq = FifoReq{wdata = ifFifoWdata, rready}
