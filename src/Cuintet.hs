@@ -1,6 +1,5 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
--- | Top. 本の @top.veryl@ に対応する。メモリの調停は 'Cuintet.MemArbiter.memArbiter' に分けてある。
 module Cuintet where
 
 import Clash.Prelude
@@ -13,6 +12,7 @@ createDomain vSystem{vName = "Dom50", vPeriod = hzToPeriod 50e6}
 
 system ::
   (HiddenClockResetEnable dom) =>
+  -- | ram unit
   ( Signal dom MemAddr ->
     Signal dom (Maybe (MemAddr, Inst)) ->
     Signal dom Inst

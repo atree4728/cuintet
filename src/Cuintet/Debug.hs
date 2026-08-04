@@ -1,14 +1,12 @@
--- | 'Cuintet.Core.InstLog' の整形。将来の Konata ログ出力の土台にする。
 module Cuintet.Debug where
 
 import Clash.Prelude
 import Cuintet.Core (InstLog (..))
-import Cuintet.Corectrl
+import Cuintet.Corectrl (InstCtrl (itype), instCode)
 import qualified Data.List as L
 import Text.Printf (printf)
 
-{- | 1 命令分のログを人間可読な複数行テキストにする。書き戻しのある命令では
-最後に @reg[rd] <= data@ の行が付く。
+{- | Displays the log for a single command in a human-friendly format. Write back is optional.
 
 >>> import Prelude
 >>> import Cuintet.Core (InstLog (..))
@@ -26,7 +24,7 @@ import Text.Printf (printf)
   alu res : 0000002b
   reg[ 3] <= 0000002b
 
-@wbReq@ が 'Nothing' なら、その行は出ない:
+@wbReq@ is optional:
 
 >>> putStrLn (showInstLog l{wbReq = Nothing})
 0000000c : 00110193
@@ -55,11 +53,4 @@ showInstLog l =
     )
 
 showInstLogs :: [Maybe InstLog] -> String
-showInstLogs xs =
-  L.intercalate "\n" $
-    L.map
-      ( \case
-          Just instLog -> showInstLog instLog
-          Nothing -> "(Nothing)"
-      )
-      xs
+showInstLogs xs = L.intercalate "\n" $ L.map (maybe "(Nothing)" showInstLog) xs

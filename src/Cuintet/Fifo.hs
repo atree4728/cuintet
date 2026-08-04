@@ -1,4 +1,4 @@
--- | FIFO that stores up to 2^@width@ - 1 elements of type @dat@. 本の @fifo.veryl@ に対応する。
+-- | FIFO that stores up to 2^@width@ - 1 elements of type @dat@.
 module Cuintet.Fifo where
 
 import Clash.Prelude
@@ -70,7 +70,7 @@ fifoOne = mealy step Nothing
       | rready = Nothing
       | otherwise = buf
 
--- | 'fifoMany' の状態。
+-- | The state of @fifoMany@.
 data FifoState width dat = FifoState
   { hd :: Unsigned width
   , tl :: Unsigned width
@@ -78,11 +78,6 @@ data FifoState width dat = FifoState
   }
   deriving (Generic, NFDataX)
 
-{- | 状態のみから決まる出力。
-
-この関数が @FifoReq@ を受け取らないことが、core との組合せ循環が存在しないことの
-保証になっている。'moore' の出力関数として使うので型でも強制される。
--}
 fifoOutput :: (KnownNat width) => FifoState width dat -> FifoResp dat
 fifoOutput FifoState{hd, tl, buf} = FifoResp{wready, wreadyTwo, rdata}
  where

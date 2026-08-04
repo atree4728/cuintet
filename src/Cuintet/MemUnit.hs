@@ -1,5 +1,5 @@
 {- |
-Memory unit: executes load/store instructions by sending the address
+Memory unit: executes load\/store instructions by sending the address
 computed by the ALU to the memory bus.
 
 An access takes at least 3 cycles ('Init' → 'WaitReady' → 'WaitValid'),
@@ -7,9 +7,6 @@ during which the core must stall (no write back, no instruction fetch).
 
 The memory ignores the low 2 bits of the address, so misaligned LW/SW
 do not work yet; all accesses are assumed to be 4-byte aligned.
-
-本の @memunit.veryl@ に対応する。ただし Veryl では module、ここでは
-'Cuintet.Core.coreT' から呼ばれる純粋な step 関数である。
 -}
 module Cuintet.MemUnit (
   InstInfo (..),
@@ -62,7 +59,7 @@ data MemUnitState
     WaitValid
   deriving (Generic, NFDataX)
 
--- | 1 サイクル分の状態遷移。'Cuintet.Core.coreT' から直接呼ばれる。
+-- | The state transision of the memory unit for a single cycle.
 memUnitStep :: MemUnitState -> MemUnitReq -> (MemUnitState, MemUnitResp)
 memUnitStep state MemUnitReq{inst, memresp} = (memUnitState, memUnitResp)
  where
@@ -88,7 +85,7 @@ memUnitStep state MemUnitReq{inst, memresp} = (memUnitState, memUnitResp)
           _ -> Nothing
       }
 
-{- | 単体シミュレーション用の薄いラッパ。core は 'memUnitStep' を直接使う。
+{- | A then wrapper for unit tests.
 
 1 回の load を 'Init' → 'WaitReady' → 'WaitValid' → 'Init' と一巡させる例:
 

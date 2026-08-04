@@ -1,4 +1,3 @@
--- | 本の @memory.veryl@ に対応する。命令フェッチとデータアクセスで共有される。
 module Cuintet.Memory where
 
 import Clash.Prelude

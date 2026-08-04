@@ -1,4 +1,3 @@
--- | 本の @alu.veryl@ に対応する。
 module Cuintet.Alu where
 
 import Clash.Prelude

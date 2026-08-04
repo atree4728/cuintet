@@ -1,4 +1,3 @@
--- | 本の @inst_decoder.veryl@ に対応する。
 module Cuintet.InstDecoder where
 
 import Clash.Prelude

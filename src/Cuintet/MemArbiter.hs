@@ -1,9 +1,6 @@
 {- |
-Arbitrates a single-port memory between instruction fetch and load\/store
+Arbitrates a single-port memory between instruction fetch and load/store
 requests. See 'memArbiter'.
-
-本では @top.veryl@ の中で調停しているが、ここでは独立したモジュールに分けている。
-@dReq@ の優先選択に 'Maybe' の 'Control.Applicative.<|>' を優先エンコーダとして使う点も本と異なる。
 -}
 module Cuintet.MemArbiter (Grant (..), MemArbiterReq (..), MemArbiterResp (..), memArbiter) where
 
@@ -67,7 +64,6 @@ memArbiter = mealy step Nothing
     (grant', MemArbiterResp{memReq, iResp, dResp})
    where
     toMemReq MemBusReq{addr, wdata} = MemBusReq{addr = addrToMemAddr addr, wdata}
-    -- @dReq@ takes priority: 'Maybe'\'s 'Control.Applicative.<|>' acts as a priority encoder.
     memReq = (toMemReq <$> dReq) <|> (toMemReq <$> iReq)
 
     grant'

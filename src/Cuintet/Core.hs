@@ -1,10 +1,4 @@
 {- |
-Core. 本の @core.veryl@ に対応する。
-
-@core.veryl@ の @always_comb@ 一括記述に対応するのが 'coreT' で、1 サイクル分の
-組合せロジックと次状態を 1 つの純粋関数として書き下している。'Signal' が現れるのは
-'core' の配線層だけである。
-
 本と意図的に変えた点:
 
 * バスの有無を valid ビットではなく 'Maybe' で表す。
@@ -53,7 +47,7 @@ data CoreOut = CoreOut
   , instLog :: Maybe InstLog
   }
 
--- | 1 命令分の実行記録。commit したサイクルにだけ出力される。
+-- | An execution log for a single instruction, which is output only in the cycle in which the commit occurred.
 data InstLog = InstLog
   { pc :: Addr
   , inst :: Inst
@@ -98,7 +92,7 @@ initState =
     , memu = Init
     }
 
--- | ALU に渡す 2 つのオペランドを命令形式から選ぶ。
+-- | Extract the two operands according to the instruction form.
 operands ::
   InstCtrl ->
   BitVector XLen ->
@@ -114,11 +108,7 @@ operands InstCtrl{itype} imm rs1Data rs2Data pc = case itype of
   UType -> (bitCoerce pc, imm)
   JType -> (bitCoerce pc, imm)
 
-{- | Outputs the memory requests and the fetched instruction (if completed).
-
-配線層。'mealy' を使うのは 'mealyB' が @Bundle@ インスタンスを要求するためで、
-'mealy' なら制約なしで同じことができる。
--}
+-- | Outputs the memory requests and the fetched instruction (if completed).
 core ::
   (HiddenClockResetEnable dom) =>
   Signal dom CoreIn ->
@@ -130,24 +120,18 @@ core coreIn = coreOut
   fifoReq = snd <$> out
   fifoResp = fifo d3 fifoReq
 
-{- | 1 サイクル分の組合せロジックと次状態。本の @core.veryl@ の @always_comb@ に対応する。
-
-@CoreIn@ を遅延パターンで受けるのは必須である。正格に受けると、@coreOut@ を WHNF まで
-評価するだけで @CoreIn@ のコンストラクタが要求され、それは 'Cuintet.MemArbiter.memArbiter'
-の正格な @MemArbiterReq@ パターンの評価に波及し、そこは @mkArbReq CoreOut{iReq, dReq}@
-（@Cuintet.hs@）経由でまた 'coreT' に戻ってくる ── 評価が循環してハングする。
--}
+-- | Combinatrial logic of the core.
 coreT ::
   CoreState ->
   (CoreIn, FifoResp FifoEntry) ->
   (CoreState, (CoreOut, FifoReq FifoEntry))
 coreT CoreState{..} (~CoreIn{iResp, dResp}, fifoResp) = (state', (coreOut, fifoReq))
  where
-  -- FIFO 先頭の命令。空のサイクルでは X が入るが、@commit@ でゲートされるので届かない。
+  -- The top of the instruction FIFO, possibly unstable @X@
   instValid = isJust fifoResp.rdata
   FifoEntry{addr = pc, bits} = fromMaybe (deepErrorX "coreT: FIFO is empty") fifoResp.rdata
 
-  -- データパス。有効性に関わらず無条件に計算する。
+  -- data path
   (ctrl, imm) = instDecode bits
   rs1Addr = slice d19 d15 bits
   rs2Addr = slice d24 d20 bits
@@ -164,7 +148,7 @@ coreT CoreState{..} (~CoreIn{iResp, dResp}, fifoResp) = (state', (coreOut, fifoR
         , memresp = dResp
         }
 
-  -- FIFO の先頭を消費するのは、メモリアクセスが飛んでいない間だけ。
+  -- Consumes the FIFO top when not accessing memory
   rready = not memuOut.stall
   commit = instValid && rready
 
@@ -177,7 +161,8 @@ coreT CoreState{..} (~CoreIn{iResp, dResp}, fifoResp) = (state', (coreOut, fifoR
   rdAddr = slice d11 d7 bits
   wbReq = orNothing (commit && ctrl.rwbEn && rdAddr /= 0) (rdAddr, wbData)
 
-  -- 命令フェッチ。FIFO に保留中の書き込みと今回の分の両方の空きがあるときだけ出す。
+  -- Instruction fetch.
+  -- FIFO に保留中の書き込みと今回の分の両方の空きがあるときだけ出す。
   fetched = (,) <$> ifRequested <*> iResp.rdata
   -- @iReq@ が出ていて（@wreadyTwo@）、かつ @dReq@ に阻まれていない（@ready@）なら
   -- メモリが受理した。arbiter は受理に必ず応答を返すので、これで @ifPc@ と
@@ -189,17 +174,13 @@ coreT CoreState{..} (~CoreIn{iResp, dResp}, fifoResp) = (state', (coreOut, fifoR
     -- 保留が残っていることはなく Nothing でよい。
     | fifoResp.wready = Nothing
     | otherwise = ifFifoWdata -- pending
-
   fifoReq = FifoReq{wdata = ifFifoWdata, rready}
 
   coreOut =
     CoreOut
       { iReq = orNothing fifoResp.wreadyTwo MemBusReq{addr = ifPc, wdata = Nothing}
       , dReq = memuOut.memreq
-      , instLog =
-          orNothing
-            commit
-            InstLog{pc, inst = bits, ctrl, imm, rs1Addr, rs2Addr, rs1Data, rs2Data, op1, op2, aluResult, wbReq}
+      , instLog = orNothing commit InstLog{pc, inst = bits, ctrl, imm, rs1Addr, rs2Addr, rs1Data, rs2Data, op1, op2, aluResult, wbReq}
       }
 
   state' =
@@ -207,8 +188,7 @@ coreT CoreState{..} (~CoreIn{iResp, dResp}, fifoResp) = (state', (coreOut, fifoR
       { ifPc = applyWhen accepted (+ 4) ifPc
       , ifRequested = if accepted then Just ifPc else ifRequested
       , ifFifoWdata = ifFifoWdata'
-      , -- 消費したなら次に見えるのは新しい命令。先頭が空なら次は必ず新しい。
-        isNew = if instValid then rready else True
+      , isNew = not instValid || rready
       , regFile = maybe regFile (\(a, d) -> replace a d regFile) wbReq
       , memu = memu'
       }
