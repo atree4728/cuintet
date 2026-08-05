@@ -26,7 +26,7 @@ module Cuintet.MemUnit (
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), isMemOp, isStore)
 import Cuintet.Eei (Addr, ByteRange (..), DataResp, LoadFmt (..), MemBusReq (..), MemBusResp (..), MemDataBytes, StoreLanes (..), XLen, XLenBytes, bitOffset, laneMask)
-import Cuintet.Util (fill, orNothing)
+import Cuintet.Util (orNothing)
 import Data.Maybe (isJust, isNothing)
 
 -- | The instruction supplied to the memory unit.
@@ -151,8 +151,8 @@ formatRdata LoadFmt{range, signed} word = case range of
   Word -> word
  where
   shifted = word `shiftR` bitOffset range
-  ext :: (KnownNat n, KnownNat m) => BitVector n -> BitVector (n + m)
-  ext v = fill (if signed then msb v else low) ++# v
+  ext :: (KnownNat n, KnownNat m) => BitVector n -> BitVector (m + n)
+  ext = if signed then signExtend else zeroExtend
 
 -- | A thin wrapper for unit tests.
 memUnit :: (HiddenClockResetEnable dom) => Signal dom MemUnitReq -> Signal dom MemUnitResp

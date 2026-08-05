@@ -69,6 +69,16 @@ branchProg =
   , 0x0000d063 -- 18: bge x1, x0, 0 -- taken, jump to itself
   ]
 
+sltProg :: [Inst]
+sltProg =
+  [ 0xfff00093 -- addi  x1, x0, -1
+  , 0x00100113 -- addi  x2, x0, 1
+  , 0x0020a1b3 -- slt   x3, x1, x2 : -1 < 1          -> 1
+  , 0x0020b233 -- sltu  x4, x1, x2 : ffffffff < 1    -> 0
+  , 0x0000a293 -- slti  x5, x1, 0  : -1 < 0          -> 1
+  , 0x0000b313 -- sltiu x6, x1, 0  : ffffffff < 0    -> 0
+  ]
+
 x0Prog :: [Inst]
 x0Prog =
   [ 0x00500013 -- addi x0, x0, 5
@@ -102,6 +112,12 @@ tests =
         let regs = finalRegs 5 storeProg
         (regs !! (2 :: Int)) @?= 0x00000023
         (regs !! (3 :: Int)) @?= 0x00000123
+    , testCase "Set less than, signed and unsigned" $ do
+        let regs = finalRegs 6 sltProg
+        (regs !! (3 :: Int)) @?= 1
+        (regs !! (4 :: Int)) @?= 0
+        (regs !! (5 :: Int)) @?= 1
+        (regs !! (6 :: Int)) @?= 0
     , testCase "Unconditional jump" $ do
         ((.pc) <$> runProgram 5 jumpProg) @?= [0x0, 0x10, 0x14, 0x20, 0x0]
     , testCase "Conditional jump" $ do

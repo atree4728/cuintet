@@ -3,7 +3,6 @@ module Cuintet.Alu where
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
 import Cuintet.Eei (XLen)
-import Cuintet.Util (fill)
 
 alu :: InstCtrl -> BitVector XLen -> BitVector XLen -> BitVector XLen
 alu InstCtrl{itype, isAluOp, funct3, funct7} op1 op2
@@ -25,5 +24,5 @@ alu InstCtrl{itype, isAluOp, funct3, funct7} op1 op2
   srl = op1 `shiftR` shiftWidth
   sra = bitCoerce $ (bitCoerce op1 :: Signed XLen) `shiftR` shiftWidth
 
-  slt = unpack $ fill low ++# pack ((bitCoerce op1 :: Signed XLen) < (bitCoerce op2 :: Signed XLen))
-  sltu = unpack $ fill low ++# pack (op1 < op2)
+  slt = boolToBV ((bitCoerce op1 :: Signed XLen) < (bitCoerce op2 :: Signed XLen))
+  sltu = boolToBV (op1 < op2)

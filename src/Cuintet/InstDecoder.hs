@@ -3,7 +3,6 @@ module Cuintet.InstDecoder where
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
 import Cuintet.Eei (Inst, OpCode (..), XLen, opDecode)
-import Cuintet.Util (fill)
 
 instDecode :: Inst -> (InstCtrl, BitVector XLen)
 instDecode bits = (ctrl op, imm op)
@@ -16,11 +15,11 @@ instDecode bits = (ctrl op, imm op)
   immUG = slice d31 d12 bits
   immJG = slice d31 d31 bits ++# slice d19 d12 bits ++# slice d20 d20 bits ++# slice d30 d21 bits
 
-  immI = fill (msb bits) ++# immIG
-  immS = fill (msb bits) ++# immSG
-  immB = fill (msb bits) ++# immBG ++# (0 :: BitVector 1)
-  immU = fill (msb bits) ++# immUG ++# (0 :: BitVector 12)
-  immJ = fill (msb bits) ++# immJG ++# (0 :: BitVector 1)
+  immI = signExtend immIG
+  immS = signExtend immSG
+  immB = signExtend (immBG ++# (0 :: BitVector 1))
+  immU = signExtend (immUG ++# (0 :: BitVector 12))
+  immJ = signExtend (immJG ++# (0 :: BitVector 1))
 
   imm :: OpCode -> BitVector XLen
   imm Lui = immU
