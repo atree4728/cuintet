@@ -2,23 +2,26 @@ module Cuintet.Alu where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
-import Cuintet.Eei (XLen)
+import Cuintet.Eei (IOp (..), ShiftRight (..), XLen)
 
 alu :: InstCtrl -> BitVector XLen -> BitVector XLen -> BitVector XLen
 alu InstCtrl{itype, isAluOp, funct3, funct7} op1 op2
   | not isAluOp = op1 + op2
-  | funct3 == 0b000 && (itype == IType || funct7 == zeroBits) = op1 + op2
-  | funct3 == 0b000 = op1 - op2
-  | funct3 == 0b001 = sll
-  | funct3 == 0b010 = slt
-  | funct3 == 0b011 = sltu
-  | funct3 == 0b100 = op1 `xor` op2
-  | funct3 == 0b101 && testBit funct7 5 = sra
-  | funct3 == 0b101 = srl
-  | funct3 == 0b110 = op1 .|. op2
-  | funct3 == 0b111 = op1 .&. op2
-  | otherwise = deepErrorX "alu: unreachable path"
+  | otherwise = case unpack funct3 of
+      ADD -> if isSub then op1 - op2 else op1 + op2
+      SLL -> sll
+      SLT -> slt
+      SLTU -> sltu
+      XOR -> op1 `xor` op2
+      SR -> case unpack (slice d5 d5 funct7) of
+        Logical -> srl
+        Arithmetic -> sra
+      OR -> op1 .|. op2
+      AND -> op1 .&. op2
  where
+  -- @funct7@ is reserved in an OP-IMM, so only an OP can mean SUB.
+  isSub = itype /= IType && funct7 /= zeroBits
+
   shiftWidth = bitCoerce $ zeroExtend (truncateB op2 :: BitVector 5)
   sll = op1 `shiftL` shiftWidth
   srl = op1 `shiftR` shiftWidth

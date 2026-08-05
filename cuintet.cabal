@@ -27,6 +27,7 @@ common common-options
     DeriveTraversable
     DerivingStrategies
     FlexibleContexts
+    GeneralizedNewtypeDeriving
     InstanceSigs
     KindSignatures
     LambdaCase
@@ -35,6 +36,7 @@ common common-options
     NoImplicitPrelude
     NoStarIsType
     OverloadedRecordDot
+    PatternSynonyms
     PolyKinds
     QuasiQuotes
     RankNTypes
@@ -46,6 +48,7 @@ common common-options
     TypeApplications
     TypeFamilies
     TypeOperators
+    UndecidableInstances
     ViewPatterns
 
   ghc-options:

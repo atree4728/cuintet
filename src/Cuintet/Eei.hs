@@ -1,5 +1,47 @@
 -- | RISC-V execution environment interface.
-module Cuintet.Eei where
+module Cuintet.Eei (
+  XLen,
+  XLenBytes,
+  ILen,
+  ILenBytes,
+  Addr,
+  Inst,
+  Sign (..),
+  AccessWidth (..),
+  LaneOffset,
+  laneOffset,
+  bitOffset,
+  sizeBytes,
+  aligned,
+  laneMask,
+  StoreLanes (..),
+  LoadFmt (..),
+  MemBusReq (..),
+  MemBusResp (..),
+  MemDataBytes,
+  WordAddrWidth,
+  WordAddr,
+  toWordAddr,
+  InstReq,
+  DataReq,
+  InstResp,
+  DataResp,
+  MemReq,
+  Opcode (
+    LUI,
+    AUIPC,
+    JAL,
+    JALR,
+    BRANCH,
+    LOAD,
+    STORE,
+    OP_IMM,
+    OP,
+    SYSTEM
+  ),
+  IOp (..),
+  ShiftRight (..),
+) where
 
 import Clash.Annotations.BitRepresentation
 import Clash.Annotations.BitRepresentation.Deriving
@@ -12,8 +54,9 @@ type XLen = 32
 -- | The maximum width of instructions which the implementation supports.
 type ILen = 32
 
--- | Widths of the buses are counted in bytes; @* 8@ appears only where a byte
--- lane vector is turned back into a word.
+{- | Widths of the buses are counted in bytes; @* 8@ appears only where a byte
+lane vector is turned back into a word.
+-}
 type XLenBytes = XLen `Div` 8
 
 type ILenBytes = ILen `Div` 8
@@ -25,6 +68,7 @@ type Inst = BitVector ILen
 -- | Whether a narrower-than-word load fills the high bits with its sign or zero.
 data Sign = Signed | Unsigned
   deriving (Generic, NFDataX, Show)
+
 deriveDefaultAnnotation [t|Sign|]
 deriveBitPack [t|Sign|]
 
@@ -45,6 +89,7 @@ data AccessWidth
   | -- | @0b111@.
     WidthIllegal3
   deriving (Generic, NFDataX, Show)
+
 {-# ANN
   module
   ( DataReprAnn
@@ -59,6 +104,7 @@ data AccessWidth
       ]
   )
   #-}
+
 deriveBitPack [t|AccessWidth|]
 
 -- | The byte offset of an access within its word, the lane 0 being the least significant.
@@ -80,31 +126,32 @@ sizeBytes = \case
   WidthIllegal1 -> illegal
   WidthIllegal2 -> illegal
   WidthIllegal3 -> illegal
- where
-  illegal = deepErrorX "sizeBytes: illegal access width"
+  where
+    illegal = deepErrorX "sizeBytes: illegal access width"
 
 {- | Whether the access is naturally aligned, i.e. contained in a single word.
 @sizeBytes - 1@ is exactly the mask of offset bits that must be zero.
 -}
 aligned :: AccessWidth -> LaneOffset -> Bool
 aligned width off = pack off .&. mask == 0
- where
-  mask :: BitVector (CLog 2 XLenBytes)
-  mask = truncateB (pack (sizeBytes width - 1))
+  where
+    mask :: BitVector (CLog 2 XLenBytes)
+    mask = truncateB (pack (sizeBytes width - 1))
 
 {- | The byte lanes the access covers, the lane 0 being the least significant:
 @sizeBytes@ ones shifted up by the offset.
 -}
 laneMask :: forall nBytes. (KnownNat nBytes) => AccessWidth -> LaneOffset -> Vec nBytes Bool
 laneMask width off = reverse $ bitCoerce mask
- where
-  mask, ones :: BitVector nBytes
-  mask = ones `shiftL` numConvert off
-  ones = complement (complement 0 `shiftL` numConvert (sizeBytes width))
+  where
+    mask, ones :: BitVector nBytes
+    mask = ones `shiftL` numConvert off
+    ones = complement (complement 0 `shiftL` numConvert (sizeBytes width))
 
 -- | Data to be written, which is masked and divided into bytes.
 newtype StoreLanes nBytes = StoreLanes (Vec nBytes (Maybe (BitVector 8)))
-  deriving (Generic, NFDataX)
+  deriving stock (Generic)
+  deriving anyclass (NFDataX)
 
 -- | Load request, which is to be sliced and extended.
 data LoadFmt = LoadFmt {width :: AccessWidth, offset :: LaneOffset}
@@ -130,14 +177,18 @@ data MemBusResp nBytes = MemBusResp
   deriving (Generic, NFDataX)
 
 type MemDataBytes = 4
+
 type WordAddrWidth = 20
 
 -- | The address the memory takes, indexing words rather than bytes.
 type WordAddr = Unsigned WordAddrWidth
 
 type InstResp = MemBusResp ILenBytes
+
 type DataResp = MemBusResp MemDataBytes
+
 type InstReq = MemBusReq ILenBytes XLen
+
 type DataReq = MemBusReq MemDataBytes XLen
 
 -- | Physical request form accepted by the memory.
@@ -146,39 +197,50 @@ type MemReq = MemBusReq MemDataBytes WordAddrWidth
 toWordAddr :: Addr -> WordAddr
 toWordAddr a = truncateB (a `shiftR` natToNum @(CLog 2 MemDataBytes))
 
-data OpCode
-  = Lui
-  | AuiPc
-  | Op
-  | OpImm
-  | Jal
-  | Jalr
-  | Branch
-  | Load
-  | Store
-  deriving (Generic, NFDataX)
+{- | The @opcode@ field. RV32I names only a handful of the 128 patterns, so this
+is the field itself with names attached rather than a sum type: @unpack@ is pure
+wiring, and one declaration serves as both the encoder and the decoder. Matching
+on it needs a catch-all for the patterns left unnamed.
+-}
+newtype Opcode = Opcode (BitVector 7)
+  deriving newtype (BitPack)
 
-{- ORMOLU_DISABLE -}
-opEncode :: OpCode -> BitVector 7
-opEncode Lui    = 0b0110111
-opEncode AuiPc  = 0b0010111
-opEncode Op     = 0b0110011
-opEncode OpImm  = 0b0010011
-opEncode Jal    = 0b1101111
-opEncode Jalr   = 0b1100111
-opEncode Branch = 0b1100011
-opEncode Load   = 0b0000011
-opEncode Store  = 0b0100011
-{- ORMOLU_ENABLE -}
+pattern LUI, AUIPC, JAL, JALR, BRANCH, LOAD, STORE, OP_IMM, OP, SYSTEM :: Opcode
+pattern LUI = Opcode 0b0110111
+pattern AUIPC = Opcode 0b0010111
+pattern JAL = Opcode 0b1101111
+pattern JALR = Opcode 0b1100111
+pattern BRANCH = Opcode 0b1100011
+pattern LOAD = Opcode 0b0000011
+pattern STORE = Opcode 0b0100011
+pattern OP_IMM = Opcode 0b0010011
+pattern OP = Opcode 0b0110011
+pattern SYSTEM = Opcode 0b1110011
 
-opDecode :: BitVector 7 -> OpCode
-opDecode 0b0110111 = Lui
-opDecode 0b0010111 = AuiPc
-opDecode 0b0110011 = Op
-opDecode 0b0010011 = OpImm
-opDecode 0b1101111 = Jal
-opDecode 0b1100111 = Jalr
-opDecode 0b1100011 = Branch
-opDecode 0b0000011 = Load
-opDecode 0b0100011 = Store
-opDecode _ = deepErrorX "encode: unknown opcode"
+{- | The ALU operation of an @OP@ or @OP-IMM@ instruction, laid out so that it
+/is/ the @funct3@ field: @unpack funct3@ is pure wiring. All 8 patterns are
+named, so a match on it is total.
+
+@SUB@ and @SRA@ are not here; they share their @funct3@ with 'ADD' and 'SR',
+and are told apart by @funct7@ bit 5.
+-}
+data IOp
+  = ADD
+  | SLL
+  | SLT
+  | SLTU
+  | XOR
+  | SR
+  | OR
+  | AND
+  deriving (Generic, NFDataX, Show)
+
+deriveDefaultAnnotation [t|IOp|]
+deriveBitPack [t|IOp|]
+
+-- | Which right shift 'SR' means; @funct7@ bit 5.
+data ShiftRight = Logical | Arithmetic
+  deriving (Generic, NFDataX, Show)
+
+deriveDefaultAnnotation [t|ShiftRight|]
+deriveBitPack [t|ShiftRight|]

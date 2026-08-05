@@ -2,12 +2,12 @@ module Cuintet.InstDecoder where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
-import Cuintet.Eei (Inst, OpCode (..), XLen, opDecode)
+import Cuintet.Eei (Inst, Opcode (..), XLen)
 
 instDecode :: Inst -> (InstCtrl, BitVector XLen)
 instDecode bits = (ctrl op, imm op)
  where
-  op = opDecode $ slice d6 d0 bits
+  op = unpack $ slice d6 d0 bits
 
   immIG = slice d31 d20 bits
   immSG = slice d31 d25 bits ++# slice d11 d7 bits
@@ -21,16 +21,16 @@ instDecode bits = (ctrl op, imm op)
   immU = signExtend (immUG ++# (0 :: BitVector 12))
   immJ = signExtend (immJG ++# (0 :: BitVector 1))
 
-  imm :: OpCode -> BitVector XLen
-  imm Lui = immU
-  imm AuiPc = immU
-  imm Op = deepErrorX "imm: Op"
-  imm OpImm = immI
-  imm Jal = immJ
-  imm Jalr = immI
-  imm Branch = immB
-  imm Load = immI
-  imm Store = immS
+  imm :: Opcode -> BitVector XLen
+  imm LUI = immU
+  imm AUIPC = immU
+  imm OP_IMM = immI
+  imm JAL = immJ
+  imm JALR = immI
+  imm BRANCH = immB
+  imm LOAD = immI
+  imm STORE = immS
+  imm _ = deepErrorX "imm: opcode carries no immediate"
 
   instCtrl itype rwbEn isLui isAluOp isJump isLoad =
     InstCtrl
@@ -44,15 +44,16 @@ instDecode bits = (ctrl op, imm op)
       , funct7 = slice d31 d25 bits
       }
 
-  ctrl :: OpCode -> InstCtrl
+  ctrl :: Opcode -> InstCtrl
 {- ORMOLU_DISABLE -}
-  ctrl Lui    = instCtrl UType  True  True False False False
-  ctrl AuiPc  = instCtrl UType  True False False False False
-  ctrl Jal    = instCtrl JType  True False False  True False
-  ctrl Jalr   = instCtrl IType  True False False  True False
-  ctrl Branch = instCtrl BType False False False False False
-  ctrl Load   = instCtrl IType  True False False False  True
-  ctrl Store  = instCtrl SType False False False False False
-  ctrl Op     = instCtrl RType  True False  True False False
-  ctrl OpImm  = instCtrl IType  True False  True False False
+  ctrl LUI    = instCtrl UType  True  True False False False
+  ctrl AUIPC  = instCtrl UType  True False False False False
+  ctrl JAL    = instCtrl JType  True False False  True False
+  ctrl JALR   = instCtrl IType  True False False  True False
+  ctrl BRANCH = instCtrl BType False False False False False
+  ctrl LOAD   = instCtrl IType  True False False False  True
+  ctrl STORE  = instCtrl SType False False False False False
+  ctrl OP     = instCtrl RType  True False  True False False
+  ctrl OP_IMM = instCtrl IType  True False  True False False
+  ctrl _      = deepErrorX "ctrl: unknown opcode"
 {- ORMOLU_ENABLE -}
