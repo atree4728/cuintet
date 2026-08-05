@@ -13,13 +13,30 @@ type Addr = Unsigned XLen
 
 type Inst = BitVector ILen
 
+data DataWidth
+  = -- | Byte i -> [(i+1)*8-1:i*8]
+    Byte (Index 4)
+  | -- | Half i -> [(i+1)*16-1:i*16]
+    Half (Index 2)
+  | -- | Word   -> [31:0]
+    Word
+  deriving (Generic, NFDataX)
+
+-- | Data to be written, which is masked and divided into bytes.
+newtype StoreFmt dataWidth = StoreFmt (Vec (dataWidth `Div` 8) (Maybe (BitVector 8)))
+  deriving (Generic, NFDataX)
+
+-- | Load request, which is to be sliced and extended.
+data LoadFmt = LoadFmt {width :: DataWidth, signed :: Bool}
+  deriving (Generic, NFDataX)
+
 {- | Memory access request, carried on the bus as @Maybe (MemBusReq ...)@;
 @Nothing@ means no access.
 -}
 data MemBusReq dataWidth addrWidth = MemBusReq
   { addr :: Unsigned addrWidth
   -- ^ The address to access.
-  , wdata :: Maybe (BitVector dataWidth)
+  , wdata :: Maybe (StoreFmt dataWidth)
   -- ^ 'Just' the data to write for stores, 'Nothing' for loads.
   }
   deriving (Generic, NFDataX)

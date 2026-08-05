@@ -40,21 +40,6 @@ response itself carries no destination tag. So the arbiter remembers, in a
 that side. 'iResp'\'s @ready@ is masked while 'dReq' is present, so a
 fetch request is only accepted once no load\/store is contending; 'dResp'
 always sees the memory's @ready@ directly, since 'dReq' is never masked.
-
->>> import Prelude
->>> import Clash.Prelude
->>> import Cuintet.Eei (MemBusReq (..), MemBusResp (..))
->>> mkI addr = Just MemBusReq{addr, wdata = Nothing}
->>> mkD addr wdata = Just MemBusReq{addr, wdata}
->>> reqs = [MemArbiterReq (mkI 0) Nothing (MemBusResp True Nothing), MemArbiterReq (mkI 4) (mkD 8 (Just 99)) (MemBusResp True (Just 0x11)), MemArbiterReq Nothing Nothing (MemBusResp True (Just 0x22)), MemArbiterReq (mkI 8) Nothing (MemBusResp True Nothing)]
->>> resps = simulateN @System (Prelude.length reqs) memArbiter reqs
->>> showReq r = (r.addr, r.wdata)
->>> (fmap showReq . (.memReq)) <$> resps
-[Just (0,Nothing),Just (2,Just 0b0000_0000_0000_0000_0000_0000_0110_0011),Nothing,Just (2,Nothing)]
->>> (.rdata) . (.iResp) <$> resps
-[Nothing,Just 0b0000_0000_0000_0000_0000_0000_0001_0001,Nothing,Nothing]
->>> (.rdata) . (.dResp) <$> resps
-[Nothing,Nothing,Just 0b0000_0000_0000_0000_0000_0000_0010_0010,Nothing]
 -}
 memArbiter :: (HiddenClockResetEnable dom) => Signal dom MemArbiterReq -> Signal dom MemArbiterResp
 memArbiter = mealy step Nothing

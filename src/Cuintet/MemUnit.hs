@@ -25,8 +25,8 @@ module Cuintet.MemUnit (
 
 import Clash.Prelude
 import Cuintet.Corectrl (InstCtrl (..), isMemOp, isStoreOp)
-import Cuintet.Eei (Addr, MemBusReq (..), MemBusResp (..), MemDataWidth, XLen)
-import Cuintet.Util (fill)
+import Cuintet.Eei (Addr, DataWidth (..), LoadFmt (..), MemBusReq (..), MemBusResp (..), MemDataWidth, StoreFmt (..), XLen)
+import Cuintet.Util (fill, orNothing)
 import Data.Maybe (isJust, isNothing)
 
 -- | The instruction supplied to the memory unit.
@@ -56,23 +56,8 @@ data MemUnitResp = MemUnitResp
   }
   deriving (Generic, NFDataX)
 
-data DataWidth
-  = -- | Byte i -> [(i+1)*8-1:i*8]
-    Byte (BitVector 2)
-  | -- | Half i -> [(i+1)*16-1:i*16]
-    Half (BitVector 1)
-  | -- | Word   -> [31:0]
-    Word
-  deriving (Generic, NFDataX)
-
-data LoadFmt = LoadFmt
-  { width :: DataWidth
-  , signed :: Bool
-  }
-  deriving (Generic, NFDataX)
-
 data Access
-  = Store (BitVector MemDataWidth)
+  = Store (StoreFmt MemDataWidth)
   | Load LoadFmt
   deriving (Generic, NFDataX)
 
@@ -91,7 +76,7 @@ memUnitStep state MemUnitReq{inst, memresp} = (memUnitState, memUnitResp)
  where
   isNewMemOp InstInfo{isNew, ctrl} = isNew && isMemOp ctrl
   memUnitState = case state of
-    Init | Just i <- inst, isNewMemOp i, isStoreOp i.ctrl -> WaitReady i.addr (Store i.rs2)
+    Init | Just i <- inst, isNewMemOp i, isStoreOp i.ctrl -> WaitReady i.addr (Store $ storeFmt i.ctrl.funct3 i.addr i.rs2)
     Init | Just i <- inst, isNewMemOp i -> WaitReady i.addr (Load $ loadFmt i.ctrl.funct3 i.addr)
     WaitReady _ acc | memresp.ready -> WaitValid acc
     WaitValid _ | isJust memresp.rdata -> Init
@@ -115,18 +100,43 @@ memUnitStep state MemUnitReq{inst, memresp} = (memUnitState, memUnitResp)
           _ -> Nothing
       }
 
+accessWidth :: BitVector 3 -> Addr -> DataWidth
+accessWidth funct3 addr = case slice d1 d0 funct3 of
+  0b00 -> Byte $ numConvert offset
+  0b01 | not (offset `testBit` 0) -> Half $ numConvert $ slice d1 d1 offset
+  0b10 -> Word
+  _ -> deepErrorX "accessWidth: invalid funct3"
+ where
+  offset :: BitVector 2
+  offset = truncateB (pack addr)
+
 -- | Construct a load format from @funct3@ and the access address.
 loadFmt :: BitVector 3 -> Addr -> LoadFmt
 loadFmt funct3 addr = LoadFmt{width, signed}
  where
   signed = not (funct3 `testBit` 2)
-  offset :: BitVector 2
-  offset = truncateB (pack addr)
-  width = case slice d1 d0 funct3 of
-    0b00 -> Byte offset
-    0b01 | not (offset `testBit` 0) -> Half (slice d1 d1 offset)
-    0b10 -> Word
-    _ -> deepErrorX "loadFmt: invalid funct3"
+  width = accessWidth funct3 addr
+
+-- | Construct a store format from @funct3@ and the access address and written word.
+storeFmt :: BitVector 3 -> Addr -> BitVector XLen -> StoreFmt MemDataWidth
+storeFmt funct3 addr word = StoreFmt $ imap lane $ reverse $ bitCoerce $ word `shiftL` (8 * numConvert base)
+ where
+  width = accessWidth funct3 addr
+
+  base :: Int
+  base = case width of
+    Byte offset -> numConvert offset
+    Half offset -> 2 * numConvert offset
+    Word -> 0
+
+  enabled :: BitVector 2 -> Bool
+  enabled i = case width of
+    Byte offset -> i == numConvert offset
+    Half offset -> msb i == fromIntegral offset
+    Word -> True
+
+  lane :: Index (Div MemDataWidth 8) -> BitVector 8 -> Maybe (BitVector 8)
+  lane i = orNothing (enabled (numConvert i))
 
 {- | Format loaded word according to 'LoadFmt'.
 
@@ -155,25 +165,6 @@ formatRdata LoadFmt{width, signed} word = case width of
   ext :: (KnownNat n, KnownNat m) => BitVector n -> BitVector (n + m)
   ext v = fill (if signed then msb v else low) ++# v
 
-{- | A then wrapper for unit tests.
-
-1 回の load を 'Init' → 'WaitReady' → 'WaitValid' → 'Init' と一巡させる例:
-
->>> import Prelude
->>> import Clash.Prelude
->>> import Cuintet.Corectrl (InstCtrl (..), InstType (..))
->>> import Cuintet.Eei (MemBusReq (..), MemBusResp (..))
->>> ctrl = InstCtrl{itype = IType, rwbEn = True, isLui = False, isAluOp = False, isJump = False, isLoad = True, funct3 = 0b010, funct7 = 0}
->>> info isNew = InstInfo{isNew, ctrl, addr = 100, rs2 = 0}
->>> mkReq inst ready rdata = MemUnitReq{inst, memresp = MemBusResp{ready, rdata}}
->>> reqs = [mkReq (Just (info True)) False Nothing, mkReq (Just (info False)) True Nothing, mkReq (Just (info False)) True Nothing, mkReq (Just (info False)) True (Just 0xdeadbeef), mkReq Nothing True Nothing]
->>> resps = simulateN @System (Prelude.length reqs) memUnit reqs
->>> (.stall) <$> resps
-[True,True,True,False,False]
->>> (fmap (\r -> (r.addr, r.wdata)) . (.memreq)) <$> resps
-[Nothing,Just (100,Nothing),Nothing,Nothing,Nothing]
->>> (.rdata) <$> resps
-[Nothing,Nothing,Nothing,Just 0b1101_1110_1010_1101_1011_1110_1110_1111,Nothing]
--}
+-- | A thin wrapper for unit tests.
 memUnit :: (HiddenClockResetEnable dom) => Signal dom MemUnitReq -> Signal dom MemUnitResp
 memUnit = mealy memUnitStep Init

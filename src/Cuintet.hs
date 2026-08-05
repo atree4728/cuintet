@@ -6,19 +6,16 @@ import Clash.Prelude
 import Cuintet.Core (CoreIn (..), CoreOut (..), InstLog, core)
 import Cuintet.Eei
 import Cuintet.MemArbiter (MemArbiterReq (..), MemArbiterResp (..), memArbiter)
-import Cuintet.Memory (memory)
+import Cuintet.Memory (RamUnit, blockRamLanes, memory)
 
 createDomain vSystem{vName = "Dom50", vPeriod = hzToPeriod 50e6}
 
 system ::
   (HiddenClockResetEnable dom) =>
-  -- | ram unit
-  ( Signal dom MemAddr ->
-    Signal dom (Maybe (MemAddr, Inst)) ->
-    Signal dom Inst
-  ) ->
+  -- | ram unit for each byte lane
+  Vec (Div MemDataWidth 8) (RamUnit dom MemAddrWidth) ->
   Signal dom (Maybe InstLog)
-system ram = (.instLog) <$> coreOut
+system rams = (.instLog) <$> coreOut
  where
   coreOut = core coreIn
   coreIn = mkCoreIn <$> arbResp
@@ -29,14 +26,14 @@ system ram = (.instLog) <$> coreOut
   arbResp = memArbiter arbReq
 
   memReq = (.memReq) <$> arbResp
-  memResp = memory ram memReq
+  memResp = memory rams memReq
 
 topEntity ::
   Clock Dom50 ->
   Reset Dom50 ->
   Enable Dom50 ->
   Signal Dom50 (Maybe InstLog)
-topEntity = exposeClockResetEnable $ system (blockRamU NoClearOnReset (SNat @(2 ^ MemAddrWidth)))
+topEntity = exposeClockResetEnable $ system (blockRamLanes (SNat @(2 ^ MemAddrWidth)))
 {-# ANN
   topEntity
   ( Synthesize
