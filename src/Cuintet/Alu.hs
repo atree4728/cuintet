@@ -1,7 +1,7 @@
 module Cuintet.Alu where
 
 import Clash.Prelude
-import Cuintet.Corectrl (InstCtrl (..), InstType (..))
+import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
 import Cuintet.Eei (XLen)
 import Cuintet.Util (fill)
 

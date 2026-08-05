@@ -78,7 +78,7 @@ library
     Cuintet
     Cuintet.Alu
     Cuintet.Core
-    Cuintet.Corectrl
+    Cuintet.CoreCtrl
     Cuintet.Debug
     Cuintet.Eei
     Cuintet.Fifo
@@ -134,6 +134,7 @@ test-suite unittests
   other-modules:
     Tests.Cuintet.Core
     Tests.Cuintet.Sim
+
   build-depends:
     clash-prelude-hedgehog,
     cuintet,

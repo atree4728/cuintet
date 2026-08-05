@@ -6,8 +6,8 @@ import Cuintet.Util (orNothing)
 import Data.Maybe (isJust)
 
 -- | A single byte lane of the memory.
-newtype RamUnit dom addrWidth
-  = RamUnit
+newtype RamLane dom addrWidth
+  = RamLane
       ( -- \| request address
         Signal dom (Unsigned addrWidth) ->
         -- \| written byte (Nothing when to load)
@@ -19,26 +19,26 @@ newtype RamUnit dom addrWidth
 -- | One-cycle-delayed memory.
 memory ::
   ( HiddenClockResetEnable dom
-  , KnownNat dataBytes
+  , KnownNat nBytes
   , KnownNat addrWidth
   ) =>
   -- | one-cycle-delayed BRAM component by @blockRam@ family, one per byte lane.
-  Vec dataBytes (RamUnit dom addrWidth) ->
+  Vec nBytes (RamLane dom addrWidth) ->
   -- | Memory read/write request.
-  Signal dom (Maybe (MemBusReq (dataBytes * 8) addrWidth)) ->
+  Signal dom (Maybe (MemBusReq nBytes addrWidth)) ->
   -- | Read value, requested at the previous clock.
-  Signal dom (MemBusResp (dataBytes * 8))
-memory rams req = MemBusResp True <$> rdata
+  Signal dom (MemBusResp nBytes)
+memory lanes req = MemBusResp True <$> rdata
  where
   laneWrite i mreq = do
     MemBusReq{addr, wdata} <- mreq
-    StoreFmt lanes <- wdata
-    (addr,) <$> lanes !! i
+    StoreLanes bytes <- wdata
+    (addr,) <$> bytes !! i
 
-  runLane i (RamUnit ram) = ram raddr (laneWrite i <$> req)
+  runLane i (RamLane ram) = ram raddr (laneWrite i <$> req)
 
   raddr = maybe (errorX "memory: no request") (.addr) <$> req
-  prevRdata = pack . reverse <$> bundle (imap runLane rams)
+  prevRdata = pack . reverse <$> bundle (imap runLane lanes)
   rready = delay False $ isJust <$> req
   rdata = orNothing <$> rready <*> prevRdata
 
@@ -50,8 +50,8 @@ blockRamLanes ::
   , 1 <= depth
   ) =>
   SNat depth ->
-  Vec nBytes (RamUnit dom addrWidth)
-blockRamLanes depth = repeat (RamUnit $ blockRamU NoClearOnReset depth)
+  Vec nBytes (RamLane dom addrWidth)
+blockRamLanes depth = repeat (RamLane $ blockRamU NoClearOnReset depth)
 
 -- | Byte lanes preloaded with a word-wise image, for simulation.
 initRamLanes ::
@@ -63,8 +63,8 @@ initRamLanes ::
   , 1 <= depth
   ) =>
   Vec depth (BitVector (nBytes * 8)) ->
-  Vec nBytes (RamUnit dom addrWidth)
-initRamLanes img = map (RamUnit . blockRam . laneImage) indicesI
+  Vec nBytes (RamLane dom addrWidth)
+initRamLanes img = map (RamLane . blockRam . laneImage) indicesI
  where
   laneImage :: Index nBytes -> Vec depth (BitVector 8)
   laneImage i = map (\word -> reverse (bitCoerce word) !! i) img

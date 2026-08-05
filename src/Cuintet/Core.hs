@@ -6,7 +6,7 @@ module Cuintet.Core where
 
 import Clash.Prelude
 import Cuintet.Alu (alu)
-import Cuintet.Corectrl (InstCtrl (..), InstType (..))
+import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
 import Cuintet.Eei
 import Cuintet.Fifo (FifoReq (..), FifoResp (..), fifo)
 import Cuintet.InstDecoder (instDecode)
@@ -81,7 +81,7 @@ initState =
     , ifFifoWdata = Nothing
     , isNew = True
     , regFile = replicate d32 0
-    , memu = Init
+    , memu = Idle
     }
 
 -- | Extract the two operands according to the instruction form.
@@ -136,15 +136,15 @@ coreT CoreState{..} (~CoreIn{iResp, dResp}, fifoResp) = (state', (coreOut, fifoR
     memUnitStep
       memu
       MemUnitReq
-        { inst = orNothing instValid InstInfo{isNew, ctrl, addr = bitCoerce aluResult, rs2 = rs2Data}
-        , memresp = dResp
+        { inst = orNothing instValid InstInfo{isNew, ctrl, addr = bitCoerce aluResult, wdata = rs2Data}
+        , memResp = dResp
         }
 
   -- Consumes the FIFO top when not accessing memory
   rready = not memuOut.stall
   commit = instValid && rready
 
-  -- 不変条件 memu == 'Init' → isNew == True （core と memUnit にまたがる）により、
+  -- 不変条件 memu == 'Idle' → isNew == True （core と memUnit にまたがる）により、
   -- load が commit するとき @memuOut.rdata@ は必ず 'Just'。
   wbData
     | ctrl.isLui = imm
@@ -171,7 +171,7 @@ coreT CoreState{..} (~CoreIn{iResp, dResp}, fifoResp) = (state', (coreOut, fifoR
   coreOut =
     CoreOut
       { iReq = orNothing fifoResp.wreadyTwo MemBusReq{addr = ifPc, wdata = Nothing}
-      , dReq = memuOut.memreq
+      , dReq = memuOut.memReq
       , instLog = orNothing commit InstLog{pc, inst = bits, ctrl, imm, rs1Addr, rs2Addr, rs1Data, rs2Data, op1, op2, aluResult, wbReq}
       }
 

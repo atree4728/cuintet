@@ -9,60 +9,96 @@ type XLen = 32
 -- | The maximum width of instructions which the implementation supports.
 type ILen = 32
 
+-- | Widths of the buses are counted in bytes; @* 8@ appears only where a byte
+-- lane vector is turned back into a word.
+type XLenBytes = XLen `Div` 8
+
+type ILenBytes = ILen `Div` 8
+
 type Addr = Unsigned XLen
 
 type Inst = BitVector ILen
 
-data DataWidth
+-- | The byte range an access covers, always aligned to its own size.
+data ByteRange
   = -- | Byte i -> [(i+1)*8-1:i*8]
-    Byte (Index 4)
+    Byte (Index XLenBytes)
   | -- | Half i -> [(i+1)*16-1:i*16]
-    Half (Index 2)
+    Half (Index (XLenBytes `Div` 2))
   | -- | Word   -> [31:0]
     Word
   deriving (Generic, NFDataX)
 
+-- | The offset of the range, in bytes. The only place where a half word index
+-- is scaled to bytes.
+byteOffset :: ByteRange -> Index XLenBytes
+byteOffset (Byte i) = i
+byteOffset (Half i) = 2 * numConvert i
+byteOffset Word = 0
+
+-- | The offset of the range in bits, to shift a word into or out of place.
+bitOffset :: ByteRange -> Int
+bitOffset range = 8 * numConvert (byteOffset range)
+
+-- | The size of the range, in bytes.
+sizeBytes :: ByteRange -> Index (XLenBytes + 1)
+sizeBytes (Byte _) = 1
+sizeBytes (Half _) = 2
+sizeBytes Word = natToNum @XLenBytes
+
+{- | The byte lanes the range covers, the lane 0 being the least significant:
+@sizeBytes@ ones shifted up by @byteOffset@.
+-}
+laneMask :: forall nBytes. (KnownNat nBytes) => ByteRange -> Vec nBytes Bool
+laneMask range = reverse $ bitCoerce mask
+ where
+  mask, ones :: BitVector nBytes
+  mask = ones `shiftL` numConvert (byteOffset range)
+  ones = complement (complement 0 `shiftL` numConvert (sizeBytes range))
+
 -- | Data to be written, which is masked and divided into bytes.
-newtype StoreFmt dataWidth = StoreFmt (Vec (dataWidth `Div` 8) (Maybe (BitVector 8)))
+newtype StoreLanes nBytes = StoreLanes (Vec nBytes (Maybe (BitVector 8)))
   deriving (Generic, NFDataX)
 
 -- | Load request, which is to be sliced and extended.
-data LoadFmt = LoadFmt {width :: DataWidth, signed :: Bool}
+data LoadFmt = LoadFmt {range :: ByteRange, signed :: Bool}
   deriving (Generic, NFDataX)
 
 {- | Memory access request, carried on the bus as @Maybe (MemBusReq ...)@;
 @Nothing@ means no access.
 -}
-data MemBusReq dataWidth addrWidth = MemBusReq
+data MemBusReq nBytes addrWidth = MemBusReq
   { addr :: Unsigned addrWidth
   -- ^ The address to access.
-  , wdata :: Maybe (StoreFmt dataWidth)
+  , wdata :: Maybe (StoreLanes nBytes)
   -- ^ 'Just' the data to write for stores, 'Nothing' for loads.
   }
   deriving (Generic, NFDataX)
 
-data MemBusResp dataWidth = MemBusResp
+data MemBusResp nBytes = MemBusResp
   { ready :: Bool
   -- ^ Whether to accept a memory access request.
-  , rdata :: Maybe (BitVector dataWidth)
+  , rdata :: Maybe (BitVector (nBytes * 8))
   -- ^ Data read.
   }
   deriving (Generic, NFDataX)
 
-type MemDataWidth = 32
-type MemAddrWidth = 20
-type MemAddr = Unsigned MemAddrWidth
+type MemDataBytes = 4
+type WordAddrWidth = 20
 
-type InstResp = MemBusResp ILen
-type DataResp = MemBusResp MemDataWidth
-type InstReq = MemBusReq ILen XLen
-type DataReq = MemBusReq MemDataWidth XLen
+-- | The address the memory takes, indexing words rather than bytes.
+type WordAddr = Unsigned WordAddrWidth
+
+type InstResp = MemBusResp ILenBytes
+type DataResp = MemBusResp MemDataBytes
+type InstReq = MemBusReq ILenBytes XLen
+type DataReq = MemBusReq MemDataBytes XLen
 
 -- | Physical request form accepted by the memory.
-type MemReq = MemBusReq MemDataWidth MemAddrWidth
+type MemReq = MemBusReq MemDataBytes WordAddrWidth
 
-addrToMemAddr :: Addr -> MemAddr
-addrToMemAddr a = truncateB (a `shiftR` natToNum @(CLog 2 (MemDataWidth `Div` 8)))
+toWordAddr :: Addr -> WordAddr
+toWordAddr a = truncateB (a `shiftR` natToNum @(CLog 2 MemDataBytes))
 
 data OpCode
   = Lui

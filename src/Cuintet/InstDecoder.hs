@@ -1,7 +1,7 @@
 module Cuintet.InstDecoder where
 
 import Clash.Prelude
-import Cuintet.Corectrl (InstCtrl (..), InstType (..))
+import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
 import Cuintet.Eei (Inst, OpCode (..), XLen, opDecode)
 import Cuintet.Util (fill)
 

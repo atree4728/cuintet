@@ -17,7 +17,7 @@ data MemArbiterReq = MemArbiterReq
   -- ^ Instruction fetch request.
   , dReq :: Maybe DataReq
   -- ^ Load\/store request.
-  , memResp :: MemBusResp MemDataWidth
+  , memResp :: DataResp
   -- ^ Response from the memory.
   }
   deriving (Generic, NFDataX)
@@ -48,7 +48,7 @@ memArbiter = mealy step Nothing
   step grant MemArbiterReq{iReq, dReq, memResp = MemBusResp{ready, rdata}} =
     (grant', MemArbiterResp{memReq, iResp, dResp})
    where
-    toMemReq MemBusReq{addr, wdata} = MemBusReq{addr = addrToMemAddr addr, wdata}
+    toMemReq MemBusReq{addr, wdata} = MemBusReq{addr = toWordAddr addr, wdata}
     memReq = (toMemReq <$> dReq) <|> (toMemReq <$> iReq)
 
     grant'

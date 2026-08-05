@@ -1,4 +1,4 @@
-module Cuintet.Corectrl where
+module Cuintet.CoreCtrl where
 
 import Clash.Prelude
 
@@ -44,5 +44,5 @@ data InstCtrl = InstCtrl
 isMemOp :: InstCtrl -> Bool
 isMemOp InstCtrl{itype, isLoad} = itype == SType || isLoad
 
-isStoreOp :: InstCtrl -> Bool
-isStoreOp InstCtrl{itype} = itype == SType
+isStore :: InstCtrl -> Bool
+isStore InstCtrl{itype} = itype == SType
