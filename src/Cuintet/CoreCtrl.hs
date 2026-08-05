@@ -46,3 +46,6 @@ isMemOp InstCtrl{itype, isLoad} = itype == SType || isLoad
 
 isStore :: InstCtrl -> Bool
 isStore InstCtrl{itype} = itype == SType
+
+isBranchOp :: InstCtrl -> Bool
+isBranchOp InstCtrl{itype} = itype == BType

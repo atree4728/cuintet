@@ -58,6 +58,17 @@ jumpProg =
   , 0xfe1ff06f -- 20: jal x0, -0x20 : jump to 0
   ]
 
+branchProg :: [Inst]
+branchProg =
+  [ 0x00100093 --  0: addi x1, x0, 1
+  , 0x10100063 --  4: beq x0, x1, 0x100 -- untaken
+  , 0x00101863 --  8: bne x0, x1, 0x10  -- taken, jump to pc+0x10=0x18
+  , 0xdeadbeef --  c:
+  , 0xdeadbeef -- 10:
+  , 0xdeadbeef -- 14:
+  , 0x0000d063 -- 18: bge x1, x0, 0 -- taken, jump to itself
+  ]
+
 x0Prog :: [Inst]
 x0Prog =
   [ 0x00500013 -- addi x0, x0, 5
@@ -93,4 +104,6 @@ tests =
         (regs !! (3 :: Int)) @?= 0x00000123
     , testCase "Unconditional jump" $ do
         ((.pc) <$> runProgram 5 jumpProg) @?= [0x0, 0x10, 0x14, 0x20, 0x0]
+    , testCase "Conditional jump" $ do
+        ((.pc) <$> runProgram 5 branchProg) @?= [0x0, 0x04, 0x08, 0x18, 0x18]
     ]

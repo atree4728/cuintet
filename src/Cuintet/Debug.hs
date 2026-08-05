@@ -12,7 +12,7 @@ import Text.Printf (printf)
 >>> import Cuintet.Core (InstLog (..))
 >>> import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
 >>> ctrl = InstCtrl{itype = IType, rwbEn = True, isLui = False, isAluOp = True, isJump = False, isLoad = False, funct3 = 0, funct7 = 0}
->>> l = InstLog{pc = 12, inst = 0x00110193, ctrl, imm = 1, rs1Addr = 2, rs2Addr = 1, rs1Data = 42, rs2Data = 0, op1 = 42, op2 = 1, aluResult = 43, wbReq = Just (3, 43)}
+>>> l = InstLog{pc = 12, inst = 0x00110193, ctrl, imm = 1, rs1Addr = 2, rs2Addr = 1, rs1Data = 42, rs2Data = 0, op1 = 42, op2 = 1, aluResult = 43, wbReq = Just (3, 43), branchTaken = Nothing}
 >>> putStrLn (showInstLog l)
 0000000c : 00110193
   itype   : 000010
@@ -49,6 +49,7 @@ showInstLog l =
       , printf "  op2     : %08x" (toInteger l.op2)
       , printf "  alu res : %08x" (toInteger l.aluResult)
       ]
+        L.++ maybe [] (\branchTaken -> [printf "  br take : %s" (show branchTaken)]) l.branchTaken
         L.++ maybe [] (\(rdAddr, wbData) -> [printf "  reg[%2d] <= %08x" (toInteger rdAddr) (toInteger wbData)]) l.wbReq
     )
 

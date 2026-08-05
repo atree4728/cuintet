@@ -6,7 +6,8 @@ module Cuintet.Core where
 
 import Clash.Prelude
 import Cuintet.Alu (alu)
-import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
+import Cuintet.BrUnit (brUnit)
+import Cuintet.CoreCtrl (InstCtrl (..), InstType (..), isBranchOp)
 import Cuintet.Eei
 import Cuintet.Fifo (FifoReq (..), FifoResp (..), fifo)
 import Cuintet.InstDecoder (instDecode)
@@ -51,6 +52,7 @@ data InstLog = InstLog
   , op1 :: BitVector XLen
   , op2 :: BitVector XLen
   , aluResult :: BitVector XLen
+  , branchTaken :: Maybe Bool
   , wbReq :: Maybe (BitVector 5, BitVector XLen)
   }
   deriving (Generic, NFDataX)
@@ -153,7 +155,8 @@ coreT CoreState{..} (~CoreIn{iResp, dResp}, fifoResp) = (state', (coreOut, fifoR
   rdAddr = slice d11 d7 bits
   wbReq = orNothing (commit && ctrl.rwbEn && rdAddr /= 0) (rdAddr, wbData)
 
-  controlHazard = instValid && ctrl.isJump
+  branchTaken = brUnit ctrl.funct3 op1 op2
+  controlHazard = instValid && (ctrl.isJump || isBranchOp ctrl && branchTaken)
 
   -- Instruction fetch
   -- FIFO に保留中の書き込みと今回の分の両方の空きがあるときだけ出す。
@@ -165,7 +168,8 @@ coreT CoreState{..} (~CoreIn{iResp, dResp}, fifoResp) = (state', (coreOut, fifoR
 
   -- next state
   (ifPc', ifRequested')
-    | controlHazard = (bitCoerce $ aluResult .&. complement 1, Nothing) -- aluResult is the destination
+    | controlHazard && ctrl.isJump = (bitCoerce $ aluResult .&. complement 1, Nothing) -- aluResult is the destination
+    | controlHazard && isBranchOp ctrl = (pc + numConvert imm, Nothing) -- aluResult is the destination
     | accepted = (ifPc + 4, Just ifPc)
     | otherwise = (ifPc, ifRequested)
   ifFifoWdata'
@@ -181,7 +185,7 @@ coreT CoreState{..} (~CoreIn{iResp, dResp}, fifoResp) = (state', (coreOut, fifoR
     CoreOut
       { iReq = orNothing fifoResp.wreadyTwo MemBusReq{addr = ifPc, wdata = Nothing}
       , dReq = memuOut.memReq
-      , instLog = orNothing commit InstLog{pc, inst = bits, ctrl, imm, rs1Addr, rs2Addr, rs1Data, rs2Data, op1, op2, aluResult, wbReq}
+      , instLog = orNothing commit InstLog{pc, inst = bits, ctrl, imm, rs1Addr, rs2Addr, rs1Data, rs2Data, op1, op2, aluResult, wbReq, branchTaken = Nothing}
       }
 
   state' =
