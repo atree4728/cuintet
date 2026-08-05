@@ -23,6 +23,28 @@ loadStoreProg =
   , 0x00110193 -- addi x3, x2, 1
   ]
 
+loadVariantsProg :: [Inst]
+loadVariantsProg =
+  [ 0x02000083 -- lb   x1, 0x20(x0) : x1 = ffffffef
+  , 0x02104103 -- lbu  x2, 0x21(x0) : x2 = 000000be
+  , 0x02201183 -- lh   x3, 0x22(x0) : x3 = ffffdead
+  , 0x02205203 -- lhu  x4, 0x22(x0) : x4 = 0000dead
+  , 0x00000000
+  , 0x00000000
+  , 0x00000000
+  , 0x00000000
+  , 0xdeadbeef
+  ]
+
+storeVariantsProg :: [Inst]
+storeVariantsProg =
+  [ 12300093 -- addi x1, x0, 0x123
+  , 02101023 -- sh x1, 0x20(x0)
+  , 02100123 -- sb x1, 0x22(x0)
+  , 02200103 -- lb x2, 0x22(x0) : x2 = 00000023
+  , 02001183 -- lh x3, 0x20(x0) : x3 = 00000123
+  ]
+
 x0Prog :: [Inst]
 x0Prog =
   [ 0x00500013 -- addi x0, x0, 5
@@ -46,4 +68,10 @@ tests =
         let regs = finalRegs 2 x0Prog
         (regs !! (0 :: Int)) @?= 0
         (regs !! (1 :: Int)) @?= 0
+    , testCase "Properly handle variants of load instruction" $ do
+        let regs = finalRegs 4 loadVariantsProg
+        (regs !! (1 :: Int)) @?= 0xffffffef
+        (regs !! (2 :: Int)) @?= 0x000000be
+        (regs !! (3 :: Int)) @?= 0xffffdead
+        (regs !! (4 :: Int)) @?= 0x0000dead
     ]

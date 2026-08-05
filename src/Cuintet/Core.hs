@@ -1,12 +1,4 @@
 {- |
-本と意図的に変えた点:
-
-* バスの有無を valid ビットではなく 'Maybe' で表す。
-* FIFO を 'moore' で書き、出力が状態のみから決まることを型で保証している
-  ('Cuintet.Fifo.fifoOutput')。これが core ↔ FIFO の組合せ循環を構造的に断ち切る。
-* @memunit.veryl@ は module だが、ここでは 'Cuintet.MemUnit.memUnitStep' という
-  純粋関数として呼び、状態は t'CoreState' が保持する。
-
 'coreT' が守るべき不変条件: @iReq@ と @dReq@ は @iResp@ / @dResp@ に組合せ依存して
 はならない。依存させると @memArbiter@ との間に組合せループができる。
 -}
@@ -161,7 +153,7 @@ coreT CoreState{..} (~CoreIn{iResp, dResp}, fifoResp) = (state', (coreOut, fifoR
   rdAddr = slice d11 d7 bits
   wbReq = orNothing (commit && ctrl.rwbEn && rdAddr /= 0) (rdAddr, wbData)
 
-  -- Instruction fetch.
+  -- Instruction fetch
   -- FIFO に保留中の書き込みと今回の分の両方の空きがあるときだけ出す。
   fetched = (,) <$> ifRequested <*> iResp.rdata
   -- @iReq@ が出ていて（@wreadyTwo@）、かつ @dReq@ に阻まれていない（@ready@）なら
