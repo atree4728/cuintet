@@ -1,11 +1,10 @@
-module Tests.Cuintet.Core where
+module Tests.Cuintet.Core (tests) where
 
 import Clash.Prelude
-
 import Cuintet.Core (InstLog (..))
 import Cuintet.Eei (Inst)
-import Test.Tasty
-import Test.Tasty.HUnit
+import Test.Tasty (TestTree, testGroup)
+import Test.Tasty.HUnit (testCase, (@?=))
 import Tests.Cuintet.Sim (finalRegs, runProgram)
 
 aluProg :: [Inst]

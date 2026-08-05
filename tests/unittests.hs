@@ -1,9 +1,8 @@
-module Main where
+module Main (main) where
 
-import Prelude
-
-import Test.Tasty
+import Test.Tasty (defaultMain, testGroup)
 import qualified Tests.Cuintet.Core
+import Prelude
 
 main :: IO ()
 main =

@@ -12,7 +12,7 @@ brUnit funct3 op1 op2 = case funct3 of
   0b110 -> bltu
   0b111 -> not bltu
   _ -> False
- where
-  beq = op1 == op2
-  blt = (bitCoerce op1 :: Signed XLen) < (bitCoerce op2 :: Signed XLen)
-  bltu = (bitCoerce op1 :: Unsigned XLen) < (bitCoerce op2 :: Unsigned XLen)
+  where
+    beq = op1 == op2
+    blt = (bitCoerce op1 :: Signed XLen) < (bitCoerce op2 :: Signed XLen)
+    bltu = (bitCoerce op1 :: Unsigned XLen) < (bitCoerce op2 :: Unsigned XLen)

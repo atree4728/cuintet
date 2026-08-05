@@ -5,7 +5,16 @@ requests. See 'memArbiter'.
 module Cuintet.MemArbiter (Grant (..), MemArbiterReq (..), MemArbiterResp (..), memArbiter) where
 
 import Clash.Prelude
-import Cuintet.Eei
+import Cuintet.Eei (
+  DataReq,
+  DataResp,
+  InstReq,
+  InstResp,
+  MemBusReq (MemBusReq, addr, wdata),
+  MemBusResp (MemBusResp, rdata, ready),
+  MemReq,
+  toWordAddr,
+ )
 import Data.Maybe (isNothing)
 
 -- | Which side was granted the memory on the previous cycle.
@@ -43,25 +52,25 @@ always sees the memory's @ready@ directly, since 'dReq' is never masked.
 -}
 memArbiter :: (HiddenClockResetEnable dom) => Signal dom MemArbiterReq -> Signal dom MemArbiterResp
 memArbiter = mealy step Nothing
- where
-  step :: Maybe Grant -> MemArbiterReq -> (Maybe Grant, MemArbiterResp)
-  step grant MemArbiterReq{iReq, dReq, memResp = MemBusResp{ready, rdata}} =
-    (grant', MemArbiterResp{memReq, iResp, dResp})
-   where
-    toMemReq MemBusReq{addr, wdata} = MemBusReq{addr = toWordAddr addr, wdata}
-    memReq = (toMemReq <$> dReq) <|> (toMemReq <$> iReq)
+  where
+    step :: Maybe Grant -> MemArbiterReq -> (Maybe Grant, MemArbiterResp)
+    step grant MemArbiterReq {iReq, dReq, memResp = MemBusResp {ready, rdata}} =
+      (grant', MemArbiterResp {memReq, iResp, dResp})
+      where
+        toMemReq MemBusReq {addr, wdata} = MemBusReq {addr = toWordAddr addr, wdata}
+        memReq = (toMemReq <$> dReq) <|> (toMemReq <$> iReq)
 
-    grant'
-      | ready = (ToData <$ dReq) <|> (ToInst <$ iReq)
-      | otherwise = grant
+        grant'
+          | ready = (ToData <$ dReq) <|> (ToInst <$ iReq)
+          | otherwise = grant
 
-    iResp =
-      MemBusResp
-        { ready = ready && isNothing dReq
-        , rdata = if grant == Just ToInst then rdata else Nothing
-        }
-    dResp =
-      MemBusResp
-        { ready
-        , rdata = if grant == Just ToData then rdata else Nothing
-        }
+        iResp =
+          MemBusResp
+            { ready = ready && isNothing dReq
+            , rdata = if grant == Just ToInst then rdata else Nothing
+            }
+        dResp =
+          MemBusResp
+            { ready
+            , rdata = if grant == Just ToData then rdata else Nothing
+            }

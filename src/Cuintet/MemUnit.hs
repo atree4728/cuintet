@@ -73,32 +73,32 @@ data MemUnitState
 
 -- | The state transision of the memory unit for a single cycle.
 memUnitStep :: MemUnitState -> MemUnitReq -> (MemUnitState, MemUnitResp)
-memUnitStep state MemUnitReq{inst, memResp} = (memUnitState, memUnitResp)
- where
-  isNewMemOp InstInfo{isNew, ctrl} = isNew && isMemOp ctrl
-  memUnitState = case state of
-    Idle | Just i <- inst, isNewMemOp i -> WaitReady i.addr (access i.ctrl i.addr i.wdata)
-    WaitReady _ acc | memResp.ready -> WaitValid acc
-    WaitValid _ | isJust memResp.rdata -> Idle
-    _ -> state
-  memUnitResp =
-    MemUnitResp
-      { rdata = case state of
-          WaitValid (Load fmt) -> formatRdata fmt <$> memResp.rdata
-          _ -> Nothing
-      , -- in 'Idle' when a new memory instruction arrives,
-        -- in 'WaitReady' always,
-        -- in 'WaitValid' until the response arrives.
-        stall = case (inst, state) of
-          (Nothing, _) -> False
-          (Just i, Idle) -> isNewMemOp i
-          (Just _, WaitReady _ _) -> True
-          (Just _, WaitValid _) -> isNothing memResp.rdata
-      , memReq = case state of
-          WaitReady reqAddr (Load _) -> Just MemBusReq{addr = reqAddr, wdata = Nothing}
-          WaitReady reqAddr (Store wdata) -> Just MemBusReq{addr = reqAddr, wdata = Just wdata}
-          _ -> Nothing
-      }
+memUnitStep state MemUnitReq {inst, memResp} = (memUnitState, memUnitResp)
+  where
+    isNewMemOp InstInfo {isNew, ctrl} = isNew && isMemOp ctrl
+    memUnitState = case state of
+      Idle | Just i <- inst, isNewMemOp i -> WaitReady i.addr (access i.ctrl i.addr i.wdata)
+      WaitReady _ acc | memResp.ready -> WaitValid acc
+      WaitValid _ | isJust memResp.rdata -> Idle
+      _ -> state
+    memUnitResp =
+      MemUnitResp
+        { rdata = case state of
+            WaitValid (Load fmt) -> formatRdata fmt <$> memResp.rdata
+            _ -> Nothing
+        , -- in 'Idle' when a new memory instruction arrives,
+          -- in 'WaitReady' always,
+          -- in 'WaitValid' until the response arrives.
+          stall = case (inst, state) of
+            (Nothing, _) -> False
+            (Just i, Idle) -> isNewMemOp i
+            (Just _, WaitReady _ _) -> True
+            (Just _, WaitValid _) -> isNothing memResp.rdata
+        , memReq = case state of
+            WaitReady reqAddr (Load _) -> Just MemBusReq {addr = reqAddr, wdata = Nothing}
+            WaitReady reqAddr (Store wdata) -> Just MemBusReq {addr = reqAddr, wdata = Just wdata}
+            _ -> Nothing
+        }
 
 {- | The access an instruction requests. The width is @funct3@ read directly;
 the offset comes from the address.
@@ -111,10 +111,10 @@ access :: InstCtrl -> Addr -> BitVector XLen -> Access
 access ctrl addr wdata
   | not (aligned width offset) = deepErrorX "access: misaligned access"
   | isStore ctrl = Store (storeLanes width offset wdata)
-  | otherwise = Load LoadFmt{width, offset}
- where
-  width = unpack ctrl.funct3
-  offset = laneOffset addr
+  | otherwise = Load LoadFmt {width, offset}
+  where
+    width = unpack ctrl.funct3
+    offset = laneOffset addr
 
 {- | Construct the byte lanes to write.
 
@@ -123,8 +123,8 @@ are given by the same offset in bytes.
 -}
 storeLanes :: AccessWidth -> LaneOffset -> BitVector XLen -> StoreLanes MemDataBytes
 storeLanes width offset word = StoreLanes $ zipWith orNothing (laneMask width offset) bytes
- where
-  bytes = reverse $ bitCoerce $ word `shiftL` bitOffset offset
+  where
+    bytes = reverse $ bitCoerce $ word `shiftL` bitOffset offset
 
 {- | Format loaded word according to 'LoadFmt'.
 
@@ -148,18 +148,18 @@ The width is the @funct3@ field verbatim:
 (Half Signed,Half Unsigned)
 -}
 formatRdata :: LoadFmt -> BitVector XLen -> BitVector XLen
-formatRdata LoadFmt{width, offset} word = case width of
+formatRdata LoadFmt {width, offset} word = case width of
   Byte sign -> ext sign (truncateB shifted :: BitVector 8)
   Half sign -> ext sign (truncateB shifted :: BitVector 16)
   Word -> word
   WidthIllegal1 -> illegal
   WidthIllegal2 -> illegal
   WidthIllegal3 -> illegal
- where
-  shifted = word `shiftR` bitOffset offset
-  illegal = deepErrorX "formatRdata: illegal access width"
-  ext Signed = signExtend
-  ext Unsigned = zeroExtend
+  where
+    shifted = word `shiftR` bitOffset offset
+    illegal = deepErrorX "formatRdata: illegal access width"
+    ext Signed = signExtend
+    ext Unsigned = zeroExtend
 
 -- | A thin wrapper for unit tests.
 memUnit :: (HiddenClockResetEnable dom) => Signal dom MemUnitReq -> Signal dom MemUnitResp

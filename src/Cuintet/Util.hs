@@ -1,4 +1,4 @@
-module Cuintet.Util where
+module Cuintet.Util (orNothing, downto) where
 
 import Clash.Annotations.BitRepresentation (BitMask)
 import Clash.Prelude

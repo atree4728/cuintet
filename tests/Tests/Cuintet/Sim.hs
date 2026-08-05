@@ -1,14 +1,13 @@
 module Tests.Cuintet.Sim (memImage, runProgram, finalRegs) where
 
 import Clash.Prelude
-import qualified Prelude as P
-
 import Clash.Sized.Vector (unsafeFromList)
 import Cuintet (system)
 import Cuintet.Core (InstLog (..))
 import Cuintet.Eei (Inst, XLen)
 import Cuintet.Memory (initRamLanes)
 import Data.Maybe (catMaybes)
+import qualified Prelude as P
 
 -- | canonical NOP (@addi x0, x0, 0@) in RISC-V.
 nop :: Inst
@@ -23,5 +22,5 @@ runProgram n prog =
 
 finalRegs :: Int -> [Inst] -> Vec 32 (BitVector XLen)
 finalRegs n prog = P.foldl apply (replicate d32 0) (runProgram n prog)
- where
-  apply regs l = maybe regs (\(a, d) -> replace a d regs) l.wbReq
+  where
+    apply regs l = maybe regs (\(a, d) -> replace a d regs) l.wbReq

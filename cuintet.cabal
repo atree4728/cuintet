@@ -54,6 +54,14 @@ common common-options
   ghc-options:
     -Wall
     -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wmissing-home-modules
+    -Wpartial-fields
+    -Wredundant-constraints
+    -Wunused-packages
     -haddock
     -fplugin
     GHC.TypeLits.Extra.Solver
@@ -140,11 +148,6 @@ test-suite unittests
     Tests.Cuintet.Sim
 
   build-depends:
-    clash-prelude-hedgehog,
     cuintet,
-    hedgehog,
-    QuickCheck,
     tasty >=1.2 && <1.6,
-    tasty-hedgehog,
     tasty-hunit,
-    tasty-th,

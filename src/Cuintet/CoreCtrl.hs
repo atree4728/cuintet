@@ -1,4 +1,11 @@
-module Cuintet.CoreCtrl where
+module Cuintet.CoreCtrl (
+  InstType (..),
+  InstCtrl (..),
+  instCode,
+  isMemOp,
+  isStore,
+  isBranchOp,
+) where
 
 import Clash.Prelude
 
@@ -42,10 +49,10 @@ data InstCtrl = InstCtrl
   deriving (Generic, NFDataX)
 
 isMemOp :: InstCtrl -> Bool
-isMemOp InstCtrl{itype, isLoad} = itype == SType || isLoad
+isMemOp InstCtrl {itype, isLoad} = itype == SType || isLoad
 
 isStore :: InstCtrl -> Bool
-isStore InstCtrl{itype} = itype == SType
+isStore InstCtrl {itype} = itype == SType
 
 isBranchOp :: InstCtrl -> Bool
-isBranchOp InstCtrl{itype} = itype == BType
+isBranchOp InstCtrl {itype} = itype == BType
