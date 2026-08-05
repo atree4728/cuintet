@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module Cuintet (vDom50, system) where
+module Cuintet (vDom50, topEntity, system) where
 
 import Clash.Prelude
 import Cuintet.Core (CoreIn (..), CoreOut (..), InstLog, core)
