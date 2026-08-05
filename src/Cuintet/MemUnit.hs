@@ -9,12 +9,13 @@ The memory ignores the low 2 bits of the address, so it always returns the
 word containing the target. Sub-word loads (LB\/LH\/LBU\/LHU) select the bytes
 from that word by 'formatRdata'; sub-word stores (SB\/SH) mask off the byte
 lanes outside the access by 'storeLanes'. Accesses that straddle a word boundary
-(e.g. LH at an odd address) are rejected as 'deepErrorX'.
+(e.g. LH at an odd address) are rejected as 'deepErrorX' by 'access'.
 -}
 module Cuintet.MemUnit (
-  ByteRange (..),
+  AccessWidth (..),
   InstInfo (..),
   LoadFmt (..),
+  Sign (..),
   MemUnitReq (..),
   MemUnitResp (..),
   MemUnitState (..),
@@ -25,7 +26,7 @@ module Cuintet.MemUnit (
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), isMemOp, isStore)
-import Cuintet.Eei (Addr, ByteRange (..), DataResp, LoadFmt (..), MemBusReq (..), MemBusResp (..), MemDataBytes, StoreLanes (..), XLen, XLenBytes, bitOffset, laneMask)
+import Cuintet.Eei (AccessWidth (..), Addr, DataResp, LaneOffset, LoadFmt (..), MemBusReq (..), MemBusResp (..), MemDataBytes, Sign (..), StoreLanes (..), XLen, aligned, bitOffset, laneMask, laneOffset)
 import Cuintet.Util (orNothing)
 import Data.Maybe (isJust, isNothing)
 
@@ -76,8 +77,7 @@ memUnitStep state MemUnitReq{inst, memResp} = (memUnitState, memUnitResp)
  where
   isNewMemOp InstInfo{isNew, ctrl} = isNew && isMemOp ctrl
   memUnitState = case state of
-    Idle | Just i <- inst, isNewMemOp i, isStore i.ctrl -> WaitReady i.addr (Store $ storeLanes i.ctrl.funct3 i.addr i.wdata)
-    Idle | Just i <- inst, isNewMemOp i -> WaitReady i.addr (Load $ loadFmt i.ctrl.funct3 i.addr)
+    Idle | Just i <- inst, isNewMemOp i -> WaitReady i.addr (access i.ctrl i.addr i.wdata)
     WaitReady _ acc | memResp.ready -> WaitValid acc
     WaitValid _ | isJust memResp.rdata -> Idle
     _ -> state
@@ -100,59 +100,66 @@ memUnitStep state MemUnitReq{inst, memResp} = (memUnitState, memUnitResp)
           _ -> Nothing
       }
 
-accessRange :: BitVector 3 -> Addr -> ByteRange
-accessRange funct3 addr = case slice d1 d0 funct3 of
-  0b00 -> Byte $ numConvert offset
-  0b01 | not (offset `testBit` 0) -> Half $ numConvert $ slice d1 d1 offset
-  0b10 -> Word
-  _ -> deepErrorX "accessRange: invalid funct3"
- where
-  offset :: BitVector (CLog 2 XLenBytes)
-  offset = truncateB (pack addr)
+{- | The access an instruction requests. The width is @funct3@ read directly;
+the offset comes from the address.
 
--- | Construct a load format from @funct3@ and the access address.
-loadFmt :: BitVector 3 -> Addr -> LoadFmt
-loadFmt funct3 addr = LoadFmt{range, signed}
- where
-  signed = not (funct3 `testBit` 2)
-  range = accessRange funct3 addr
-
-{- | Construct the byte lanes to write from @funct3@ and the access address and written word.
-
-The word is shifted into place by @8 * byteOffset@ bits, and the lanes it
-occupies are given by the same offset in bytes.
+A misaligned access traps in RISC-V, but there is no trap mechanism yet, so it
+is rejected as 'deepErrorX'. An illegal @funct3@ is rejected the same way, by
+'sizeBytes' inside 'aligned'.
 -}
-storeLanes :: BitVector 3 -> Addr -> BitVector XLen -> StoreLanes MemDataBytes
-storeLanes funct3 addr word = StoreLanes $ zipWith orNothing (laneMask range) bytes
+access :: InstCtrl -> Addr -> BitVector XLen -> Access
+access ctrl addr wdata
+  | not (aligned width offset) = deepErrorX "access: misaligned access"
+  | isStore ctrl = Store (storeLanes width offset wdata)
+  | otherwise = Load LoadFmt{width, offset}
  where
-  range = accessRange funct3 addr
-  bytes = reverse $ bitCoerce $ word `shiftL` bitOffset range
+  width = unpack ctrl.funct3
+  offset = laneOffset addr
+
+{- | Construct the byte lanes to write.
+
+The word is shifted into place by @8 * offset@ bits, and the lanes it occupies
+are given by the same offset in bytes.
+-}
+storeLanes :: AccessWidth -> LaneOffset -> BitVector XLen -> StoreLanes MemDataBytes
+storeLanes width offset word = StoreLanes $ zipWith orNothing (laneMask width offset) bytes
+ where
+  bytes = reverse $ bitCoerce $ word `shiftL` bitOffset offset
 
 {- | Format loaded word according to 'LoadFmt'.
 
 >>> import Clash.Prelude
 >>> 0xdeadbeef :: BitVector 32
 0b1101_1110_1010_1101_1011_1110_1110_1111
->>> formatRdata LoadFmt{range = Byte 0, signed = True} 0xdeadbeef  -- lb
+>>> formatRdata LoadFmt{width = Byte Signed, offset = 0} 0xdeadbeef   -- lb
 0b1111_1111_1111_1111_1111_1111_1110_1111
->>> formatRdata LoadFmt{range = Byte 1, signed = False} 0xdeadbeef -- lbu
+>>> formatRdata LoadFmt{width = Byte Unsigned, offset = 1} 0xdeadbeef -- lbu
 0b0000_0000_0000_0000_0000_0000_1011_1110
->>> formatRdata LoadFmt{range = Half 1, signed = True} 0xdeadbeef  -- lh
+>>> formatRdata LoadFmt{width = Half Signed, offset = 2} 0xdeadbeef   -- lh
 0b1111_1111_1111_1111_1101_1110_1010_1101
->>> formatRdata LoadFmt{range = Half 0, signed = False} 0xdeadbeef -- lhu
+>>> formatRdata LoadFmt{width = Half Unsigned, offset = 0} 0xdeadbeef -- lhu
 0b0000_0000_0000_0000_1011_1110_1110_1111
->>> formatRdata LoadFmt{range = Word, signed = True} 0xdeadbeef    -- lw
+>>> formatRdata LoadFmt{width = Word, offset = 0} 0xdeadbeef          -- lw
 0b1101_1110_1010_1101_1011_1110_1110_1111
+
+The width is the @funct3@ field verbatim:
+
+>>> (unpack 0b001 :: AccessWidth, unpack 0b101 :: AccessWidth)  -- lh, lhu
+(Half Signed,Half Unsigned)
 -}
 formatRdata :: LoadFmt -> BitVector XLen -> BitVector XLen
-formatRdata LoadFmt{range, signed} word = case range of
-  Byte _ -> ext (truncateB shifted :: BitVector 8)
-  Half _ -> ext (truncateB shifted :: BitVector 16)
+formatRdata LoadFmt{width, offset} word = case width of
+  Byte sign -> ext sign (truncateB shifted :: BitVector 8)
+  Half sign -> ext sign (truncateB shifted :: BitVector 16)
   Word -> word
+  WidthIllegal1 -> illegal
+  WidthIllegal2 -> illegal
+  WidthIllegal3 -> illegal
  where
-  shifted = word `shiftR` bitOffset range
-  ext :: (KnownNat n, KnownNat m) => BitVector n -> BitVector (m + n)
-  ext = if signed then signExtend else zeroExtend
+  shifted = word `shiftR` bitOffset offset
+  illegal = deepErrorX "formatRdata: illegal access width"
+  ext Signed = signExtend
+  ext Unsigned = zeroExtend
 
 -- | A thin wrapper for unit tests.
 memUnit :: (HiddenClockResetEnable dom) => Signal dom MemUnitReq -> Signal dom MemUnitResp

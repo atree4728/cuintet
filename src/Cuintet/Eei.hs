@@ -1,7 +1,10 @@
 -- | RISC-V execution environment interface.
 module Cuintet.Eei where
 
+import Clash.Annotations.BitRepresentation
+import Clash.Annotations.BitRepresentation.Deriving
 import Clash.Prelude
+import Cuintet.Util (downto)
 
 -- | The length of integer registers.
 type XLen = 32
@@ -19,49 +22,92 @@ type Addr = Unsigned XLen
 
 type Inst = BitVector ILen
 
--- | The byte range an access covers, always aligned to its own size.
-data ByteRange
-  = -- | Byte i -> [(i+1)*8-1:i*8]
-    Byte (Index XLenBytes)
-  | -- | Half i -> [(i+1)*16-1:i*16]
-    Half (Index (XLenBytes `Div` 2))
-  | -- | Word   -> [31:0]
-    Word
-  deriving (Generic, NFDataX)
+-- | Whether a narrower-than-word load fills the high bits with its sign or zero.
+data Sign = Signed | Unsigned
+  deriving (Generic, NFDataX, Show)
+deriveDefaultAnnotation [t|Sign|]
+deriveBitPack [t|Sign|]
 
--- | The offset of the range, in bytes. The only place where a half word index
--- is scaled to bytes.
-byteOffset :: ByteRange -> Index XLenBytes
-byteOffset (Byte i) = i
-byteOffset (Half i) = 2 * numConvert i
-byteOffset Word = 0
+{- | The width of a memory access, laid out so that it /is/ the @funct3@ field
+of a load: @unpack funct3@ is pure wiring, and the sign comes along with it.
 
--- | The offset of the range in bits, to shift a word into or out of place.
-bitOffset :: ByteRange -> Int
-bitOffset range = 8 * numConvert (byteOffset range)
-
--- | The size of the range, in bytes.
-sizeBytes :: ByteRange -> Index (XLenBytes + 1)
-sizeBytes (Byte _) = 1
-sizeBytes (Half _) = 2
-sizeBytes Word = natToNum @XLenBytes
-
-{- | The byte lanes the range covers, the lane 0 being the least significant:
-@sizeBytes@ ones shifted up by @byteOffset@.
+Stores use the same encoding but ignore the 'Sign'; @funct3@ bit 2 is reserved
+in a store, so 'Unsigned' never reaches the bus.
 -}
-laneMask :: forall nBytes. (KnownNat nBytes) => ByteRange -> Vec nBytes Bool
-laneMask range = reverse $ bitCoerce mask
+data AccessWidth
+  = Byte Sign
+  | Half Sign
+  | Word
+  | -- | @0b011@; @LD@ in RV64I.
+    WidthIllegal1
+  | -- | @0b110@; @LWU@ in RV64I.
+    WidthIllegal2
+  | -- | @0b111@.
+    WidthIllegal3
+  deriving (Generic, NFDataX, Show)
+{-# ANN
+  module
+  ( DataReprAnn
+      $(liftQ [t|AccessWidth|])
+      3
+      [ ConstrRepr 'Byte (1 `downto` 0) 0b00 [0b100]
+      , ConstrRepr 'Half (1 `downto` 0) 0b01 [0b100]
+      , ConstrRepr 'Word (2 `downto` 0) 0b010 []
+      , ConstrRepr 'WidthIllegal1 (2 `downto` 0) 0b011 []
+      , ConstrRepr 'WidthIllegal2 (2 `downto` 0) 0b110 []
+      , ConstrRepr 'WidthIllegal3 (2 `downto` 0) 0b111 []
+      ]
+  )
+  #-}
+deriveBitPack [t|AccessWidth|]
+
+-- | The byte offset of an access within its word, the lane 0 being the least significant.
+type LaneOffset = Index XLenBytes
+
+laneOffset :: Addr -> LaneOffset
+laneOffset a = numConvert (truncateB (pack a) :: BitVector (CLog 2 XLenBytes))
+
+-- | The offset in bits, to shift a word into or out of place.
+bitOffset :: LaneOffset -> Int
+bitOffset off = 8 * numConvert off
+
+-- | The size of the access, in bytes.
+sizeBytes :: AccessWidth -> Index (XLenBytes + 1)
+sizeBytes = \case
+  Byte _ -> 1
+  Half _ -> 2
+  Word -> natToNum @XLenBytes
+  WidthIllegal1 -> illegal
+  WidthIllegal2 -> illegal
+  WidthIllegal3 -> illegal
+ where
+  illegal = deepErrorX "sizeBytes: illegal access width"
+
+{- | Whether the access is naturally aligned, i.e. contained in a single word.
+@sizeBytes - 1@ is exactly the mask of offset bits that must be zero.
+-}
+aligned :: AccessWidth -> LaneOffset -> Bool
+aligned width off = pack off .&. mask == 0
+ where
+  mask :: BitVector (CLog 2 XLenBytes)
+  mask = truncateB (pack (sizeBytes width - 1))
+
+{- | The byte lanes the access covers, the lane 0 being the least significant:
+@sizeBytes@ ones shifted up by the offset.
+-}
+laneMask :: forall nBytes. (KnownNat nBytes) => AccessWidth -> LaneOffset -> Vec nBytes Bool
+laneMask width off = reverse $ bitCoerce mask
  where
   mask, ones :: BitVector nBytes
-  mask = ones `shiftL` numConvert (byteOffset range)
-  ones = complement (complement 0 `shiftL` numConvert (sizeBytes range))
+  mask = ones `shiftL` numConvert off
+  ones = complement (complement 0 `shiftL` numConvert (sizeBytes width))
 
 -- | Data to be written, which is masked and divided into bytes.
 newtype StoreLanes nBytes = StoreLanes (Vec nBytes (Maybe (BitVector 8)))
   deriving (Generic, NFDataX)
 
 -- | Load request, which is to be sliced and extended.
-data LoadFmt = LoadFmt {range :: ByteRange, signed :: Bool}
+data LoadFmt = LoadFmt {width :: AccessWidth, offset :: LaneOffset}
   deriving (Generic, NFDataX)
 
 {- | Memory access request, carried on the bus as @Maybe (MemBusReq ...)@;
