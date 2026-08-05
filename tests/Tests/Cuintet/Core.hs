@@ -45,6 +45,19 @@ storeProg =
   , 0x02001183 -- lh x3, 0x20(x0) : x3 = 00000123
   ]
 
+jumpProg :: [Inst]
+jumpProg =
+  [ 0x0100006f --  0: jal x0, 0x10 : jump to 0x10
+  , 0xdeadbeef --  4:
+  , 0xdeadbeef --  8:
+  , 0xdeadbeef --  c:
+  , 0x01800093 -- 10: addi x1, x0, 0x18
+  , 0x00808067 -- 14: jalr x0, 8(x1) : jump to x1+8=0x20
+  , 0xdeadbeef -- 18:
+  , 0xdeadbeef -- 1c:
+  , 0xfe1ff06f -- 20: jal x0, -0x20 : jump to 0
+  ]
+
 x0Prog :: [Inst]
 x0Prog =
   [ 0x00500013 -- addi x0, x0, 5
@@ -78,4 +91,6 @@ tests =
         let regs = finalRegs 5 storeProg
         (regs !! (2 :: Int)) @?= 0x00000023
         (regs !! (3 :: Int)) @?= 0x00000123
+    , testCase "Unconditional jump" $ do
+        ((.pc) <$> runProgram 5 jumpProg) @?= [0x0, 0x10, 0x14, 0x20, 0x0]
     ]

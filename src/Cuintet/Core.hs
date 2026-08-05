@@ -12,7 +12,6 @@ import Cuintet.Fifo (FifoReq (..), FifoResp (..), fifo)
 import Cuintet.InstDecoder (instDecode)
 import Cuintet.MemUnit (InstInfo (..), MemUnitReq (..), MemUnitResp (..), MemUnitState (..), memUnitStep)
 import Cuintet.Util (orNothing)
-import Data.Function (applyWhen)
 import Data.Maybe (fromMaybe, isJust)
 
 -- | Pair of fetched instruction and its address.
@@ -148,10 +147,13 @@ coreT CoreState{..} (~CoreIn{iResp, dResp}, fifoResp) = (state', (coreOut, fifoR
   -- load が commit するとき @memuOut.rdata@ は必ず 'Just'。
   wbData
     | ctrl.isLui = imm
+    | ctrl.isJump = bitCoerce (pc + 4)
     | ctrl.isLoad = fromMaybe (deepErrorX "coreT: load committed without data") memuOut.rdata
     | otherwise = aluResult
   rdAddr = slice d11 d7 bits
   wbReq = orNothing (commit && ctrl.rwbEn && rdAddr /= 0) (rdAddr, wbData)
+
+  controlHazard = instValid && ctrl.isJump
 
   -- Instruction fetch
   -- FIFO に保留中の書き込みと今回の分の両方の空きがあるときだけ出す。
@@ -160,13 +162,20 @@ coreT CoreState{..} (~CoreIn{iResp, dResp}, fifoResp) = (state', (coreOut, fifoR
   -- メモリが受理した。arbiter は受理に必ず応答を返すので、これで @ifPc@ と
   -- @ifRequested@ が同期する。
   accepted = fifoResp.wreadyTwo && iResp.ready
+
+  -- next state
+  (ifPc', ifRequested')
+    | controlHazard = (bitCoerce $ aluResult .&. complement 1, Nothing) -- aluResult is the destination
+    | accepted = (ifPc + 4, Just ifPc)
+    | otherwise = (ifPc, ifRequested)
   ifFifoWdata'
+    | controlHazard = Nothing
     | Just (a, b) <- fetched = Just FifoEntry{addr = a, bits = b}
     -- 前クロックで書き込み済み。フェッチは @wreadyTwo@ のときしか出さないので、
     -- 保留が残っていることはなく Nothing でよい。
     | fifoResp.wready = Nothing
     | otherwise = ifFifoWdata -- pending
-  fifoReq = FifoReq{wdata = ifFifoWdata, rready}
+  fifoReq = FifoReq{wdata = ifFifoWdata, rready, flush = controlHazard}
 
   coreOut =
     CoreOut
@@ -177,8 +186,8 @@ coreT CoreState{..} (~CoreIn{iResp, dResp}, fifoResp) = (state', (coreOut, fifoR
 
   state' =
     CoreState
-      { ifPc = applyWhen accepted (+ 4) ifPc
-      , ifRequested = if accepted then Just ifPc else ifRequested
+      { ifPc = ifPc'
+      , ifRequested = ifRequested'
       , ifFifoWdata = ifFifoWdata'
       , isNew = not instValid || rready
       , regFile = maybe regFile (\(a, d) -> replace a d regFile) wbReq

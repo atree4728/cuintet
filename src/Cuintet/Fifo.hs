@@ -12,6 +12,8 @@ data FifoReq dat = FifoReq
   -- ^ Data to write.
   , rready :: Bool
   -- ^ Whether to consume @rdata@.
+  , flush :: Bool
+  -- ^ Whether to flush the FIFO.
   }
   deriving (Generic, NFDataX, Show)
 
@@ -48,7 +50,7 @@ Unlike 'fifoMany', it accepts a write even when full if the stored element is co
 
 >>> import Prelude
 >>> import Clash.Prelude
->>> reqs = (\(wdata, rready) -> FifoReq {wdata, rready}) <$> [(Just 1, True), (Just 2, False), (Just 3, True), (Just 4, False), (Just 5, False), (Just 6, True), (Just 7, True)]
+>>> reqs = (\(wdata, rready) -> FifoReq {wdata, rready, flush = False}) <$> [(Just 1, True), (Just 2, False), (Just 3, True), (Just 4, False), (Just 5, False), (Just 6, True), (Just 7, True)]
 >>> (.rdata) <$> simulateN @System (Prelude.length reqs) (fifo d1) reqs
 [Nothing,Just 1,Just 1,Just 3,Just 3,Just 3,Just 6]
 -}
@@ -59,7 +61,9 @@ fifoOne ::
   Signal dom (FifoResp dat)
 fifoOne = mealy step Nothing
  where
-  step buf FifoReq{..} = (buf', FifoResp{wready, wreadyTwo, rdata})
+  step buf FifoReq{..}
+    | flush = (Nothing, FifoResp{wready = False, wreadyTwo = False, rdata = Nothing})
+    | otherwise = (buf', FifoResp{wready, wreadyTwo, rdata})
    where
     -- accept write when the buffer is either already empty or going to be emptied by read.
     wready = isNothing buf || rready
@@ -85,8 +89,10 @@ fifoOutput FifoState{hd, tl, buf} = FifoResp{wready, wreadyTwo, rdata}
   wreadyTwo = wready && tl + 2 /= hd
   rdata = orNothing (hd /= tl) (buf !! hd)
 
-fifoUpdate :: (KnownNat width) => FifoState width dat -> FifoReq dat -> FifoState width dat
-fifoUpdate s@FifoState{hd, tl, buf} FifoReq{wdata, rready} = FifoState{hd = hd', tl = tl', buf = buf'}
+fifoUpdate :: (KnownNat width, NFDataX dat) => FifoState width dat -> FifoReq dat -> FifoState width dat
+fifoUpdate s@FifoState{hd, tl, buf} FifoReq{wdata, rready, flush}
+  | flush = FifoState{hd = 0, tl = 0, buf = deepErrorX "fifoMany: flushed"}
+  | otherwise = FifoState{hd = hd', tl = tl', buf = buf'}
  where
   FifoResp{wready, rdata} = fifoOutput s
   hd' = applyWhen (rready && isJust rdata) (+ 1) hd
@@ -101,7 +107,7 @@ One of the 2^@width@ slots is kept unused to distinguish full from empty.
 
 >>> import Prelude
 >>> import Clash.Prelude
->>> reqs = (\(wdata, rready) -> FifoReq {wdata, rready}) <$> [(Just 1, True), (Just 2, False), (Just 3, True), (Just 4, False), (Just 5, False), (Just 6, True), (Just 7, True)]
+>>> reqs = (\(wdata, rready) -> FifoReq {wdata, rready, flush = False}) <$> [(Just 1, True), (Just 2, False), (Just 3, True), (Just 4, False), (Just 5, False), (Just 6, True), (Just 7, True)]
 >>> (.rdata) <$> simulateN @System (Prelude.length reqs) (fifo d3) reqs
 [Nothing,Just 1,Just 1,Just 2,Just 2,Just 2,Just 3]
 -}
