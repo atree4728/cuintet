@@ -91,6 +91,7 @@ library
     Cuintet.BrUnit
     Cuintet.Core
     Cuintet.CoreCtrl
+    Cuintet.CsrUnit
     Cuintet.Debug
     Cuintet.Eei
     Cuintet.Fifo

@@ -30,9 +30,10 @@ instDecode bits = (ctrl op, imm op)
     imm BRANCH = immB
     imm LOAD = immI
     imm STORE = immS
+    imm SYSTEM = immI -- use [11:0]
     imm _ = deepErrorX "imm: opcode carries no immediate"
 
-    instCtrl itype rwbEn isLui isAluOp isJump isLoad =
+    instCtrl itype rwbEn isLui isAluOp isJump isLoad isCsr =
       InstCtrl
         { itype
         , rwbEn
@@ -40,20 +41,22 @@ instDecode bits = (ctrl op, imm op)
         , isAluOp
         , isJump
         , isLoad
+        , isCsr
         , funct3 = slice d14 d12 bits
         , funct7 = slice d31 d25 bits
         }
 
     ctrl :: Opcode -> InstCtrl
 {- FOURMOLU_DISABLE -}
-    ctrl LUI    = instCtrl UType  True  True False False False
-    ctrl AUIPC  = instCtrl UType  True False False False False
-    ctrl JAL    = instCtrl JType  True False False  True False
-    ctrl JALR   = instCtrl IType  True False False  True False
-    ctrl BRANCH = instCtrl BType False False False False False
-    ctrl LOAD   = instCtrl IType  True False False False  True
-    ctrl STORE  = instCtrl SType False False False False False
-    ctrl OP     = instCtrl RType  True False  True False False
-    ctrl OP_IMM = instCtrl IType  True False  True False False
+    ctrl LUI    = instCtrl UType  True  True False False False False
+    ctrl AUIPC  = instCtrl UType  True False False False False False
+    ctrl JAL    = instCtrl JType  True False False  True False False
+    ctrl JALR   = instCtrl IType  True False False  True False False
+    ctrl BRANCH = instCtrl BType False False False False False False
+    ctrl LOAD   = instCtrl IType  True False False False  True False
+    ctrl STORE  = instCtrl SType False False False False False False
+    ctrl OP     = instCtrl RType  True False  True False False False
+    ctrl OP_IMM = instCtrl IType  True False  True False False False
+    ctrl SYSTEM = instCtrl IType  True False False False False  True
     ctrl _      = deepErrorX "ctrl: unknown opcode"
 {- FOURMOLU_ENABLE -}

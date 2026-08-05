@@ -41,6 +41,8 @@ data InstCtrl = InstCtrl
   -- ^ Whether to be jump instruction.
   , isLoad :: Bool
   -- ^ Whether to be load instruction.
+  , isCsr :: Bool
+  -- ^ Whether to be CSR instruction.
   , funct3 :: BitVector 3
   -- ^ @funct3@ field.
   , funct7 :: BitVector 7

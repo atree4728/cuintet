@@ -8,6 +8,7 @@ import Clash.Prelude
 import Cuintet.Alu (alu)
 import Cuintet.BrUnit (brUnit)
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..), isBranchOp)
+import Cuintet.CsrUnit (CsrAddr (..), CsrFile, CsrReq (..), CsrResp (..), csrUnitStep, initCsrFile)
 import Cuintet.Eei (
   Addr,
   DataReq,
@@ -64,6 +65,7 @@ data InstLog = InstLog
   , aluResult :: BitVector XLen
   , branchTaken :: Maybe Bool
   , wbReq :: Maybe (BitVector 5, BitVector XLen)
+  , csrRdata :: Maybe (BitVector XLen)
   }
   deriving (Generic, NFDataX)
 
@@ -79,6 +81,8 @@ data CoreState = CoreState
   -- ^ Whether the instruction at the FIFO's head is newly presented this cycle.
   , regFile :: Vec 32 (BitVector XLen)
   -- ^ Register file.
+  , csrFile :: CsrFile
+  -- ^ CSR file.
   , memu :: MemUnitState
   -- ^ Memory unit's FSM.
   }
@@ -92,6 +96,7 @@ initState =
     , ifFifoWdata = Nothing
     , isNew = True
     , regFile = replicate d32 0
+    , csrFile = initCsrFile
     , memu = Idle
     }
 
@@ -143,6 +148,18 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, fifoResp) = (state', (coreOut, fif
     (op1, op2) = operands ctrl imm rs1Data rs2Data pc
     aluResult = alu ctrl op1 op2
 
+    -- CSR
+    (csrFile', CsrResp {rdata = csrRdata}) =
+      csrUnitStep csrFile $
+        orNothing
+          (instValid && ctrl.isCsr)
+          CsrReq
+            { csrAddr = CsrAddr (slice d11 d0 imm)
+            , csrOp = unpack ctrl.funct3
+            , rs1Addr
+            , rs1Data
+            }
+
     (memu', memuOut) =
       memUnitStep
         memu
@@ -161,6 +178,7 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, fifoResp) = (state', (coreOut, fif
       | ctrl.isLui = imm
       | ctrl.isJump = bitCoerce (pc + 4)
       | ctrl.isLoad = fromMaybe (deepErrorX "coreT: load committed without data") memuOut.rdata
+      | ctrl.isCsr = csrRdata
       | otherwise = aluResult
     rdAddr = slice d11 d7 bits
     wbReq = orNothing (commit && ctrl.rwbEn && rdAddr /= 0) (rdAddr, wbData)
@@ -195,7 +213,25 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, fifoResp) = (state', (coreOut, fif
       CoreOut
         { iReq = orNothing fifoResp.wreadyTwo MemBusReq {addr = ifPc, wdata = Nothing}
         , dReq = memuOut.memReq
-        , instLog = orNothing commit InstLog {pc, inst = bits, ctrl, imm, rs1Addr, rs2Addr, rs1Data, rs2Data, op1, op2, aluResult, wbReq, branchTaken = Nothing}
+        , instLog =
+            orNothing
+              commit
+              InstLog
+                { pc
+                , inst = bits
+                , ctrl
+                , imm
+                , rs1Addr
+                , rs2Addr
+                , rs1Data
+                , rs2Data
+                , op1
+                , op2
+                , aluResult
+                , branchTaken = orNothing (instValid && isBranchOp ctrl) branchTaken
+                , wbReq
+                , csrRdata = orNothing (instValid && ctrl.isCsr) csrRdata
+                }
         }
 
     state' =
@@ -205,5 +241,6 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, fifoResp) = (state', (coreOut, fif
         , ifFifoWdata = ifFifoWdata'
         , isNew = not instValid || rready
         , regFile = maybe regFile (\(a, d) -> replace a d regFile) wbReq
+        , csrFile = csrFile'
         , memu = memu'
         }

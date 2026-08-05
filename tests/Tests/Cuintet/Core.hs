@@ -84,6 +84,12 @@ x0Prog =
   , 0x000000b3 -- add  x1, x0, x0
   ]
 
+csrProg :: [Inst]
+csrProg =
+  [ 0x305bd0f3 -- 0: csrrwi x1, mtvec, 0b10111
+  , 0x30502173 -- 4: csrrs  x2, mtvec, x0 -- 0b10100 (ignore mode bits)
+  ]
+
 tests :: TestTree
 tests =
   testGroup
@@ -121,4 +127,7 @@ tests =
         ((.pc) <$> runProgram 5 jumpProg) @?= [0x0, 0x10, 0x14, 0x20, 0x0]
     , testCase "Conditional jump" $ do
         ((.pc) <$> runProgram 5 branchProg) @?= [0x0, 0x04, 0x08, 0x18, 0x18]
+    , testCase "Zicsr" $ do
+        let regs = finalRegs 2 csrProg
+        (regs !! (2 :: Int)) @?= 0b10100
     ]

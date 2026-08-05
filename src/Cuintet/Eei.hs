@@ -41,6 +41,8 @@ module Cuintet.Eei (
   ),
   IOp (..),
   ShiftRight (..),
+  CsrType (..),
+  CsrOp (..),
 ) where
 
 import Clash.Annotations.BitRepresentation
@@ -244,3 +246,43 @@ data ShiftRight = Logical | Arithmetic
 
 deriveDefaultAnnotation [t|ShiftRight|]
 deriveBitPack [t|ShiftRight|]
+
+data CsrType
+  = ReadWrite
+  | ReadSet
+  | ReadClear
+  | CSRIllegal
+  deriving (Generic, NFDataX)
+
+{-# ANN
+  module
+  ( DataReprAnn
+      $(liftQ [t|CsrType|])
+      2
+      [ ConstrRepr 'ReadWrite (1 `downto` 0) 0b01 []
+      , ConstrRepr 'ReadSet (1 `downto` 0) 0b10 []
+      , ConstrRepr 'ReadClear (1 `downto` 0) 0b11 []
+      , ConstrRepr 'CSRIllegal (1 `downto` 0) 0b00 []
+      ]
+  )
+  #-}
+
+deriveBitPack [t|CsrType|]
+
+data CsrOp
+  = CsrReg CsrType
+  | CsrImm CsrType
+  deriving (Generic, NFDataX)
+
+{-# ANN
+  module
+  ( DataReprAnn
+      $(liftQ [t|CsrOp|])
+      3
+      [ ConstrRepr 'CsrReg (2 `downto` 2) 0b0 [0b011]
+      , ConstrRepr 'CsrImm (2 `downto` 2) 0b1 [0b011]
+      ]
+  )
+  #-}
+
+deriveBitPack [t|CsrOp|]
