@@ -73,9 +73,9 @@ sltProg =
   [ 0xfff00093 -- addi  x1, x0, -1
   , 0x00100113 -- addi  x2, x0, 1
   , 0x0020a1b3 -- slt   x3, x1, x2 : -1 < 1          -> 1
-  , 0x0020b233 -- sltu  x4, x1, x2 : ffffffff < 1    -> 0
-  , 0x0000a293 -- slti  x5, x1, 0  : -1 < 0          -> 1
-  , 0x0000b313 -- sltiu x6, x1, 0  : ffffffff < 0    -> 0
+  , 0x0020b233 -- sltu  x4, x1, x2 : ffffffffffffffff < 1 -> 0
+  , 0x0000a293 -- slti  x5, x1, 0  : -1 < 0               -> 1
+  , 0x0000b313 -- sltiu x6, x1, 0  : ffffffffffffffff < 0 -> 0
   ]
 
 x0Prog :: [Inst]

@@ -5,11 +5,12 @@ computed by the ALU to the memory bus.
 An access takes at least 3 cycles ('Idle' → 'WaitReady' → 'WaitValid'),
 during which the core must stall (no write back, no instruction fetch).
 
-The memory ignores the low 2 bits of the address, so it always returns the
-word containing the target. Sub-word loads (LB\/LH\/LBU\/LHU) select the bytes
-from that word by 'formatRdata'; sub-word stores (SB\/SH) mask off the byte
-lanes outside the access by 'storeLanes'. Accesses that straddle a word boundary
-(e.g. LH at an odd address) are rejected as 'deepErrorX' by 'access'.
+The memory is addressed in bus words of 'MemDataBytes' bytes and ignores the
+offset within one, so it always returns the bus word containing the target.
+Narrower loads (LB\/LH\/LW and their unsigned forms) select the bytes from that
+word by 'formatRdata'; narrower stores (SB\/SH\/SW) mask off the byte lanes
+outside the access by 'storeLanes'. Accesses that are not naturally aligned are
+rejected as 'deepErrorX' by 'access', so one never straddles two bus words.
 -}
 module Cuintet.MemUnit (
   AccessWidth (..),
@@ -139,7 +140,7 @@ storeLanes width offset word = StoreLanes $ zipWith orNothing (laneMask width of
 0b1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1101_1110_1010_1101
 >>> formatRdata LoadFmt{width = Half Unsigned, offset = 0} 0xdeadbeef -- lhu
 0b0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_1011_1110_1110_1111
->>> formatRdata LoadFmt{width = Word Signed, offset = 0} 0xdeadbeef          -- lw
+>>> formatRdata LoadFmt{width = Word Signed, offset = 0} 0xdeadbeef   -- lw
 0b1111_1111_1111_1111_1111_1111_1111_1111_1101_1110_1010_1101_1011_1110_1110_1111
 
 The width is the @funct3@ field verbatim:

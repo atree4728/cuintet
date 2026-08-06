@@ -50,7 +50,7 @@ type Addr = Unsigned XLen
 
 type Inst = BitVector ILen
 
--- | Whether a narrower-than-word load fills the high bits with its sign or zero.
+-- | Whether a narrower-than-register load fills the high bits with its sign or zero.
 data Sign = Signed | Unsigned
   deriving (Generic, NFDataX, Show)
 
@@ -162,7 +162,7 @@ type MemReq = MemBusReq MemDataBytes
 
 type MemResp = MemBusResp MemDataBytes
 
-{- | The @opcode@ field. RV32I names only a handful of the 128 patterns, so this
+{- | The @opcode@ field. RV64I names only a handful of the 128 patterns, so this
 is the field itself with names attached rather than a sum type: @unpack@ is pure
 wiring, and one declaration serves as both the encoder and the decoder. Matching
 on it needs a catch-all for the patterns left unnamed.

@@ -24,8 +24,8 @@ pattern MTVEC = CsrAddr 0x305
 pattern MEPC = CsrAddr 0x341
 pattern MCAUSE = CsrAddr 0x342
 
-{- | The reason a trap was taken. RV32I names no exception code above 15, so the
-code is kept narrow and widened only where @mcause@ is read.
+{- | The reason a trap was taken. No exception code in use here goes above 15,
+so the code is kept narrow and widened only where @mcause@ is read.
 -}
 data MCause
   = MCause

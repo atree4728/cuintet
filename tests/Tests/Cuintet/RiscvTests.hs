@@ -25,8 +25,8 @@ import Tests.Cuintet.Sim (packInsts)
 import Text.Printf (printf)
 import Prelude qualified as P
 
-{- | Words of memory the core is given.  The images are linked at
-@0x80000000@, which 'Cuintet.Eei.toWordAddr' truncates to word zero, so an
+{- | Bus words of memory the core is given.  The images are linked at
+@0x80000000@, which 'Cuintet.Memory.memory' truncates to word zero, so an
 image loaded at offset zero is addressed correctly by both @lui@/@addi@ and
 @auipc@.  The largest of them is under a thousand words.
 -}

@@ -136,7 +136,7 @@ initState =
     , ifRequested = Nothing
     , ifFifoWdata = Nothing
     , isNew = True
-    , regFile = replicate d32 0
+    , regFile = zeroBits :> replicate d31 (deepErrorX "register uninitialized")
     , csrFile = initCsrFile
     , memUnitState = Idle
     }
