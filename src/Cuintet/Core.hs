@@ -150,7 +150,7 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, fifoResp) = (state', (coreOut, fif
     aluResult = alu ctrl op1 op2
 
     -- CSR
-    (csrFile', csrResp) = csrUnitStep csrFile csrReq
+    (csrFile', csrResp) = maybe (csrFile, Nothing) (fmap Just . csrUnitStep csrFile) csrReq
     csrReq
       | not instValid = Nothing
       | Just (SysCsr csrOp) <- ctrl.systemOp =
@@ -158,9 +158,8 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, fifoResp) = (state', (coreOut, fif
       | Just SysEcall <- ctrl.systemOp = Just $ Trap CsrTrap {pc, mcause = ENVIRONMENT_CALL}
       | Just SysMret <- ctrl.systemOp = Just Mret
       | otherwise = Nothing
-    isCsrAccess
-      | Just (SysCsr _) <- ctrl.systemOp = True
-      | otherwise = False
+    csrRdata = case csrResp of Just (Accessed v) -> Just v; _ -> Nothing
+    csrRedirect = case csrResp of Just (Redirect a) -> Just a; _ -> Nothing
 
     (memu', memuOut) =
       memUnitStep
@@ -180,13 +179,13 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, fifoResp) = (state', (coreOut, fif
       | ctrl.isLui = imm
       | ctrl.isJump = bitCoerce (pc + 4)
       | ctrl.isLoad = fromMaybe (deepErrorX "coreT: load committed without data") memuOut.rdata
-      | isCsrAccess = csrResp.rdata
+      | Just rdata <- csrRdata = rdata
       | otherwise = aluResult
     rdAddr = slice d11 d7 bits
     wbReq = orNothing (commit && ctrl.rwbEn && rdAddr /= 0) (rdAddr, wbData)
 
     branchTaken = brUnit ctrl.funct3 op1 op2
-    controlHazard = instValid && (isJust csrResp.redirect || ctrl.isJump || isBranchOp ctrl && branchTaken)
+    controlHazard = instValid && (isJust csrRedirect || ctrl.isJump || isBranchOp ctrl && branchTaken)
 
     -- Instruction fetch
     -- FIFO に保留中の書き込みと今回の分の両方の空きがあるときだけ出す。
@@ -198,7 +197,7 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, fifoResp) = (state', (coreOut, fif
 
     -- next state
     (ifPc', ifRequested')
-      | controlHazard, Just redirect <- csrResp.redirect = (redirect, Nothing)
+      | controlHazard, Just redirect <- csrRedirect = (redirect, Nothing)
       | controlHazard && ctrl.isJump = (bitCoerce $ aluResult .&. complement 1, Nothing) -- aluResult is the destination
       | controlHazard && isBranchOp ctrl = (pc + numConvert imm, Nothing)
       | accepted = (ifPc + 4, Just ifPc)
@@ -233,7 +232,7 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, fifoResp) = (state', (coreOut, fif
                 , aluResult
                 , branchTaken = orNothing (instValid && isBranchOp ctrl) branchTaken
                 , wbReq
-                , csrRdata = orNothing (instValid && isCsrAccess) csrResp.rdata
+                , csrRdata
                 }
         }
 

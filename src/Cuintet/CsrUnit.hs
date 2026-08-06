@@ -9,7 +9,6 @@ module Cuintet.CsrUnit (
   CsrFile,
   initCsrFile,
   csrUnitStep,
-  csrUnit,
 ) where
 
 import Clash.Prelude
@@ -77,16 +76,12 @@ data CsrReq
   | Mret
   deriving (Generic, NFDataX)
 
-data CsrResp = CsrResp
-  { rdata :: BitVector XLen
-  -- ^ Meaningful only in response to a 'CsrAccess'.
-  , redirect :: Maybe Addr
-  -- ^ Where to resume
-  }
+data CsrResp
+  = -- | for CsrAccess
+    Accessed (BitVector XLen)
+  | -- | for trap or mret
+    Redirect Addr
   deriving (Generic, NFDataX)
-
-noResp :: CsrResp
-noResp = CsrResp {rdata = deepErrorX "csrUnitStep: no CSR was read", redirect = Nothing}
 
 csrWrite :: CsrType -> BitVector XLen -> Maybe (BitVector XLen) -> BitVector XLen
 csrWrite ReadWrite oldValue newValueM = fromMaybe oldValue newValueM
@@ -94,25 +89,23 @@ csrWrite ReadSet oldValue newValueM = maybe oldValue (oldValue .|.) newValueM
 csrWrite ReadClear oldValue newValueM = maybe oldValue ((oldValue .&.) . complement) newValueM
 csrWrite CSRIllegal _ _ = deepErrorX "csrWrite: illegal System instruction"
 
-csrUnitStep :: CsrFile -> Maybe CsrReq -> (CsrFile, CsrResp)
-csrUnitStep file Nothing = (file, noResp)
-csrUnitStep file (Just (Trap CsrTrap {..})) =
+csrUnitStep :: CsrFile -> CsrReq -> (CsrFile, CsrResp)
+csrUnitStep file (Trap CsrTrap {..}) =
   ( file {mepcAligned = slice d31 d2 (pack pc), mcause}
-  , noResp {redirect = Just (bitCoerce (file.mtvecBase ++# (0 :: BitVector 2)))}
+  , Redirect $ bitCoerce $ file.mtvecBase ++# (0 :: BitVector 2)
   )
-csrUnitStep file (Just Mret) = (file, noResp {redirect = Just (bitCoerce (file.mepcAligned ++# (0 :: BitVector 2)))})
-csrUnitStep file (Just (Access CsrAccess {..}))
+csrUnitStep file Mret = (file, Redirect $ bitCoerce $ file.mepcAligned ++# (0 :: BitVector 2))
+csrUnitStep file (Access CsrAccess {..})
   | CSRIllegal <- csrType = deepErrorX "csrUnitStep: illegal System instruction"
   | MTVEC <- csrAddr =
       let old = file.mtvecBase ++# (0 :: BitVector 2)
-       in (file {mtvecBase = slice d31 d2 (csrWrite csrType old wdata)}, readResp old)
+       in (file {mtvecBase = slice d31 d2 (csrWrite csrType old wdata)}, Accessed old)
   | MEPC <- csrAddr =
       let old = file.mepcAligned ++# (0 :: BitVector 2)
-       in (file {mepcAligned = slice d31 d2 (csrWrite csrType old wdata)}, readResp old)
-  | MCAUSE <- csrAddr = (file, readResp (mcauseValue file.mcause))
+       in (file {mepcAligned = slice d31 d2 (csrWrite csrType old wdata)}, Accessed old)
+  | MCAUSE <- csrAddr = (file, Accessed (mcauseValue file.mcause))
   | otherwise = deepErrorX "csrUnitStep: unimplemented CSR instruction"
   where
-    readResp old = noResp {rdata = old}
     (wvalue, csrType) = case csrOp of
       CsrReg t -> (rs1Data, t)
       CsrImm t -> (zeroExtend rs1Addr, t)
@@ -123,6 +116,3 @@ csrUnitStep file (Just (Access CsrAccess {..}))
 
 initCsrFile :: CsrFile
 initCsrFile = CsrFile {mtvecBase = 0, mepcAligned = 0, mcause = MCause False 0}
-
-csrUnit :: (HiddenClockResetEnable dom) => Signal dom (Maybe CsrReq) -> Signal dom CsrResp
-csrUnit = mealy csrUnitStep initCsrFile
