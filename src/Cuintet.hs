@@ -4,16 +4,18 @@ module Cuintet (vDom50, topEntity, system) where
 
 import Clash.Prelude
 import Cuintet.Core (CoreIn (..), CoreOut (..), InstLog, core)
-import Cuintet.Eei (MemDataBytes, WordAddrWidth)
+import Cuintet.Eei (MemDataBytes)
 import Cuintet.MemArbiter (MemArbiterReq (..), MemArbiterResp (..), memArbiter)
 import Cuintet.Memory (RamLane, blockRamLanes, memory)
 
 createDomain vSystem {vName = "Dom50", vPeriod = hzToPeriod 50e6}
 
 system ::
-  (HiddenClockResetEnable dom) =>
+  ( HiddenClockResetEnable dom
+  , KnownNat ramAddrWidth
+  ) =>
   -- | RAM lane for each byte of the word
-  Vec MemDataBytes (RamLane dom WordAddrWidth) ->
+  Vec MemDataBytes (RamLane dom ramAddrWidth) ->
   Signal dom (Maybe InstLog)
 system lanes = (.instLog) <$> coreOut
   where
@@ -33,7 +35,7 @@ topEntity ::
   Reset Dom50 ->
   Enable Dom50 ->
   Signal Dom50 (Maybe InstLog)
-topEntity = exposeClockResetEnable $ system (blockRamLanes (SNat @(2 ^ WordAddrWidth)))
+topEntity = exposeClockResetEnable $ system (blockRamLanes d19) -- BRAM size = 2^19 * 8 bytes = 4 MiB
 {-# ANN
   topEntity
   ( Synthesize

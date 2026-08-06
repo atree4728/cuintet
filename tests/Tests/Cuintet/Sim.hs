@@ -1,4 +1,4 @@
-module Tests.Cuintet.Sim (memImage, runProgram, finalRegs) where
+module Tests.Cuintet.Sim (memImage, runProgram, finalRegs, packInsts) where
 
 import Clash.Prelude
 import Clash.Sized.Vector (unsafeFromList)
@@ -7,14 +7,19 @@ import Cuintet.Core (InstLog (..))
 import Cuintet.Eei (Inst, XLen)
 import Cuintet.Memory (initRamLanes)
 import Data.Maybe (catMaybes)
-import qualified Prelude as P
+import Prelude qualified as P
 
 -- | canonical NOP (@addi x0, x0, 0@) in RISC-V.
 nop :: Inst
 nop = 0x00000013
 
-memImage :: [Inst] -> Vec 256 Inst
-memImage prog = unsafeFromList (P.take 256 (prog P.++ P.repeat nop))
+packInsts :: [Inst] -> [BitVector XLen]
+packInsts [] = []
+packInsts [_] = error "packInsts: odd number of instructions"
+packInsts (l : h : rest) = h ++# l : packInsts rest
+
+memImage :: [Inst] -> Vec 128 (BitVector XLen)
+memImage prog = unsafeFromList (packInsts $ P.take 256 (prog P.++ P.repeat nop))
 
 runProgram :: Int -> [Inst] -> [InstLog]
 runProgram n prog =

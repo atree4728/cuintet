@@ -26,7 +26,7 @@ module Cuintet.MemUnit (
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), isMemOp, isStore)
-import Cuintet.Eei (AccessWidth (..), Addr, DataResp, LaneOffset, LoadFmt (..), MemBusReq (..), MemBusResp (..), MemDataBytes, Sign (..), StoreLanes (..), XLen, aligned, bitOffset, laneMask, laneOffset)
+import Cuintet.Eei (AccessWidth (..), Addr, LaneOffset, LoadFmt (..), MemBusReq (..), MemBusResp (..), MemDataBytes, MemReq, MemResp, Sign (..), StoreLanes (..), XLen, aligned, bitOffset, laneMask, laneOffset)
 import Cuintet.Util (orNothing)
 import Data.Maybe (isJust, isNothing)
 
@@ -45,7 +45,7 @@ data InstInfo = InstInfo
 data MemUnitReq = MemUnitReq
   { inst :: Maybe InstInfo
   -- ^ The instruction being executed, if any.
-  , memResp :: DataResp
+  , memResp :: MemResp
   }
   deriving (Generic, NFDataX)
 
@@ -53,7 +53,7 @@ data MemUnitResp = MemUnitResp
   { rdata :: Maybe (BitVector XLen)
   , stall :: Bool
   -- ^ Whether the core must stall for an access in flight
-  , memReq :: Maybe (MemBusReq MemDataBytes XLen)
+  , memReq :: Maybe MemReq
   }
   deriving (Generic, NFDataX)
 
@@ -77,7 +77,7 @@ memUnitStep state MemUnitReq {inst, memResp} = (memUnitState, memUnitResp)
   where
     isNewMemOp InstInfo {isNew, ctrl} = isNew && isMemOp ctrl
     memUnitState = case state of
-      Idle | Just i <- inst, isNewMemOp i -> WaitReady i.addr (access i.ctrl i.addr (truncateB i.wdata)) -- for now
+      Idle | Just i <- inst, isNewMemOp i -> WaitReady i.addr (access i.ctrl i.addr i.wdata)
       WaitReady _ acc | memResp.ready -> WaitValid acc
       WaitValid _ | isJust memResp.rdata -> Idle
       _ -> state
@@ -139,7 +139,7 @@ storeLanes width offset word = StoreLanes $ zipWith orNothing (laneMask width of
 0b1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1101_1110_1010_1101
 >>> formatRdata LoadFmt{width = Half Unsigned, offset = 0} 0xdeadbeef -- lhu
 0b0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_1011_1110_1110_1111
->>> formatRdata LoadFmt{width = Word, offset = 0} 0xdeadbeef          -- lw
+>>> formatRdata LoadFmt{width = Word Signed, offset = 0} 0xdeadbeef          -- lw
 0b1111_1111_1111_1111_1111_1111_1111_1111_1101_1110_1010_1101_1011_1110_1110_1111
 
 The width is the @funct3@ field verbatim:
@@ -148,14 +148,14 @@ The width is the @funct3@ field verbatim:
 (Half Signed,Half Unsigned)
 -}
 formatRdata :: LoadFmt -> BitVector (MemDataBytes * 8) -> BitVector XLen
-formatRdata LoadFmt {width, offset} word = case width of
+formatRdata LoadFmt {width, offset} busWord = case width of
   Byte sign -> ext sign (truncateB shifted :: BitVector 8)
   Half sign -> ext sign (truncateB shifted :: BitVector 16)
-  Word sign -> ext sign word
-  DoubleWord -> deepErrorX "formatRdata: unimplemented"
+  Word sign -> ext sign (truncateB shifted :: BitVector 32)
+  DoubleWord -> busWord
   WidthIllegal -> deepErrorX "formatRdata: illegal access width"
   where
-    shifted = word `shiftR` bitOffset offset
+    shifted = busWord `shiftR` bitOffset offset
     ext Signed = signExtend
     ext Unsigned = zeroExtend
 

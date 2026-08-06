@@ -6,14 +6,9 @@ module Cuintet.MemArbiter (Grant (..), MemArbiterReq (..), MemArbiterResp (..), 
 
 import Clash.Prelude
 import Cuintet.Eei (
-  DataReq,
-  DataResp,
-  InstReq,
-  InstResp,
-  MemBusReq (MemBusReq, addr, wdata),
   MemBusResp (MemBusResp, rdata, ready),
   MemReq,
-  toWordAddr,
+  MemResp,
  )
 import Data.Maybe (isNothing)
 
@@ -22,11 +17,11 @@ data Grant = ToInst | ToData
   deriving (Generic, NFDataX, Eq, Show)
 
 data MemArbiterReq = MemArbiterReq
-  { iReq :: Maybe InstReq
+  { iReq :: Maybe MemReq
   -- ^ Instruction fetch request.
-  , dReq :: Maybe DataReq
+  , dReq :: Maybe MemReq
   -- ^ Load\/store request.
-  , memResp :: DataResp
+  , memResp :: MemResp
   -- ^ Response from the memory.
   }
   deriving (Generic, NFDataX)
@@ -34,8 +29,8 @@ data MemArbiterReq = MemArbiterReq
 data MemArbiterResp = MemArbiterResp
   { memReq :: Maybe MemReq
   -- ^ Request to send to the memory.
-  , iResp :: InstResp
-  , dResp :: DataResp
+  , iResp :: MemResp
+  , dResp :: MemResp
   }
   deriving (Generic, NFDataX)
 
@@ -57,8 +52,7 @@ memArbiter = mealy step Nothing
     step grant MemArbiterReq {iReq, dReq, memResp = MemBusResp {ready, rdata}} =
       (grant', MemArbiterResp {memReq, iResp, dResp})
       where
-        toMemReq MemBusReq {addr, wdata} = MemBusReq {addr = toWordAddr addr, wdata}
-        memReq = (toMemReq <$> dReq) <|> (toMemReq <$> iReq)
+        memReq = dReq <|> iReq
 
         grant'
           | ready = (ToData <$ dReq) <|> (ToInst <$ iReq)

@@ -52,15 +52,14 @@ import Cuintet.CoreCtrl (InstCtrl (..), InstType (..), isBranchOp)
 import Cuintet.CsrUnit (CsrAccess (..), CsrAddr (..), CsrFile, CsrReq (..), CsrResp (..), CsrTrap (..), csrUnitStep, initCsrFile, pattern ENVIRONMENT_CALL)
 import Cuintet.Eei (
   Addr,
-  DataReq,
-  DataResp,
   Inst,
-  InstReq,
-  InstResp,
   MemBusReq (MemBusReq, addr, wdata),
   MemBusResp (rdata, ready),
+  MemReq,
+  MemResp,
   SystemOp (..),
   XLen,
+  instAt,
  )
 import Cuintet.Fifo (FifoReq (..), FifoResp (..), fifo)
 import Cuintet.InstDecoder (instDecode)
@@ -78,16 +77,16 @@ data FifoEntry = FifoEntry
   deriving (Generic, NFDataX)
 
 data CoreIn = CoreIn
-  { iResp :: InstResp
+  { iResp :: MemResp
   -- ^ Response to the instruction fetch request.
-  , dResp :: DataResp
+  , dResp :: MemResp
   -- ^ Response to the load/store request.
   }
 
 data CoreOut = CoreOut
-  { iReq :: Maybe InstReq
+  { iReq :: Maybe MemReq
   -- ^ Instruction fetch request.
-  , dReq :: Maybe DataReq
+  , dReq :: Maybe MemReq
   -- ^ Load/store request.
   , instLog :: Maybe InstLog
   }
@@ -243,7 +242,7 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, fifoResp) = (state', (coreOut, fif
       | otherwise = (ifPc, ifRequested)
     ifFifoWdata'
       | controlHazard = Nothing
-      | Just (a, b) <- fetched = Just FifoEntry {addr = a, bits = b}
+      | Just (addr, busWord) <- fetched = Just FifoEntry {addr = addr, bits = instAt addr busWord}
       | fifoResp.wready = Nothing
       | otherwise = ifFifoWdata -- pending
     fifoReq = FifoReq {wdata = ifFifoWdata, rready, flush = controlHazard}

@@ -11,9 +11,9 @@ import Clash.Prelude
 import Clash.Sized.Vector (unsafeFromList)
 import Cuintet (system)
 import Cuintet.Core (InstLog (..))
-import Cuintet.Eei (Inst, XLen)
+import Cuintet.Eei (Inst, MemDataBytes)
 import Cuintet.Memory (initRamLanes)
-import qualified Data.ByteString.Char8 as BC
+import Data.ByteString.Char8 qualified as BC
 import Data.FileEmbed (embedDir, makeRelativeToProject)
 import Data.List (sortOn)
 import Data.Maybe (catMaybes)
@@ -21,15 +21,16 @@ import Numeric (readHex)
 import System.FilePath (takeBaseName)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase)
+import Tests.Cuintet.Sim (packInsts)
 import Text.Printf (printf)
-import qualified Prelude as P
+import Prelude qualified as P
 
 {- | Words of memory the core is given.  The images are linked at
 @0x80000000@, which 'Cuintet.Eei.toWordAddr' truncates to word zero, so an
 image loaded at offset zero is addressed correctly by both @lui@/@addi@ and
 @auipc@.  The largest of them is under a thousand words.
 -}
-type MemWords = 2048
+type RamAddrWidth = 10
 
 -- | Cycles to simulate before reporting a test as hung.
 maxCycles :: Int
@@ -53,13 +54,13 @@ images :: [(FilePath, BC.ByteString)]
 images = $(makeRelativeToProject "tests/riscv-tests/hex" >>= embedDir)
 
 -- | Decodes an image, zero-padded to the size of the memory.
-image :: FilePath -> BC.ByteString -> Vec MemWords Inst
+image :: FilePath -> BC.ByteString -> Vec (2 ^ RamAddrWidth) (BitVector (MemDataBytes * 8))
 image path bs
-  | P.length ws > depth = errorWithoutStackTrace (printf "%s: %d words do not fit in %d" path (P.length ws) depth)
-  | otherwise = unsafeFromList (P.take depth (ws P.++ P.repeat 0))
+  | P.length ws > maxInsts = errorWithoutStackTrace (printf "%s: RAM size is insufficient" path)
+  | otherwise = unsafeFromList (packInsts $ P.take maxInsts (ws P.++ P.repeat 0))
   where
     ws = P.zipWith (parseWord path) [1 ..] (P.lines (BC.unpack bs))
-    depth = natToNum @MemWords
+    maxInsts = 2 * natToNum @(2 ^ RamAddrWidth)
 
 parseWord :: FilePath -> Int -> String -> Inst
 parseWord path lineNo s = case readHex s of
@@ -69,12 +70,12 @@ parseWord path lineNo s = case readHex s of
 {- | Runs an image until its @ecall@, rebuilding the register file from the
 write-backs the core logs, and reads the verdict out of 'testnum'.
 -}
-runImage :: Vec MemWords Inst -> Either String ()
+runImage :: Vec (2 ^ RamAddrWidth) (BitVector (MemDataBytes * 8)) -> Either String ()
 runImage img = verdict (replicate d32 0) instLogs
   where
     instLogs = catMaybes (sampleN @System maxCycles (system (initRamLanes img)))
 
-    verdict :: Vec 32 (BitVector XLen) -> [InstLog] -> Either String ()
+    verdict :: Vec 32 (BitVector (MemDataBytes * 8)) -> [InstLog] -> Either String ()
     verdict _ [] = Left (printf "no ecall within %d cycles" maxCycles)
     verdict regs (l : ls)
       | l.inst == ecall = report (regs !! testnum)

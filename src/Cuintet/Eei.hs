@@ -3,7 +3,6 @@ module Cuintet.Eei (
   XLen,
   XLenBytes,
   ILen,
-  ILenBytes,
   Addr,
   Inst,
   Sign (..),
@@ -19,14 +18,8 @@ module Cuintet.Eei (
   MemBusReq (..),
   MemBusResp (..),
   MemDataBytes,
-  WordAddrWidth,
-  WordAddr,
-  toWordAddr,
-  InstReq,
-  DataReq,
-  InstResp,
-  DataResp,
   MemReq,
+  MemResp,
   Opcode (LUI, AUIPC, JAL, JALR, BRANCH, LOAD, STORE, OP_IMM, OP_REG, OP_IMM_32, OP_REG_32, MISC_MEM, SYSTEM),
   IOp (..),
   ShiftRight (..),
@@ -34,6 +27,7 @@ module Cuintet.Eei (
   CsrOp (..),
   System12 (System12, ECALL, MRET),
   SystemOp (..),
+  instAt,
 ) where
 
 import Clash.Annotations.BitRepresentation
@@ -51,8 +45,6 @@ type ILen = 32
 lane vector is turned back into a word.
 -}
 type XLenBytes = XLen `Div` 8
-
-type ILenBytes = ILen `Div` 8
 
 type Addr = Unsigned XLen
 
@@ -133,6 +125,9 @@ laneMask width off = reverse $ bitCoerce mask
     mask = ones `shiftL` numConvert off
     ones = complement (complement 0 `shiftL` numConvert (sizeBytes width))
 
+instAt :: Addr -> BitVector (MemDataBytes * 8) -> Inst
+instAt addr busWord = truncateB (busWord `shiftR` bitOffset (laneOffset addr))
+
 -- | Data to be written, which is masked and divided into bytes.
 newtype StoreLanes nBytes = StoreLanes (Vec nBytes (Maybe (BitVector 8)))
   deriving stock (Generic)
@@ -145,8 +140,8 @@ data LoadFmt = LoadFmt {width :: AccessWidth, offset :: LaneOffset}
 {- | Memory access request, carried on the bus as @Maybe (MemBusReq ...)@;
 @Nothing@ means no access.
 -}
-data MemBusReq nBytes addrWidth = MemBusReq
-  { addr :: Unsigned addrWidth
+data MemBusReq nBytes = MemBusReq
+  { addr :: Addr
   -- ^ The address to access.
   , wdata :: Maybe (StoreLanes nBytes)
   -- ^ 'Just' the data to write for stores, 'Nothing' for loads.
@@ -161,26 +156,11 @@ data MemBusResp nBytes = MemBusResp
   }
   deriving (Generic, NFDataX)
 
-type MemDataBytes = 4
+type MemDataBytes = XLenBytes
 
-type WordAddrWidth = 20
+type MemReq = MemBusReq MemDataBytes
 
--- | The address the memory takes, indexing words rather than bytes.
-type WordAddr = Unsigned WordAddrWidth
-
-type InstResp = MemBusResp ILenBytes
-
-type DataResp = MemBusResp MemDataBytes
-
-type InstReq = MemBusReq ILenBytes XLen
-
-type DataReq = MemBusReq MemDataBytes XLen
-
--- | Physical request form accepted by the memory.
-type MemReq = MemBusReq MemDataBytes WordAddrWidth
-
-toWordAddr :: Addr -> WordAddr
-toWordAddr a = truncateB (a `shiftR` natToNum @(CLog 2 MemDataBytes))
+type MemResp = MemBusResp MemDataBytes
 
 {- | The @opcode@ field. RV32I names only a handful of the 128 patterns, so this
 is the field itself with names attached rather than a sum type: @unpack@ is pure
