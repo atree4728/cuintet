@@ -151,13 +151,11 @@ formatRdata :: LoadFmt -> BitVector (MemDataBytes * 8) -> BitVector XLen
 formatRdata LoadFmt {width, offset} word = case width of
   Byte sign -> ext sign (truncateB shifted :: BitVector 8)
   Half sign -> ext sign (truncateB shifted :: BitVector 16)
-  Word -> ext Signed word
-  WidthIllegal1 -> illegal
-  WidthIllegal2 -> illegal
-  WidthIllegal3 -> illegal
+  Word sign -> ext sign word
+  DoubleWord -> deepErrorX "formatRdata: unimplemented"
+  WidthIllegal -> deepErrorX "formatRdata: illegal access width"
   where
     shifted = word `shiftR` bitOffset offset
-    illegal = deepErrorX "formatRdata: illegal access width"
     ext Signed = signExtend
     ext Unsigned = zeroExtend
 

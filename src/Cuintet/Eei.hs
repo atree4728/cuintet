@@ -74,13 +74,9 @@ in a store, so 'Unsigned' never reaches the bus.
 data AccessWidth
   = Byte Sign
   | Half Sign
-  | Word
-  | -- | @0b011@; @LD@ in RV64I.
-    WidthIllegal1
-  | -- | @0b110@; @LWU@ in RV64I.
-    WidthIllegal2
-  | -- | @0b111@.
-    WidthIllegal3
+  | Word Sign
+  | DoubleWord
+  | WidthIllegal
   deriving (Generic, NFDataX, Show)
 
 {-# ANN
@@ -90,10 +86,9 @@ data AccessWidth
       3
       [ ConstrRepr 'Byte (1 `downto` 0) 0b00 [0b100]
       , ConstrRepr 'Half (1 `downto` 0) 0b01 [0b100]
-      , ConstrRepr 'Word (2 `downto` 0) 0b010 []
-      , ConstrRepr 'WidthIllegal1 (2 `downto` 0) 0b011 []
-      , ConstrRepr 'WidthIllegal2 (2 `downto` 0) 0b110 []
-      , ConstrRepr 'WidthIllegal3 (2 `downto` 0) 0b111 []
+      , ConstrRepr 'Word (1 `downto` 0) 0b10 [0b100]
+      , ConstrRepr 'DoubleWord (2 `downto` 0) 0b011 []
+      , ConstrRepr 'WidthIllegal (2 `downto` 0) 0b111 []
       ]
   )
   #-}
@@ -115,12 +110,9 @@ sizeBytes :: AccessWidth -> Index (XLenBytes + 1)
 sizeBytes = \case
   Byte _ -> 1
   Half _ -> 2
-  Word -> natToNum @XLenBytes
-  WidthIllegal1 -> illegal
-  WidthIllegal2 -> illegal
-  WidthIllegal3 -> illegal
-  where
-    illegal = deepErrorX "sizeBytes: illegal access width"
+  Word _ -> 4
+  DoubleWord -> 8
+  WidthIllegal -> deepErrorX "sizeBytes: illegal access width"
 
 {- | Whether the access is naturally aligned, i.e. contained in a single word.
 @sizeBytes - 1@ is exactly the mask of offset bits that must be zero.
