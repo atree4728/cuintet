@@ -61,16 +61,16 @@ instDecode bits = (ctrl op, imm op)
 
     ctrl :: Opcode -> InstCtrl
 {- FOURMOLU_DISABLE -}
-    ctrl LUI    = instCtrl UType  True  True False False False
-    ctrl AUIPC  = instCtrl UType  True False False False False
-    ctrl JAL    = instCtrl JType  True False False  True False
-    ctrl JALR   = instCtrl IType  True False False  True False
-    ctrl BRANCH = instCtrl BType False False False False False
-    ctrl LOAD   = instCtrl IType  True False False False  True
-    ctrl STORE  = instCtrl SType False False False False False
-    ctrl OP     = instCtrl RType  True False  True False False
-    ctrl OP_IMM = instCtrl IType  True False  True False False
+    ctrl LUI      = instCtrl UType  True  True False False False
+    ctrl AUIPC    = instCtrl UType  True False False False False
+    ctrl JAL      = instCtrl JType  True False False  True False
+    ctrl JALR     = instCtrl IType  True False False  True False
+    ctrl BRANCH   = instCtrl BType False False False False False
+    ctrl LOAD     = instCtrl IType  True False False False  True
+    ctrl STORE    = instCtrl SType False False False False False
+    ctrl OP       = instCtrl RType  True False  True False False
+    ctrl OP_IMM   = instCtrl IType  True False  True False False
     ctrl MISC_MEM = instCtrl IType False False False False False -- fench is nop
-    ctrl SYSTEM = instCtrl IType  True False False False False
-    ctrl _      = deepErrorX "ctrl: unknown opcode"
+    ctrl SYSTEM   = instCtrl IType  True False False False False
+    ctrl _        = deepErrorX "ctrl: unknown opcode"
 {- FOURMOLU_ENABLE -}

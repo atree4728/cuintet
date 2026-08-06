@@ -22,7 +22,7 @@ alu InstCtrl {itype, isAluOp, funct3, funct7} op1 op2
     -- @funct7@ is reserved in an OP-IMM, so only an OP can mean SUB.
     isSub = itype /= IType && funct7 /= zeroBits
 
-    shiftWidth = bitCoerce $ zeroExtend (truncateB op2 :: BitVector 5)
+    shiftWidth = unpack $ zeroExtend (truncateB op2 :: BitVector 6)
     sll = op1 `shiftL` shiftWidth
     srl = op1 `shiftR` shiftWidth
     sra = bitCoerce $ (bitCoerce op1 :: Signed XLen) `shiftR` shiftWidth

@@ -42,7 +42,7 @@ import Clash.Prelude
 import Cuintet.Util (downto)
 
 -- | The length of integer registers.
-type XLen = 32
+type XLen = 64
 
 -- | The maximum width of instructions which the implementation supports.
 type ILen = 32

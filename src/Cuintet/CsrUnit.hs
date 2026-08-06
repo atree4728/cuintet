@@ -40,14 +40,14 @@ pattern ENVIRONMENT_CALL :: MCause
 pattern ENVIRONMENT_CALL = MCause False 11
 
 mcauseValue :: MCause -> BitVector XLen
-mcauseValue MCause {interrupt, code} = pack interrupt ++# (0 :: BitVector 27) ++# code
+mcauseValue MCause {interrupt, code} = pack interrupt ++# zeroExtend code
 
 {- | Addresses are held without the bits that are always zero: @mtvec@ in Direct
 mode and @mepc@ both have a four-byte aligned base.
 -}
 data CsrFile = CsrFile
-  { mtvecBase :: BitVector 30
-  , mepcAligned :: BitVector 30
+  { mtvecBase :: BitVector 62 -- (XLen - 2); see https://github.com/clash-lang/clash-compiler/issues/3100
+  , mepcAligned :: BitVector 62 -- (XLen - 2)
   , mcause :: MCause
   }
   deriving (Generic, NFDataX)
@@ -91,7 +91,7 @@ csrWrite CSRIllegal _ _ = deepErrorX "csrWrite: illegal System instruction"
 
 csrUnitStep :: CsrFile -> CsrReq -> (CsrFile, CsrResp)
 csrUnitStep file (Trap CsrTrap {..}) =
-  ( file {mepcAligned = slice d31 d2 (pack pc), mcause}
+  ( file {mepcAligned = slice d63 d2 (pack pc), mcause}
   , Redirect $ bitCoerce $ file.mtvecBase ++# (0 :: BitVector 2)
   )
 csrUnitStep file Mret = (file, Redirect $ bitCoerce $ file.mepcAligned ++# (0 :: BitVector 2))
@@ -99,10 +99,10 @@ csrUnitStep file (Access CsrAccess {..})
   | CSRIllegal <- csrType = deepErrorX "csrUnitStep: illegal System instruction"
   | MTVEC <- csrAddr =
       let old = file.mtvecBase ++# (0 :: BitVector 2)
-       in (file {mtvecBase = slice d31 d2 (csrWrite csrType old wdata)}, Accessed old)
+       in (file {mtvecBase = slice d63 d2 (csrWrite csrType old wdata)}, Accessed old)
   | MEPC <- csrAddr =
       let old = file.mepcAligned ++# (0 :: BitVector 2)
-       in (file {mepcAligned = slice d31 d2 (csrWrite csrType old wdata)}, Accessed old)
+       in (file {mepcAligned = slice d63 d2 (csrWrite csrType old wdata)}, Accessed old)
   | MCAUSE <- csrAddr = (file, Accessed (mcauseValue file.mcause))
   | otherwise = deepErrorX "csrUnitStep: unimplemented CSR instruction"
   where

@@ -77,7 +77,7 @@ memUnitStep state MemUnitReq {inst, memResp} = (memUnitState, memUnitResp)
   where
     isNewMemOp InstInfo {isNew, ctrl} = isNew && isMemOp ctrl
     memUnitState = case state of
-      Idle | Just i <- inst, isNewMemOp i -> WaitReady i.addr (access i.ctrl i.addr i.wdata)
+      Idle | Just i <- inst, isNewMemOp i -> WaitReady i.addr (access i.ctrl i.addr (truncateB i.wdata)) -- for now
       WaitReady _ acc | memResp.ready -> WaitValid acc
       WaitValid _ | isJust memResp.rdata -> Idle
       _ -> state
@@ -107,7 +107,7 @@ A misaligned access traps in RISC-V, but there is no trap mechanism yet, so it
 is rejected as 'deepErrorX'. An illegal @funct3@ is rejected the same way, by
 'sizeBytes' inside 'aligned'.
 -}
-access :: InstCtrl -> Addr -> BitVector XLen -> Access
+access :: InstCtrl -> Addr -> BitVector (MemDataBytes * 8) -> Access
 access ctrl addr wdata
   | not (aligned width offset) = deepErrorX "access: misaligned access"
   | isStore ctrl = Store (storeLanes width offset wdata)
@@ -121,7 +121,7 @@ access ctrl addr wdata
 The word is shifted into place by @8 * offset@ bits, and the lanes it occupies
 are given by the same offset in bytes.
 -}
-storeLanes :: AccessWidth -> LaneOffset -> BitVector XLen -> StoreLanes MemDataBytes
+storeLanes :: AccessWidth -> LaneOffset -> BitVector (MemDataBytes * 8) -> StoreLanes MemDataBytes
 storeLanes width offset word = StoreLanes $ zipWith orNothing (laneMask width offset) bytes
   where
     bytes = reverse $ bitCoerce $ word `shiftL` bitOffset offset
@@ -147,11 +147,11 @@ The width is the @funct3@ field verbatim:
 >>> (unpack 0b001 :: AccessWidth, unpack 0b101 :: AccessWidth)  -- lh, lhu
 (Half Signed,Half Unsigned)
 -}
-formatRdata :: LoadFmt -> BitVector XLen -> BitVector XLen
+formatRdata :: LoadFmt -> BitVector (MemDataBytes * 8) -> BitVector XLen
 formatRdata LoadFmt {width, offset} word = case width of
   Byte sign -> ext sign (truncateB shifted :: BitVector 8)
   Half sign -> ext sign (truncateB shifted :: BitVector 16)
-  Word -> word
+  Word -> ext Signed word
   WidthIllegal1 -> illegal
   WidthIllegal2 -> illegal
   WidthIllegal3 -> illegal

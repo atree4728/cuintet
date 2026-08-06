@@ -19,7 +19,7 @@ cabal run doctests
 
 ### riscv-tests
 
-`unittests` also runs the `rv32ui-p-*` suite from
+`unittests` also runs the `rv64ui-p-*` suite from
 [riscv-tests](https://github.com/riscv-software-src/riscv-tests). The images are
 assembled ahead of time and checked in under `tests/riscv-tests/hex/`, so no
 RISC-V toolchain is needed to run them.
@@ -32,7 +32,7 @@ git submodule update --init
 ./tests/riscv-tests/gen.sh
 ```
 
-This needs `riscv64-unknown-elf-gcc` with `rv32i` multilib; override the
+This needs `riscv64-unknown-elf-gcc` with `rv64i` multilib; override the
 toolchain with `RISCV_PREFIX`.
 
 `fence_i` and `ma_data` are left out, since Zifencei and misaligned accesses
