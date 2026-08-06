@@ -27,7 +27,7 @@ module Cuintet.Eei (
   InstResp,
   DataResp,
   MemReq,
-  Opcode (LUI, AUIPC, JAL, JALR, BRANCH, LOAD, STORE, OP_IMM, OP, MISC_MEM, SYSTEM),
+  Opcode (LUI, AUIPC, JAL, JALR, BRANCH, LOAD, STORE, OP_IMM, OP_REG, OP_IMM_32, OP_REG_32, MISC_MEM, SYSTEM),
   IOp (..),
   ShiftRight (..),
   CsrType (..),
@@ -198,18 +198,22 @@ on it needs a catch-all for the patterns left unnamed.
 newtype Opcode = Opcode (BitVector 7)
   deriving newtype (BitPack)
 
-pattern LUI, AUIPC, JAL, JALR, BRANCH, LOAD, STORE, OP_IMM, OP, MISC_MEM, SYSTEM :: Opcode
-pattern LUI = Opcode 0b0110111
-pattern AUIPC = Opcode 0b0010111
-pattern JAL = Opcode 0b1101111
-pattern JALR = Opcode 0b1100111
-pattern BRANCH = Opcode 0b1100011
-pattern LOAD = Opcode 0b0000011
-pattern STORE = Opcode 0b0100011
-pattern OP_IMM = Opcode 0b0010011
-pattern OP = Opcode 0b0110011
-pattern MISC_MEM = Opcode 0b0001111
-pattern SYSTEM = Opcode 0b1110011
+pattern LUI, AUIPC, JAL, JALR, BRANCH, LOAD, STORE, OP_IMM, OP_REG, MISC_MEM, SYSTEM, OP_REG_32, OP_IMM_32 :: Opcode
+{- FOURMOLU_DISABLE -}
+pattern LUI       = Opcode 0b0110111
+pattern AUIPC     = Opcode 0b0010111
+pattern JAL       = Opcode 0b1101111
+pattern JALR      = Opcode 0b1100111
+pattern BRANCH    = Opcode 0b1100011
+pattern LOAD      = Opcode 0b0000011
+pattern STORE     = Opcode 0b0100011
+pattern OP_IMM    = Opcode 0b0010011
+pattern OP_REG    = Opcode 0b0110011
+pattern OP_IMM_32 = Opcode 0b0011011 
+pattern OP_REG_32 = Opcode 0b0111011
+pattern MISC_MEM  = Opcode 0b0001111
+pattern SYSTEM    = Opcode 0b1110011
+{- FOURMOLU_ENABLE -}
 
 {- | The ALU operation of an @OP@ or @OP-IMM@ instruction, laid out so that it
 /is/ the @funct3@ field: @unpack funct3@ is pure wiring. All 8 patterns are

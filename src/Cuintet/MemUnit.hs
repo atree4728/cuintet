@@ -129,18 +129,18 @@ storeLanes width offset word = StoreLanes $ zipWith orNothing (laneMask width of
 {- | Format loaded word according to 'LoadFmt'.
 
 >>> import Clash.Prelude
->>> 0xdeadbeef :: BitVector 32
-0b1101_1110_1010_1101_1011_1110_1110_1111
+>>> 0xdeadbeef :: BitVector 64
+0b0000_0000_0000_0000_0000_0000_0000_0000_1101_1110_1010_1101_1011_1110_1110_1111
 >>> formatRdata LoadFmt{width = Byte Signed, offset = 0} 0xdeadbeef   -- lb
-0b1111_1111_1111_1111_1111_1111_1110_1111
+0b1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1110_1111
 >>> formatRdata LoadFmt{width = Byte Unsigned, offset = 1} 0xdeadbeef -- lbu
-0b0000_0000_0000_0000_0000_0000_1011_1110
+0b0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_1011_1110
 >>> formatRdata LoadFmt{width = Half Signed, offset = 2} 0xdeadbeef   -- lh
-0b1111_1111_1111_1111_1101_1110_1010_1101
+0b1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1101_1110_1010_1101
 >>> formatRdata LoadFmt{width = Half Unsigned, offset = 0} 0xdeadbeef -- lhu
-0b0000_0000_0000_0000_1011_1110_1110_1111
+0b0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_1011_1110_1110_1111
 >>> formatRdata LoadFmt{width = Word, offset = 0} 0xdeadbeef          -- lw
-0b1101_1110_1010_1101_1011_1110_1110_1111
+0b1111_1111_1111_1111_1111_1111_1111_1111_1101_1110_1010_1101_1011_1110_1110_1111
 
 The width is the @funct3@ field verbatim:
 

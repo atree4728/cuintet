@@ -3,7 +3,7 @@ module Cuintet.Debug (showInstLog, showInstLogs) where
 import Clash.Prelude
 import Cuintet.Core (InstLog (..))
 import Cuintet.CoreCtrl (InstCtrl (itype), instCode)
-import qualified Data.List as L
+import Data.List qualified as L
 import Text.Printf (printf)
 
 {- | Displays the log for a single command in a human-friendly format. Write back is optional.
@@ -11,7 +11,7 @@ import Text.Printf (printf)
 >>> import Prelude
 >>> import Cuintet.Core (InstLog (..))
 >>> import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
->>> ctrl = InstCtrl{itype = IType, rwbEn = True, isLui = False, isAluOp = True, isJump = False, isLoad = False, systemOp = Nothing, funct3 = 0, funct7 = 0}
+>>> ctrl = InstCtrl{itype = IType, rwbEn = True, isLui = False, isAluOp = True, isOp32 = False, isJump = False, isLoad = False, systemOp = Nothing, funct3 = 0, funct7 = 0}
 >>> l = InstLog{pc = 12, inst = 0x00110193, ctrl, imm = 1, rs1Addr = 2, rs2Addr = 1, rs1Data = 42, rs2Data = 0, op1 = 42, op2 = 1, aluResult = 43, wbReq = Just (3, 43), branchTaken = Nothing, csrRdata = Nothing}
 >>> putStrLn (showInstLog l)
 0000000c : 00110193

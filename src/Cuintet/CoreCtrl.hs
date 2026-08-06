@@ -38,6 +38,8 @@ data InstCtrl = InstCtrl
   -- ^ Whether to be LUI instruction.
   , isAluOp :: Bool
   -- ^ Whether to use the ALU.
+  , isOp32 :: Bool
+  -- ^ Whether to be either OP_REG_32 or OP_IMM_32.
   , isJump :: Bool
   -- ^ Whether to be jump instruction.
   , isLoad :: Bool

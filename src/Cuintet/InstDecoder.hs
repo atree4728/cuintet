@@ -25,6 +25,7 @@ instDecode bits = (ctrl op, imm op)
     imm LUI = immU
     imm AUIPC = immU
     imm OP_IMM = immI
+    imm OP_IMM_32 = immI
     imm JAL = immJ
     imm JALR = immI
     imm BRANCH = immB
@@ -46,12 +47,13 @@ instDecode bits = (ctrl op, imm op)
       | otherwise = Just SysIllegal
     systemOp _ = Nothing
 
-    instCtrl itype rwbEn isLui isAluOp isJump isLoad =
+    instCtrl itype rwbEn isLui isAluOp isOp32 isJump isLoad =
       InstCtrl
         { itype
         , rwbEn
         , isLui
         , isAluOp
+        , isOp32
         , isJump
         , isLoad
         , systemOp = systemOp op
@@ -61,16 +63,18 @@ instDecode bits = (ctrl op, imm op)
 
     ctrl :: Opcode -> InstCtrl
 {- FOURMOLU_DISABLE -}
-    ctrl LUI      = instCtrl UType  True  True False False False
-    ctrl AUIPC    = instCtrl UType  True False False False False
-    ctrl JAL      = instCtrl JType  True False False  True False
-    ctrl JALR     = instCtrl IType  True False False  True False
-    ctrl BRANCH   = instCtrl BType False False False False False
-    ctrl LOAD     = instCtrl IType  True False False False  True
-    ctrl STORE    = instCtrl SType False False False False False
-    ctrl OP       = instCtrl RType  True False  True False False
-    ctrl OP_IMM   = instCtrl IType  True False  True False False
-    ctrl MISC_MEM = instCtrl IType False False False False False -- fench is nop
-    ctrl SYSTEM   = instCtrl IType  True False False False False
-    ctrl _        = deepErrorX "ctrl: unknown opcode"
+    ctrl LUI       = instCtrl UType  True  True False False False False
+    ctrl AUIPC     = instCtrl UType  True False False False False False
+    ctrl JAL       = instCtrl JType  True False False False  True False
+    ctrl JALR      = instCtrl IType  True False False False  True False
+    ctrl BRANCH    = instCtrl BType False False False False False False
+    ctrl LOAD      = instCtrl IType  True False False False False  True
+    ctrl STORE     = instCtrl SType False False False False False False
+    ctrl OP_IMM    = instCtrl IType  True False  True False False False
+    ctrl OP_REG    = instCtrl RType  True False  True False False False
+    ctrl OP_IMM_32 = instCtrl IType  True False  True  True False False
+    ctrl OP_REG_32 = instCtrl RType  True False  True  True False False
+    ctrl MISC_MEM  = instCtrl IType False False False False False False -- fench is nop
+    ctrl SYSTEM    = instCtrl IType  True False False False False False
+    ctrl _         = deepErrorX "ctrl: unknown opcode"
 {- FOURMOLU_ENABLE -}
