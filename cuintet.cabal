@@ -147,9 +147,13 @@ test-suite unittests
   ghc-options: -threaded
   other-modules:
     Tests.Cuintet.Core
+    Tests.Cuintet.RiscvTests
     Tests.Cuintet.Sim
 
   build-depends:
+    bytestring,
     cuintet,
+    file-embed >=0.0.15 && <0.1,
+    filepath,
     tasty >=1.2 && <1.6,
     tasty-hunit,

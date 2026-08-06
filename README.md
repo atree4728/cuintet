@@ -17,6 +17,35 @@ cabal run unittests
 cabal run doctests
 ```
 
+### riscv-tests
+
+`unittests` also runs the `rv32ui-p-*` suite from
+[riscv-tests](https://github.com/riscv-software-src/riscv-tests). The images are
+assembled ahead of time and checked in under `tests/riscv-tests/hex/`, so no
+RISC-V toolchain is needed to run them.
+
+Regenerating them is only necessary after changing the test list or the
+environment in `tests/riscv-tests/env/`:
+
+```sh
+git submodule update --init
+./tests/riscv-tests/gen.sh
+```
+
+This needs `riscv64-unknown-elf-gcc` with `rv32i` multilib; override the
+toolchain with `RISCV_PREFIX`.
+
+`fence_i` and `ma_data` are left out, since Zifencei and misaligned accesses
+are not implemented.
+
+The tests are linked against a cut-down environment in `tests/riscv-tests/env/`,
+because the upstream `env/p` initialises PMP, address translation and trap
+delegation, and reports through the `tohost` MMIO word. Instead a test leaves
+its verdict in `gp` and executes `ecall`, and the testbench halts there.
+
+riscv-tests and the environment it is derived from are Copyright (c) 2012-2015,
+The Regents of the University of California; see `tests/riscv-tests/LICENSE`.
+
 To open the REPL, use:
 
 ```

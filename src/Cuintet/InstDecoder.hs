@@ -30,6 +30,7 @@ instDecode bits = (ctrl op, imm op)
     imm BRANCH = immB
     imm LOAD = immI
     imm STORE = immS
+    imm MISC_MEM = immI -- @fm@, @pred@ and @succ@ sit in the I-immediate field
     imm SYSTEM = immI -- use [11:0]
     imm _ = deepErrorX "imm: opcode carries no immediate"
 
@@ -69,6 +70,7 @@ instDecode bits = (ctrl op, imm op)
     ctrl STORE  = instCtrl SType False False False False False
     ctrl OP     = instCtrl RType  True False  True False False
     ctrl OP_IMM = instCtrl IType  True False  True False False
+    ctrl MISC_MEM = instCtrl IType False False False False False -- fench is nop
     ctrl SYSTEM = instCtrl IType  True False False False False
     ctrl _      = deepErrorX "ctrl: unknown opcode"
 {- FOURMOLU_ENABLE -}
