@@ -74,18 +74,19 @@ data CsrTrap = CsrTrap
 data CsrReq
   = Access CsrAccess
   | Trap CsrTrap
+  | Mret
   deriving (Generic, NFDataX)
 
 data CsrResp = CsrResp
   { rdata :: BitVector XLen
   -- ^ Meaningful only in response to a 'CsrAccess'.
-  , trapVector :: Maybe Addr
+  , redirect :: Maybe Addr
   -- ^ Where to resume
   }
   deriving (Generic, NFDataX)
 
 noResp :: CsrResp
-noResp = CsrResp {rdata = deepErrorX "csrUnitStep: no CSR was read", trapVector = Nothing}
+noResp = CsrResp {rdata = deepErrorX "csrUnitStep: no CSR was read", redirect = Nothing}
 
 csrWrite :: CsrType -> BitVector XLen -> Maybe (BitVector XLen) -> BitVector XLen
 csrWrite ReadWrite oldValue newValueM = fromMaybe oldValue newValueM
@@ -97,8 +98,9 @@ csrUnitStep :: CsrFile -> Maybe CsrReq -> (CsrFile, CsrResp)
 csrUnitStep file Nothing = (file, noResp)
 csrUnitStep file (Just (Trap CsrTrap {..})) =
   ( file {mepcAligned = slice d31 d2 (pack pc), mcause}
-  , noResp {trapVector = Just (bitCoerce (file.mtvecBase ++# (0 :: BitVector 2)))}
+  , noResp {redirect = Just (bitCoerce (file.mtvecBase ++# (0 :: BitVector 2)))}
   )
+csrUnitStep file (Just Mret) = (file, noResp {redirect = Just (bitCoerce (file.mepcAligned ++# (0 :: BitVector 2)))})
 csrUnitStep file (Just (Access CsrAccess {..}))
   | CSRIllegal <- csrType = deepErrorX "csrUnitStep: illegal System instruction"
   | MTVEC <- csrAddr =

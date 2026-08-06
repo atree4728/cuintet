@@ -27,23 +27,12 @@ module Cuintet.Eei (
   InstResp,
   DataResp,
   MemReq,
-  Opcode (
-    LUI,
-    AUIPC,
-    JAL,
-    JALR,
-    BRANCH,
-    LOAD,
-    STORE,
-    OP_IMM,
-    OP,
-    SYSTEM
-  ),
+  Opcode (LUI, AUIPC, JAL, JALR, BRANCH, LOAD, STORE, OP_IMM, OP, SYSTEM),
   IOp (..),
   ShiftRight (..),
   CsrType (..),
   CsrOp (..),
-  System12 (System12, ECALL),
+  System12 (System12, ECALL, MRET),
   SystemOp (..),
 ) where
 
@@ -295,8 +284,9 @@ it names the operation rather than a CSR.
 newtype System12 = System12 (BitVector 12)
   deriving newtype (Eq)
 
-pattern ECALL :: System12
+pattern ECALL, MRET :: System12
 pattern ECALL = System12 0
+pattern MRET = System12 0b001100000010
 
 {- | What a @SYSTEM@ instruction asks for. @funct3@ tells a CSR access from the
 rest; among the rest, only @ECALL@ is implemented.
@@ -304,5 +294,6 @@ rest; among the rest, only @ECALL@ is implemented.
 data SystemOp
   = SysCsr CsrOp
   | SysEcall
+  | SysMret
   | SysIllegal
   deriving (Generic, NFDataX)

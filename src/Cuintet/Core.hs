@@ -156,6 +156,7 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, fifoResp) = (state', (coreOut, fif
       | Just (SysCsr csrOp) <- ctrl.systemOp =
           Just $ Access CsrAccess {csrAddr = CsrAddr (slice d11 d0 imm), csrOp, rs1Addr, rs1Data}
       | Just SysEcall <- ctrl.systemOp = Just $ Trap CsrTrap {pc, mcause = ENVIRONMENT_CALL}
+      | Just SysMret <- ctrl.systemOp = Just Mret
       | otherwise = Nothing
     isCsrAccess
       | Just (SysCsr _) <- ctrl.systemOp = True
@@ -185,7 +186,7 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, fifoResp) = (state', (coreOut, fif
     wbReq = orNothing (commit && ctrl.rwbEn && rdAddr /= 0) (rdAddr, wbData)
 
     branchTaken = brUnit ctrl.funct3 op1 op2
-    controlHazard = instValid && (isJust csrResp.trapVector || ctrl.isJump || isBranchOp ctrl && branchTaken)
+    controlHazard = instValid && (isJust csrResp.redirect || ctrl.isJump || isBranchOp ctrl && branchTaken)
 
     -- Instruction fetch
     -- FIFO に保留中の書き込みと今回の分の両方の空きがあるときだけ出す。
@@ -197,9 +198,9 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, fifoResp) = (state', (coreOut, fif
 
     -- next state
     (ifPc', ifRequested')
-      | controlHazard, Just trapVector <- csrResp.trapVector = (trapVector, Nothing) -- a trap outranks any branch
+      | controlHazard, Just redirect <- csrResp.redirect = (redirect, Nothing)
       | controlHazard && ctrl.isJump = (bitCoerce $ aluResult .&. complement 1, Nothing) -- aluResult is the destination
-      | controlHazard && isBranchOp ctrl = (pc + numConvert imm, Nothing) -- aluResult is the destination
+      | controlHazard && isBranchOp ctrl = (pc + numConvert imm, Nothing)
       | accepted = (ifPc + 4, Just ifPc)
       | otherwise = (ifPc, ifRequested)
     ifFifoWdata'

@@ -100,6 +100,15 @@ ecallProg =
   , 0x34102173 -- 14: csrrs x2, mepc, x0   -- trapped at 0x4
   ]
 
+mretProg :: [Inst]
+mretProg =
+  [ 0x34185073 --  0: csrrwi x0, mepc, 0x10
+  , 0x30200073 --  4: mret
+  , 0x00000000 --  8:
+  , 0x00000000 --  c:
+  , 0x00000013 -- 10: addi x0, x0, 0
+  ]
+
 tests :: TestTree
 tests =
   testGroup
@@ -145,4 +154,6 @@ tests =
         let regs = finalRegs 4 ecallProg
         (regs !! (1 :: Int)) @?= 0xb
         (regs !! (2 :: Int)) @?= 0x4
+    , testCase "mret" $
+        ((.pc) <$> runProgram 3 mretProg) @?= [0x0, 0x04, 0x10]
     ]

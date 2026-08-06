@@ -41,6 +41,7 @@ instDecode bits = (ctrl op, imm op)
     systemOp SYSTEM
       | funct3 /= 0 = Just $ SysCsr (unpack funct3)
       | ECALL <- System12 immIG = Just SysEcall
+      | MRET <- System12 immIG = Just SysMret
       | otherwise = Just SysIllegal
     systemOp _ = Nothing
 
