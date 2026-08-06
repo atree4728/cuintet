@@ -1,6 +1,47 @@
 {- |
-'coreT' が守るべき不変条件: @iReq@ と @dReq@ は @iResp@ / @dResp@ に組合せ依存して
-はならない。依存させると @memArbiter@ との間に組合せループができる。
+The core in terms of the classical IF, ID, EX, MA and WB stages. Only IF is
+pipelined, against the rest, through the instruction FIFO; ID through WB form a
+single combinational cone that handles one instruction at a time.
+
+In the diagrams below, @[x]@ is a register, i.e. a clock boundary, and @(x)@ is
+combinational logic.
+
+@
+    IF    [ifPc] --> iReq --> memory --> iResp --> [ifFifoWdata] --> [fifo]
+                                                                       |
+    ===================================================================|===
+      the FIFO output is the only register boundary between the stages |
+    ===================================================================|===
+                                                                       |
+    ID    (instDecode), [regFile] read, (operands) <--------------------+
+            |
+    EX    (alu), (brUnit), (csrUnitStep) --> [csrFile]
+            |
+    MA    (memUnitStep) --> [memUnitState] --> dReq
+            |
+    WB    [regFile] write, (control hazard) --> [ifPc] + FIFO flush
+@
+
+[IF]: Runs ahead on its own. Each of the three arrows out of a register takes a
+  clock, so an instruction reaches the head of the FIFO three clocks after its
+  request goes out, while the throughput stays at one instruction per clock.
+  The FIFO absorbs the difference between that and the rate ID drains it at.
+
+[ID]: Decoding and the register file read. Holds no state; @regFile@ is read
+  combinationally out of the register bank that WB writes.
+
+[EX]: The ALU, the branch condition, and the CSR access. @csrFile@ is the only
+  thing here that carries over to the next clock.
+
+[MA]: The one stage that takes more than a clock. @memUnitStep@ walks
+  @memUnitState@ through @Idle@, @WaitReady@ and @WaitValid@, driving @dReq@
+  from the register rather than straight from the ALU, and stalls ID through WB
+  until the data comes back.
+
+[WB]: The write back and the control hazard, which redirects @ifPc@ and flushes
+  everything IF has fetched so far. An instruction commits on the clock where it
+  is valid and MA does not stall; draining the FIFO and writing back both follow
+  that condition.
 -}
 module Cuintet.Core (FifoEntry (..), CoreIn (..), CoreOut (..), InstLog (..), core) where
 
@@ -51,7 +92,7 @@ data CoreOut = CoreOut
   , instLog :: Maybe InstLog
   }
 
--- | An execution log for a single instruction, which is output only in the cycle in which the commit occurred.
+-- | Execution log of a single instruction, emitted only in the clock it commits.
 data InstLog = InstLog
   { pc :: Addr
   , inst :: Inst
@@ -70,7 +111,7 @@ data InstLog = InstLog
   }
   deriving (Generic, NFDataX)
 
--- | core state. "if" is a shorthand of instruction fetch.
+-- | Core state. The @if@ prefix is short for instruction fetch.
 data CoreState = CoreState
   { ifPc :: Addr
   -- ^ Program counter.
@@ -84,8 +125,8 @@ data CoreState = CoreState
   -- ^ Register file.
   , csrFile :: CsrFile
   -- ^ CSR file.
-  , memu :: MemUnitState
-  -- ^ Memory unit's FSM.
+  , memUnitState :: MemUnitState
+  -- ^ Memory unit state.
   }
   deriving (Generic, NFDataX)
 
@@ -98,7 +139,7 @@ initState =
     , isNew = True
     , regFile = replicate d32 0
     , csrFile = initCsrFile
-    , memu = Idle
+    , memUnitState = Idle
     }
 
 -- | Extract the two operands according to the instruction form.
@@ -117,7 +158,7 @@ operands InstCtrl {itype} imm rs1Data rs2Data pc = case itype of
   UType -> (bitCoerce pc, imm)
   JType -> (bitCoerce pc, imm)
 
--- | Outputs the memory requests and the fetched instruction (if completed).
+-- | Closes 'coreT' around the instruction FIFO.
 core ::
   (HiddenClockResetEnable dom) =>
   Signal dom CoreIn ->
@@ -129,18 +170,18 @@ core coreIn = coreOut
     fifoReq = snd <$> out
     fifoResp = fifo d3 fifoReq
 
--- | Combinatrial logic of the core.
+-- | One clock of every stage, all combinational.
 coreT ::
   CoreState ->
   (CoreIn, FifoResp FifoEntry) ->
   (CoreState, (CoreOut, FifoReq FifoEntry))
 coreT CoreState {..} (~CoreIn {iResp, dResp}, fifoResp) = (state', (coreOut, fifoReq))
   where
-    -- The top of the instruction FIFO, possibly unstable @X@
+    -- The head of the FIFO, @X@ while it is empty.
     instValid = isJust fifoResp.rdata
     FifoEntry {addr = pc, bits} = fromMaybe (deepErrorX "coreT: FIFO is empty") fifoResp.rdata
 
-    -- data path
+    -- ID and EX
     (ctrl, imm) = instDecode bits
     rs1Addr = slice d19 d15 bits
     rs2Addr = slice d24 d20 bits
@@ -149,7 +190,9 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, fifoResp) = (state', (coreOut, fif
     (op1, op2) = operands ctrl imm rs1Data rs2Data pc
     aluResult = alu ctrl op1 op2
 
-    -- CSR
+    -- EX: the CSR access, and the redirect that @ECALL@ and @MRET@ answer with.
+    -- A system instruction never stalls, so the request is raised in the clock
+    -- it commits and @csrFile@ is never updated twice.
     (csrFile', csrResp) = maybe (csrFile, Nothing) (fmap Just . csrUnitStep csrFile) csrReq
     csrReq
       | not instValid = Nothing
@@ -161,38 +204,34 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, fifoResp) = (state', (coreOut, fif
     csrRdata = case csrResp of Just (Accessed v) -> Just v; _ -> Nothing
     csrRedirect = case csrResp of Just (Redirect a) -> Just a; _ -> Nothing
 
-    (memu', memuOut) =
+    -- MA
+    (memUnitState', memUnitResp) =
       memUnitStep
-        memu
+        memUnitState
         MemUnitReq
           { inst = orNothing instValid InstInfo {isNew, ctrl, addr = bitCoerce aluResult, wdata = rs2Data}
           , memResp = dResp
           }
 
-    -- Consumes the FIFO top when not accessing memory
-    rready = not memuOut.stall
+    -- WB: the instruction leaves once MA has let go of it, draining the FIFO.
+    rready = not memUnitResp.stall
     commit = instValid && rready
 
-    -- 不変条件 memu == 'Idle' → isNew == True （core と memUnit にまたがる）により、
-    -- load が commit するとき @memuOut.rdata@ は必ず 'Just'。
     wbData
       | ctrl.isLui = imm
       | ctrl.isJump = bitCoerce (pc + 4)
-      | ctrl.isLoad = fromMaybe (deepErrorX "coreT: load committed without data") memuOut.rdata
+      | ctrl.isLoad = fromMaybe (deepErrorX "coreT: load committed without data") memUnitResp.rdata
       | Just rdata <- csrRdata = rdata
       | otherwise = aluResult
     rdAddr = slice d11 d7 bits
     wbReq = orNothing (commit && ctrl.rwbEn && rdAddr /= 0) (rdAddr, wbData)
 
+    -- Everything that redirects IF.
     branchTaken = brUnit ctrl.funct3 op1 op2
     controlHazard = instValid && (isJust csrRedirect || ctrl.isJump || isBranchOp ctrl && branchTaken)
 
-    -- Instruction fetch
-    -- FIFO に保留中の書き込みと今回の分の両方の空きがあるときだけ出す。
+    -- IF: the answer to the request issued when @ifRequested@ was set.
     fetched = (,) <$> ifRequested <*> iResp.rdata
-    -- @iReq@ が出ていて（@wreadyTwo@）、かつ @dReq@ に阻まれていない（@ready@）なら
-    -- メモリが受理した。arbiter は受理に必ず応答を返すので、これで @ifPc@ と
-    -- @ifRequested@ が同期する。
     accepted = fifoResp.wreadyTwo && iResp.ready
 
     -- next state
@@ -205,16 +244,19 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, fifoResp) = (state', (coreOut, fif
     ifFifoWdata'
       | controlHazard = Nothing
       | Just (a, b) <- fetched = Just FifoEntry {addr = a, bits = b}
-      -- 前クロックで書き込み済み。フェッチは @wreadyTwo@ のときしか出さないので、
-      -- 保留が残っていることはなく Nothing でよい。
       | fifoResp.wready = Nothing
       | otherwise = ifFifoWdata -- pending
     fifoReq = FifoReq {wdata = ifFifoWdata, rready, flush = controlHazard}
 
+    -- Neither request may depend combinationally on @iResp@ or @dResp@, or a
+    -- combinational loop closes through @memArbiter@. Both are driven straight
+    -- from registers: @iReq@ from @ifPc@ and the FIFO, @dReq@ from
+    -- @memUnitState@. A fetch goes out only when the FIFO has room for the
+    -- pending write and this one both.
     coreOut =
       CoreOut
         { iReq = orNothing fifoResp.wreadyTwo MemBusReq {addr = ifPc, wdata = Nothing}
-        , dReq = memuOut.memReq
+        , dReq = memUnitResp.memReq
         , instLog =
             orNothing
               commit
@@ -244,5 +286,5 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, fifoResp) = (state', (coreOut, fif
         , isNew = not instValid || rready
         , regFile = maybe regFile (\(a, d) -> replace a d regFile) wbReq
         , csrFile = csrFile'
-        , memu = memu'
+        , memUnitState = memUnitState'
         }
