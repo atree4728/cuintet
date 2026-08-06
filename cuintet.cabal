@@ -26,6 +26,7 @@ common common-options
     DeriveLift
     DeriveTraversable
     DerivingStrategies
+    DuplicateRecordFields
     FlexibleContexts
     GeneralizedNewtypeDeriving
     InstanceSigs

@@ -8,7 +8,7 @@ import Clash.Prelude
 import Cuintet.Alu (alu)
 import Cuintet.BrUnit (brUnit)
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..), isBranchOp)
-import Cuintet.CsrUnit (CsrAddr (..), CsrFile, CsrReq (..), CsrResp (..), csrUnitStep, initCsrFile)
+import Cuintet.CsrUnit (CsrAccess (..), CsrAddr (..), CsrFile, CsrReq (..), CsrResp (..), CsrTrap (..), csrUnitStep, initCsrFile, pattern ENVIRONMENT_CALL)
 import Cuintet.Eei (
   Addr,
   DataReq,
@@ -18,6 +18,7 @@ import Cuintet.Eei (
   InstResp,
   MemBusReq (MemBusReq, addr, wdata),
   MemBusResp (rdata, ready),
+  SystemOp (..),
   XLen,
  )
 import Cuintet.Fifo (FifoReq (..), FifoResp (..), fifo)
@@ -149,16 +150,16 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, fifoResp) = (state', (coreOut, fif
     aluResult = alu ctrl op1 op2
 
     -- CSR
-    (csrFile', CsrResp {rdata = csrRdata}) =
-      csrUnitStep csrFile $
-        orNothing
-          (instValid && ctrl.isCsr)
-          CsrReq
-            { csrAddr = CsrAddr (slice d11 d0 imm)
-            , csrOp = unpack ctrl.funct3
-            , rs1Addr
-            , rs1Data
-            }
+    (csrFile', csrResp) = csrUnitStep csrFile csrReq
+    csrReq
+      | not instValid = Nothing
+      | Just (SysCsr csrOp) <- ctrl.systemOp =
+          Just $ Access CsrAccess {csrAddr = CsrAddr (slice d11 d0 imm), csrOp, rs1Addr, rs1Data}
+      | Just SysEcall <- ctrl.systemOp = Just $ Trap CsrTrap {pc, mcause = ENVIRONMENT_CALL}
+      | otherwise = Nothing
+    isCsrAccess
+      | Just (SysCsr _) <- ctrl.systemOp = True
+      | otherwise = False
 
     (memu', memuOut) =
       memUnitStep
@@ -178,13 +179,13 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, fifoResp) = (state', (coreOut, fif
       | ctrl.isLui = imm
       | ctrl.isJump = bitCoerce (pc + 4)
       | ctrl.isLoad = fromMaybe (deepErrorX "coreT: load committed without data") memuOut.rdata
-      | ctrl.isCsr = csrRdata
+      | isCsrAccess = csrResp.rdata
       | otherwise = aluResult
     rdAddr = slice d11 d7 bits
     wbReq = orNothing (commit && ctrl.rwbEn && rdAddr /= 0) (rdAddr, wbData)
 
     branchTaken = brUnit ctrl.funct3 op1 op2
-    controlHazard = instValid && (ctrl.isJump || isBranchOp ctrl && branchTaken)
+    controlHazard = instValid && (isJust csrResp.trapVector || ctrl.isJump || isBranchOp ctrl && branchTaken)
 
     -- Instruction fetch
     -- FIFO に保留中の書き込みと今回の分の両方の空きがあるときだけ出す。
@@ -196,6 +197,7 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, fifoResp) = (state', (coreOut, fif
 
     -- next state
     (ifPc', ifRequested')
+      | controlHazard, Just trapVector <- csrResp.trapVector = (trapVector, Nothing) -- a trap outranks any branch
       | controlHazard && ctrl.isJump = (bitCoerce $ aluResult .&. complement 1, Nothing) -- aluResult is the destination
       | controlHazard && isBranchOp ctrl = (pc + numConvert imm, Nothing) -- aluResult is the destination
       | accepted = (ifPc + 4, Just ifPc)
@@ -230,7 +232,7 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, fifoResp) = (state', (coreOut, fif
                 , aluResult
                 , branchTaken = orNothing (instValid && isBranchOp ctrl) branchTaken
                 , wbReq
-                , csrRdata = orNothing (instValid && ctrl.isCsr) csrRdata
+                , csrRdata = orNothing (instValid && isCsrAccess) csrResp.rdata
                 }
         }
 

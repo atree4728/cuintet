@@ -2,7 +2,7 @@ module Cuintet.InstDecoder (instDecode) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
-import Cuintet.Eei (Inst, Opcode (..), XLen)
+import Cuintet.Eei (Inst, Opcode (..), System12 (..), SystemOp (..), XLen)
 
 instDecode :: Inst -> (InstCtrl, BitVector XLen)
 instDecode bits = (ctrl op, imm op)
@@ -33,7 +33,18 @@ instDecode bits = (ctrl op, imm op)
     imm SYSTEM = immI -- use [11:0]
     imm _ = deepErrorX "imm: opcode carries no immediate"
 
-    instCtrl itype rwbEn isLui isAluOp isJump isLoad isCsr =
+    funct3 = slice d14 d12 bits
+    funct7 = slice d31 d25 bits
+
+    -- @funct3@ tells a CSR access from the rest; @immIG@ /is/ the @funct12@ field.
+    systemOp :: Opcode -> Maybe SystemOp
+    systemOp SYSTEM
+      | funct3 /= 0 = Just $ SysCsr (unpack funct3)
+      | ECALL <- System12 immIG = Just SysEcall
+      | otherwise = Just SysIllegal
+    systemOp _ = Nothing
+
+    instCtrl itype rwbEn isLui isAluOp isJump isLoad =
       InstCtrl
         { itype
         , rwbEn
@@ -41,22 +52,22 @@ instDecode bits = (ctrl op, imm op)
         , isAluOp
         , isJump
         , isLoad
-        , isCsr
-        , funct3 = slice d14 d12 bits
-        , funct7 = slice d31 d25 bits
+        , systemOp = systemOp op
+        , funct3
+        , funct7
         }
 
     ctrl :: Opcode -> InstCtrl
 {- FOURMOLU_DISABLE -}
-    ctrl LUI    = instCtrl UType  True  True False False False False
-    ctrl AUIPC  = instCtrl UType  True False False False False False
-    ctrl JAL    = instCtrl JType  True False False  True False False
-    ctrl JALR   = instCtrl IType  True False False  True False False
-    ctrl BRANCH = instCtrl BType False False False False False False
-    ctrl LOAD   = instCtrl IType  True False False False  True False
-    ctrl STORE  = instCtrl SType False False False False False False
-    ctrl OP     = instCtrl RType  True False  True False False False
-    ctrl OP_IMM = instCtrl IType  True False  True False False False
-    ctrl SYSTEM = instCtrl IType  True False False False False  True
+    ctrl LUI    = instCtrl UType  True  True False False False
+    ctrl AUIPC  = instCtrl UType  True False False False False
+    ctrl JAL    = instCtrl JType  True False False  True False
+    ctrl JALR   = instCtrl IType  True False False  True False
+    ctrl BRANCH = instCtrl BType False False False False False
+    ctrl LOAD   = instCtrl IType  True False False False  True
+    ctrl STORE  = instCtrl SType False False False False False
+    ctrl OP     = instCtrl RType  True False  True False False
+    ctrl OP_IMM = instCtrl IType  True False  True False False
+    ctrl SYSTEM = instCtrl IType  True False False False False
     ctrl _      = deepErrorX "ctrl: unknown opcode"
 {- FOURMOLU_ENABLE -}

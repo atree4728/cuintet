@@ -90,6 +90,16 @@ csrProg =
   , 0x30502173 -- 4: csrrs  x2, mtvec, x0 -- 0b10100 (ignore mode bits)
   ]
 
+ecallProg :: [Inst]
+ecallProg =
+  [ 0x30585073 --  0: csrrwi x0, mtvec, 0x10
+  , 0x00000073 --  4: ecall
+  , 0x00000000 --  8:
+  , 0x00000000 --  c:
+  , 0x342020f3 -- 10: csrrs x1, mcause, x0 -- 0xb (Environment call from M-mode])
+  , 0x34102173 -- 14: csrrs x2, mepc, x0   -- trapped at 0x4
+  ]
+
 tests :: TestTree
 tests =
   testGroup
@@ -130,4 +140,9 @@ tests =
     , testCase "Zicsr" $ do
         let regs = finalRegs 2 csrProg
         (regs !! (2 :: Int)) @?= 0b10100
+    , testCase "ecall" $ do
+        ((.pc) <$> runProgram 4 ecallProg) @?= [0x0, 0x04, 0x10, 0x14]
+        let regs = finalRegs 4 ecallProg
+        (regs !! (1 :: Int)) @?= 0xb
+        (regs !! (2 :: Int)) @?= 0x4
     ]

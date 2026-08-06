@@ -43,6 +43,8 @@ module Cuintet.Eei (
   ShiftRight (..),
   CsrType (..),
   CsrOp (..),
+  System12 (System12, ECALL),
+  SystemOp (..),
 ) where
 
 import Clash.Annotations.BitRepresentation
@@ -286,3 +288,21 @@ data CsrOp
   #-}
 
 deriveBitPack [t|CsrOp|]
+
+{- | The @funct12@ field of a @SYSTEM@ instruction whose @funct3@ is zero, where
+it names the operation rather than a CSR.
+-}
+newtype System12 = System12 (BitVector 12)
+  deriving newtype (Eq)
+
+pattern ECALL :: System12
+pattern ECALL = System12 0
+
+{- | What a @SYSTEM@ instruction asks for. @funct3@ tells a CSR access from the
+rest; among the rest, only @ECALL@ is implemented.
+-}
+data SystemOp
+  = SysCsr CsrOp
+  | SysEcall
+  | SysIllegal
+  deriving (Generic, NFDataX)
