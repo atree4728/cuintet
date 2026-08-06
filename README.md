@@ -1,5 +1,7 @@
 # Cuintet
 
+[![CI](https://github.com/atree4728/cuintet/actions/workflows/ci.yml/badge.svg)](https://github.com/atree4728/cuintet/actions/workflows/ci.yml)
+
 A RISC-V CPU written in Clash.
 
 ## Building and testing
