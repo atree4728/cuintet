@@ -109,6 +109,21 @@ mretProg =
   , 0x00000013 -- 10: addi x0, x0, 0
   ]
 
+dataHazardProg :: [Inst]
+dataHazardProg =
+  [ 0x00100093 -- 0: addi x1, x0, 1
+  , 0x00108113 -- 4: addi x2, x1, 1
+  ]
+
+loadUseProg :: [Inst]
+loadUseProg =
+  [ 0x02a00093 --  0: addi x1, x0, 42
+  , 0x10102023 --  4: sw   x1, 256(x0)
+  , 0x10002103 --  8: lw   x2, 256(x0)
+  , 0x00110193 --  c: addi x3, x2, 1
+  , 0x00118213 -- 10: addi x4, x3, 1
+  ]
+
 tests :: TestTree
 tests =
   testGroup
@@ -156,4 +171,12 @@ tests =
         (regs !! (2 :: Int)) @?= 0x4
     , testCase "mret" $
         ((.pc) <$> runProgram 3 mretProg) @?= [0x0, 0x04, 0x10]
+    , testCase "Interlock a data dependency" $ do
+        let regs = finalRegs 2 dataHazardProg
+        (regs !! (2 :: Int)) @?= 2
+    , testCase "Interlock a load-use dependency" $ do
+        let regs = finalRegs 5 loadUseProg
+        (regs !! (2 :: Int)) @?= 42
+        (regs !! (3 :: Int)) @?= 43
+        (regs !! (4 :: Int)) @?= 44
     ]
