@@ -47,11 +47,11 @@ module Cuintet.Core (CoreIn (..), CoreOut (..), core) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), isBranchOp)
-import Cuintet.CsrUnit (CsrAccess (..), CsrAddr (..), CsrFile, CsrReq (..), CsrResp (..), CsrTrap (..), csrUnitStep, initCsrFile, pattern ENVIRONMENT_CALL)
-import Cuintet.Eei (Addr, MemBusReq (MemBusReq, addr, wdata), MemBusResp (rdata, ready), MemReq, MemResp, SystemOp (..), XLen, instAt)
+import Cuintet.CsrUnit (CsrAccess (..), CsrAddr (..), CsrFile, CsrReq (..), CsrResp (..), CsrTrap (..), csrStep, initCsrFile, pattern ENVIRONMENT_CALL)
+import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, RegFile, SystemOp (..), instAt)
 import Cuintet.Fifo (FifoReq (..), FifoResp (..), fifo)
-import Cuintet.MemUnit (InstInfo (..), MemUnitReq (..), MemUnitResp (..), MemUnitState (..), memUnitStep)
-import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), MaWb (..), exMaRd, idExRd, maWbRd)
+import Cuintet.LoadStoreUnit (InstInfo (..), LoadStoreReq (..), LoadStoreResp (..), LoadStoreState (..), loadStoreStep)
+import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), MaWb (..), pendingRd)
 import Cuintet.Stage.Decode (decode, hazard)
 import Cuintet.Stage.Execute (execute)
 import Cuintet.Stage.Writeback (writeback)
@@ -77,17 +77,17 @@ data CoreOut = CoreOut
 
 -- | Core state. The @if@ prefix is short for instruction fetch.
 data CoreState = CoreState
-  { ifPc :: Addr
+  { next :: Addr
   -- ^ Program counter.
-  , ifRequested :: Maybe Addr
+  , fetching :: Maybe Addr
   -- ^ Address being fetched.
-  , ifFifoWdata :: Maybe IfId
+  , staged :: Maybe IfId
   -- ^ The instruction waiting to be written.
-  , regFile :: Vec 32 (BitVector XLen)
+  , regFile :: RegFile
   -- ^ Register file.
   , csrFile :: CsrFile
   -- ^ CSR file.
-  , memUnitState :: MemUnitState
+  , loadStoreState :: LoadStoreState
   -- ^ Memory unit state.
   }
   deriving (Generic, NFDataX)
@@ -95,12 +95,12 @@ data CoreState = CoreState
 initState :: CoreState
 initState =
   CoreState
-    { ifPc = 0
-    , ifRequested = Nothing
-    , ifFifoWdata = Nothing
+    { next = 0
+    , fetching = Nothing
+    , staged = Nothing
     , regFile = zeroBits :> replicate d31 (deepErrorX "register uninitialized")
     , csrFile = initCsrFile
-    , memUnitState = Idle
+    , loadStoreState = Idle
     }
 
 -- | Closes 'coreT' around the instruction FIFO.
@@ -123,15 +123,19 @@ coreT ::
   (CoreState, (CoreOut, FifoReq IfId, FifoReq IdEx, FifoReq ExMa, FifoReq MaWb))
 coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp, maWbResp) = (state', (coreOut, instReq, idExReq, exMaReq, maWbReq))
   where
-    pending = idExRd idExResp.rdata :> exMaRd exMaResp.rdata :> maWbRd maWbResp.rdata :> Nil
+    inflights =
+      (idExResp.rdata >>= pendingRd)
+        :> (exMaResp.rdata >>= pendingRd)
+        :> (maWbResp.rdata >>= pendingRd)
+        :> Nil
 
     -- IF stage
-    instReq = FifoReq {wdata = ifFifoWdata, rready = idIssue, flush = controlHazard}
+    instReq = FifoReq {wdata = staged, rready = idIssue, flush = controlHazard}
 
     -- ID stage
     idValid = isJust instResp.rdata
     idEx = decode regFile $ fromMaybe (deepErrorX "coreT: IF-ID FIFO is empty") instResp.rdata
-    idIssue = idValid && not (hazard idEx pending) && idExResp.wready && not controlHazard
+    idIssue = idValid && not (hazard idEx inflights) && idExResp.wready && not controlHazard
     idExReq = FifoReq {wdata = orNothing idIssue idEx, rready = exIssue, flush = controlHazard}
 
     -- EX-WB stage
@@ -146,7 +150,7 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp, maWb
     -- EX: the CSR access, and the redirect that @ECALL@ and @MRET@ answer with.
     -- A system instruction never stalls, so the request is raised in the clock
     -- it commits and @csrFile@ is never updated twice.
-    (csrFile', csrResp) = maybe (csrFile, Nothing) (fmap Just . csrUnitStep csrFile) csrReq
+    (csrFile', csrResp) = maybe (csrFile, Nothing) (fmap Just . csrStep csrFile) csrReq
     csrReq
       | not maValid = Nothing
       | Just (SysCsr csrOp) <- ctrl.systemOp =
@@ -158,30 +162,31 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp, maWb
     csrRedirect = case csrResp of Just (Redirect a) -> Just a; _ -> Nothing
 
     -- MA
-    (memUnitState', memUnitResp) =
-      memUnitStep
-        memUnitState
-        MemUnitReq
+    (loadStoreState', loadStoreResp) =
+      loadStoreStep
+        loadStoreState
+        LoadStoreReq
           { inst = orNothing maValid InstInfo {ctrl, addr = bitCoerce aluResult, wdata = rs2Data}
           , memResp = dResp
           }
 
     -- WB: the instruction leaves once MA has let go of it, draining the FIFO.
-    rready = not memUnitResp.stall
+    rready = not loadStoreResp.stall
     commit = maValid && rready
 
     wbData'
-      | ctrl.isLoad = fromMaybe (deepErrorX "coreT: load committed without data") memUnitResp.rdata
+      | ctrl.isLoad = fromMaybe (deepErrorX "coreT: load committed without data") loadStoreResp.rdata
       | Just rdata <- csrRdata = rdata
       | otherwise = wbData
     maWb =
       MaWb
         { pc
-        , inst = instBits
+        , instBits
         , ctrl
         , imm
         , rs1Addr
         , rs2Addr
+        , rdAddr
         , rs1Data
         , rs2Data
         , op1
@@ -198,21 +203,21 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp, maWb
     controlHazard = commit && (isJust csrRedirect || ctrl.isJump || isBranchOp ctrl && branchTaken)
 
     -- IF: the answer to the request issued when @ifRequested@ was set.
-    fetched = (,) <$> ifRequested <*> iResp.rdata
+    fetched = (,) <$> fetching <*> iResp.rdata
     accepted = instResp.wreadyTwo && iResp.ready
 
     -- next state
-    (ifPc', ifRequested')
+    (next', fetching')
       | controlHazard, Just redirect <- csrRedirect = (redirect, Nothing)
       | controlHazard && ctrl.isJump = (bitCoerce $ aluResult .&. complement 1, Nothing) -- aluResult is the destination
       | controlHazard && isBranchOp ctrl = (pc + numConvert imm, Nothing)
-      | accepted = (ifPc + 4, Just ifPc)
-      | otherwise = (ifPc, ifRequested)
-    ifFifoWdata'
+      | accepted = (next + 4, Just next)
+      | otherwise = (next, fetching)
+    staged'
       | controlHazard = Nothing
       | Just (addr, busWord) <- fetched = Just IfId {pc = addr, instBits = instAt addr busWord}
       | instResp.wready = Nothing
-      | otherwise = ifFifoWdata -- pending
+      | otherwise = staged -- pending
 
     -- Neither request may depend combinationally on @iResp@ or @dResp@, or a
     -- combinational loop closes through @memArbiter@. Both are driven straight
@@ -221,17 +226,17 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp, maWb
     -- pending write and this one both.
     coreOut =
       CoreOut
-        { iReq = orNothing instResp.wreadyTwo MemBusReq {addr = ifPc, wdata = Nothing}
-        , dReq = memUnitResp.memReq
+        { iReq = orNothing instResp.wreadyTwo BusReq {addr = next, wdata = Nothing}
+        , dReq = loadStoreResp.memReq
         , instLog = maWbResp.rdata
         }
 
     state' =
       CoreState
-        { ifPc = ifPc'
-        , ifRequested = ifRequested'
-        , ifFifoWdata = ifFifoWdata'
+        { next = next'
+        , fetching = fetching'
+        , staged = staged'
         , regFile = writeback regFile maWbResp.rdata
         , csrFile = csrFile'
-        , memUnitState = memUnitState'
+        , loadStoreState = loadStoreState'
         }

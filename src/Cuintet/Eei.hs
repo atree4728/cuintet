@@ -15,8 +15,8 @@ module Cuintet.Eei (
   laneMask,
   StoreLanes (..),
   LoadFmt (..),
-  MemBusReq (..),
-  MemBusResp (..),
+  BusReq (..),
+  BusResp (..),
   MemDataBytes,
   MemReq,
   MemResp,
@@ -28,6 +28,8 @@ module Cuintet.Eei (
   System12 (System12, ECALL, MRET),
   SystemOp (..),
   instAt,
+  RegFile,
+  RegAddr,
 ) where
 
 import Clash.Annotations.BitRepresentation
@@ -49,6 +51,10 @@ type XLenBytes = XLen `Div` 8
 type Addr = Unsigned XLen
 
 type Inst = BitVector ILen
+
+type RegFile = Vec 32 (BitVector XLen)
+
+type RegAddr = BitVector 5
 
 -- | Whether a narrower-than-register load fills the high bits with its sign or zero.
 data Sign = Signed | Unsigned
@@ -140,7 +146,7 @@ data LoadFmt = LoadFmt {width :: AccessWidth, offset :: LaneOffset}
 {- | Memory access request, carried on the bus as @Maybe (MemBusReq ...)@;
 @Nothing@ means no access.
 -}
-data MemBusReq nBytes = MemBusReq
+data BusReq nBytes = BusReq
   { addr :: Addr
   -- ^ The address to access.
   , wdata :: Maybe (StoreLanes nBytes)
@@ -148,7 +154,7 @@ data MemBusReq nBytes = MemBusReq
   }
   deriving (Generic, NFDataX)
 
-data MemBusResp nBytes = MemBusResp
+data BusResp nBytes = BusResp
   { ready :: Bool
   -- ^ Whether to accept a memory access request.
   , rdata :: Maybe (BitVector (nBytes * 8))
@@ -158,9 +164,9 @@ data MemBusResp nBytes = MemBusResp
 
 type MemDataBytes = XLenBytes
 
-type MemReq = MemBusReq MemDataBytes
+type MemReq = BusReq MemDataBytes
 
-type MemResp = MemBusResp MemDataBytes
+type MemResp = BusResp MemDataBytes
 
 {- | The @opcode@ field. RV64I names only a handful of the 128 patterns, so this
 is the field itself with names attached rather than a sum type: @unpack@ is pure

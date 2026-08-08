@@ -2,7 +2,7 @@ module Cuintet.Stage.Decode (decode, hazard) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
-import Cuintet.Eei (Inst, Opcode (..), System12 (..), SystemOp (..), XLen)
+import Cuintet.Eei (Inst, Opcode (..), RegAddr, System12 (..), SystemOp (..), XLen)
 import Cuintet.Pipeline (IdEx (..), IfId (..))
 
 decode :: Vec 32 (BitVector XLen) -> IfId -> IdEx
@@ -101,7 +101,7 @@ usesRs2 InstCtrl {itype} = case itype of
   BType -> True
   _ -> False
 
-hazard :: (KnownNat n) => IdEx -> Vec n (Maybe (BitVector 5)) -> Bool
+hazard :: (KnownNat n) => IdEx -> Vec n (Maybe RegAddr) -> Bool
 hazard IdEx {ctrl, rs1Addr, rs2Addr} = any conflicts
   where
     conflicts = maybe False $

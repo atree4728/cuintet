@@ -3,11 +3,11 @@
 module Cuintet (vDom50, topEntity, system) where
 
 import Clash.Prelude
+import Cuintet.BusArbiter (BusArbiterReq (..), BusArbiterResp (..), busArbiter)
 import Cuintet.Core (CoreIn (..), CoreOut (..), core)
 import Cuintet.Eei (MemDataBytes)
-import Cuintet.MemArbiter (MemArbiterReq (..), MemArbiterResp (..), memArbiter)
-import Cuintet.Memory (RamLane, blockRamLanes, memory)
 import Cuintet.Pipeline (MaWb)
+import Cuintet.Ram (RamLane, blockRamLanes, ram)
 
 createDomain vSystem {vName = "Dom50", vPeriod = hzToPeriod 50e6}
 
@@ -22,14 +22,14 @@ system lanes = (.instLog) <$> coreOut
   where
     coreOut = core coreIn
     coreIn = mkCoreIn <$> arbResp
-    mkCoreIn MemArbiterResp {iResp, dResp} = CoreIn {iResp, dResp}
+    mkCoreIn BusArbiterResp {iResp, dResp} = CoreIn {iResp, dResp}
 
     arbReq = mkArbReq <$> coreOut <*> memResp
-    mkArbReq CoreOut {iReq, dReq} mr = MemArbiterReq {iReq, dReq, memResp = mr}
-    arbResp = memArbiter arbReq
+    mkArbReq CoreOut {iReq, dReq} mr = BusArbiterReq {iReq, dReq, memResp = mr}
+    arbResp = busArbiter arbReq
 
     memReq = (.memReq) <$> arbResp
-    memResp = memory lanes memReq
+    memResp = ram lanes memReq
 
 topEntity ::
   Clock Dom50 ->

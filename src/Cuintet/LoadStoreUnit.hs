@@ -12,22 +12,21 @@ word by 'formatRdata'; narrower stores (SB\/SH\/SW) mask off the byte lanes
 outside the access by 'storeLanes'. Accesses that are not naturally aligned are
 rejected as 'deepErrorX' by 'access', so one never straddles two bus words.
 -}
-module Cuintet.MemUnit (
+module Cuintet.LoadStoreUnit (
   AccessWidth (..),
   InstInfo (..),
   LoadFmt (..),
   Sign (..),
-  MemUnitReq (..),
-  MemUnitResp (..),
-  MemUnitState (..),
+  LoadStoreReq (..),
+  LoadStoreResp (..),
+  LoadStoreState (..),
+  loadStoreStep,
   formatRdata,
-  memUnitStep,
-  memUnit,
 ) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), isMemOp, isStore)
-import Cuintet.Eei (AccessWidth (..), Addr, LaneOffset, LoadFmt (..), MemBusReq (..), MemBusResp (..), MemDataBytes, MemReq, MemResp, Sign (..), StoreLanes (..), XLen, aligned, bitOffset, laneMask, laneOffset)
+import Cuintet.Eei (AccessWidth (..), Addr, BusReq (..), BusResp (..), LaneOffset, LoadFmt (..), MemDataBytes, MemReq, MemResp, Sign (..), StoreLanes (..), XLen, aligned, bitOffset, laneMask, laneOffset)
 import Cuintet.Util (orNothing)
 import Data.Maybe (isJust, isNothing)
 
@@ -41,14 +40,14 @@ data InstInfo = InstInfo
   }
   deriving (Generic, NFDataX)
 
-data MemUnitReq = MemUnitReq
+data LoadStoreReq = LoadStoreReq
   { inst :: Maybe InstInfo
   -- ^ The instruction being executed, if any.
   , memResp :: MemResp
   }
   deriving (Generic, NFDataX)
 
-data MemUnitResp = MemUnitResp
+data LoadStoreResp = LoadStoreResp
   { rdata :: Maybe (BitVector XLen)
   , stall :: Bool
   -- ^ Whether the core must stall for an access in flight
@@ -61,7 +60,7 @@ data Access
   | Load LoadFmt
   deriving (Generic, NFDataX)
 
-data MemUnitState
+data LoadStoreState
   = -- | Wait for a new memory instruction; latch its request and move to 'WaitReady'.
     Idle
   | -- | Keep sending the request until the memory accepts it, then move to 'WaitValid', with @(addr, wdata)@
@@ -71,8 +70,8 @@ data MemUnitState
   deriving (Generic, NFDataX)
 
 -- | The state transision of the memory unit for a single cycle.
-memUnitStep :: MemUnitState -> MemUnitReq -> (MemUnitState, MemUnitResp)
-memUnitStep state MemUnitReq {inst, memResp} = (memUnitState, memUnitResp)
+loadStoreStep :: LoadStoreState -> LoadStoreReq -> (LoadStoreState, LoadStoreResp)
+loadStoreStep state LoadStoreReq {inst, memResp} = (memUnitState, memUnitResp)
   where
     memUnitState = case state of
       Idle | Just i <- inst, isMemOp i.ctrl -> WaitReady i.addr (access i.ctrl i.addr i.wdata)
@@ -80,7 +79,7 @@ memUnitStep state MemUnitReq {inst, memResp} = (memUnitState, memUnitResp)
       WaitValid _ | isJust memResp.rdata -> Idle
       _ -> state
     memUnitResp =
-      MemUnitResp
+      LoadStoreResp
         { rdata = case state of
             WaitValid (Load fmt) -> formatRdata fmt <$> memResp.rdata
             _ -> Nothing
@@ -93,8 +92,8 @@ memUnitStep state MemUnitReq {inst, memResp} = (memUnitState, memUnitResp)
             (Just _, WaitReady _ _) -> True
             (Just _, WaitValid _) -> isNothing memResp.rdata
         , memReq = case state of
-            WaitReady reqAddr (Load _) -> Just MemBusReq {addr = reqAddr, wdata = Nothing}
-            WaitReady reqAddr (Store wdata) -> Just MemBusReq {addr = reqAddr, wdata = Just wdata}
+            WaitReady reqAddr (Load _) -> Just BusReq {addr = reqAddr, wdata = Nothing}
+            WaitReady reqAddr (Store wdata) -> Just BusReq {addr = reqAddr, wdata = Just wdata}
             _ -> Nothing
         }
 
@@ -156,7 +155,3 @@ formatRdata LoadFmt {width, offset} busWord = case width of
     shifted = busWord `shiftR` bitOffset offset
     ext Signed = signExtend
     ext Unsigned = zeroExtend
-
--- | A thin wrapper for unit tests.
-memUnit :: (HiddenClockResetEnable dom) => Signal dom MemUnitReq -> Signal dom MemUnitResp
-memUnit = mealy memUnitStep Idle

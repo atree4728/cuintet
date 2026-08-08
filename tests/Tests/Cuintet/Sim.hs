@@ -3,9 +3,9 @@ module Tests.Cuintet.Sim (memImage, runProgram, finalRegs, packInsts) where
 import Clash.Prelude
 import Clash.Sized.Vector (unsafeFromList)
 import Cuintet (system)
-import Cuintet.Eei (Inst, XLen)
-import Cuintet.Memory (initRamLanes)
+import Cuintet.Eei (Inst, RegFile, XLen)
 import Cuintet.Pipeline (MaWb (..))
+import Cuintet.Ram (initRamLanes)
 import Data.Maybe (catMaybes)
 import Prelude qualified as P
 
@@ -25,7 +25,7 @@ runProgram :: Int -> [Inst] -> [MaWb]
 runProgram n prog =
   P.take n (catMaybes (sampleN @System (32 + 24 * n) (system (initRamLanes (memImage prog)))))
 
-finalRegs :: Int -> [Inst] -> Vec 32 (BitVector XLen)
+finalRegs :: Int -> [Inst] -> RegFile
 finalRegs n prog = P.foldl apply (replicate d32 0) (runProgram n prog)
   where
     apply regs l = maybe regs (\(a, d) -> replace a d regs) l.wbReq

@@ -8,11 +8,11 @@ module Cuintet.CsrUnit (
   CsrResp (..),
   CsrFile,
   initCsrFile,
-  csrUnitStep,
+  csrStep,
 ) where
 
 import Clash.Prelude
-import Cuintet.Eei (Addr, CsrOp (..), CsrType (..), XLen)
+import Cuintet.Eei (Addr, CsrOp (..), CsrType (..), RegAddr, XLen)
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe)
 
@@ -57,7 +57,7 @@ deriveAutoReg ''CsrFile
 data CsrAccess = CsrAccess
   { csrAddr :: CsrAddr
   , csrOp :: CsrOp
-  , rs1Addr :: BitVector 5 -- uimm in the @CsrImm@ case
+  , rs1Addr :: RegAddr -- uimm in the @CsrImm@ case
   , rs1Data :: BitVector XLen
   }
   deriving (Generic, NFDataX)
@@ -89,14 +89,14 @@ csrWrite ReadSet oldValue newValueM = maybe oldValue (oldValue .|.) newValueM
 csrWrite ReadClear oldValue newValueM = maybe oldValue ((oldValue .&.) . complement) newValueM
 csrWrite CSRIllegal _ _ = deepErrorX "csrWrite: illegal System instruction"
 
-csrUnitStep :: CsrFile -> CsrReq -> (CsrFile, CsrResp)
-csrUnitStep file (Trap CsrTrap {..}) =
+csrStep :: CsrFile -> CsrReq -> (CsrFile, CsrResp)
+csrStep file (Trap CsrTrap {..}) =
   ( file {mepcAligned = slice d63 d2 (pack pc), mcause}
   , Redirect $ bitCoerce $ file.mtvecBase ++# (0 :: BitVector 2)
   )
-csrUnitStep file Mret = (file, Redirect $ bitCoerce $ file.mepcAligned ++# (0 :: BitVector 2))
-csrUnitStep file (Access CsrAccess {..})
-  | CSRIllegal <- csrType = deepErrorX "csrUnitStep: illegal System instruction"
+csrStep file Mret = (file, Redirect $ bitCoerce $ file.mepcAligned ++# (0 :: BitVector 2))
+csrStep file (Access CsrAccess {..})
+  | CSRIllegal <- csrType = deepErrorX "csrStep: illegal System instruction"
   | MTVEC <- csrAddr =
       let old = file.mtvecBase ++# (0 :: BitVector 2)
        in (file {mtvecBase = slice d63 d2 (csrWrite csrType old wdata)}, Accessed old)
@@ -104,7 +104,7 @@ csrUnitStep file (Access CsrAccess {..})
       let old = file.mepcAligned ++# (0 :: BitVector 2)
        in (file {mepcAligned = slice d63 d2 (csrWrite csrType old wdata)}, Accessed old)
   | MCAUSE <- csrAddr = (file, Accessed (mcauseValue file.mcause))
-  | otherwise = deepErrorX "csrUnitStep: unimplemented CSR instruction"
+  | otherwise = deepErrorX "csrStep: unimplemented CSR instruction"
   where
     (wvalue, csrType) = case csrOp of
       CsrReg t -> (rs1Data, t)

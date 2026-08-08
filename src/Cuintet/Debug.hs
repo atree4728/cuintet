@@ -12,7 +12,7 @@ import Text.Printf (printf)
 >>> import Cuintet.Pipeline (MaWb (..))
 >>> import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
 >>> ctrl = InstCtrl{itype = IType, rwbEn = True, isLui = False, isAluOp = True, isOp32 = False, isJump = False, isLoad = False, systemOp = Nothing, funct3 = 0, funct7 = 0}
->>> l = MaWb{pc = 12, inst = 0x00110193, ctrl, imm = 1, rs1Addr = 2, rs2Addr = 1, rs1Data = 42, rs2Data = 0, op1 = 42, op2 = 1, aluResult = 43, wbReq = Just (3, 43), branchTaken = Nothing, csrRdata = Nothing}
+>>> l = MaWb{pc = 12, instBits = 0x00110193, ctrl, imm = 1, rs1Addr = 2, rs2Addr = 1, rdAddr = 3, rs1Data = 42, rs2Data = 0, op1 = 42, op2 = 1, aluResult = 43, wbReq = Just (3, 43), branchTaken = Nothing, csrRdata = Nothing}
 >>> putStrLn (showInstLog l)
 0000000c : 00110193
   itype   : 000010
@@ -40,7 +40,7 @@ showInstLog :: MaWb -> String
 showInstLog l =
   L.intercalate
     "\n"
-    ( [ printf "%08x : %08x" (toInteger l.pc) (toInteger l.inst)
+    ( [ printf "%08x : %08x" (toInteger l.pc) (toInteger l.instBits)
       , printf "  itype   : %06b" (toInteger $ instCode l.ctrl.itype)
       , printf "  imm     : %08x" (toInteger (if hasUndefined l.imm then zeroBits else l.imm))
       , printf "  rs1[%2d] : %08x" (toInteger l.rs1Addr) (toInteger l.rs1Data)

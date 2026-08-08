@@ -2,21 +2,17 @@
 Arbitrates a single-port memory between instruction fetch and load/store
 requests. See 'memArbiter'.
 -}
-module Cuintet.MemArbiter (Grant (..), MemArbiterReq (..), MemArbiterResp (..), memArbiter) where
+module Cuintet.BusArbiter (Grant (..), BusArbiterReq (..), BusArbiterResp (..), busArbiter) where
 
 import Clash.Prelude
-import Cuintet.Eei (
-  MemBusResp (MemBusResp, rdata, ready),
-  MemReq,
-  MemResp,
- )
+import Cuintet.Eei (BusResp (..), MemReq, MemResp)
 import Data.Maybe (isNothing)
 
 -- | Which side was granted the memory on the previous cycle.
 data Grant = ToInst | ToData
   deriving (Generic, NFDataX, Eq, Show)
 
-data MemArbiterReq = MemArbiterReq
+data BusArbiterReq = BusArbiterReq
   { iReq :: Maybe MemReq
   -- ^ Instruction fetch request.
   , dReq :: Maybe MemReq
@@ -26,7 +22,7 @@ data MemArbiterReq = MemArbiterReq
   }
   deriving (Generic, NFDataX)
 
-data MemArbiterResp = MemArbiterResp
+data BusArbiterResp = BusArbiterResp
   { memReq :: Maybe MemReq
   -- ^ Request to send to the memory.
   , iResp :: MemResp
@@ -45,12 +41,12 @@ that side. 'iResp'\'s @ready@ is masked while 'dReq' is present, so a
 fetch request is only accepted once no load\/store is contending; 'dResp'
 always sees the memory's @ready@ directly, since 'dReq' is never masked.
 -}
-memArbiter :: (HiddenClockResetEnable dom) => Signal dom MemArbiterReq -> Signal dom MemArbiterResp
-memArbiter = mealy step Nothing
+busArbiter :: (HiddenClockResetEnable dom) => Signal dom BusArbiterReq -> Signal dom BusArbiterResp
+busArbiter = mealy step Nothing
   where
-    step :: Maybe Grant -> MemArbiterReq -> (Maybe Grant, MemArbiterResp)
-    step grant MemArbiterReq {iReq, dReq, memResp = MemBusResp {ready, rdata}} =
-      (grant', MemArbiterResp {memReq, iResp, dResp})
+    step :: Maybe Grant -> BusArbiterReq -> (Maybe Grant, BusArbiterResp)
+    step grant BusArbiterReq {iReq, dReq, memResp = BusResp {ready, rdata}} =
+      (grant', BusArbiterResp {memReq, iResp, dResp})
       where
         memReq = dReq <|> iReq
 
@@ -59,12 +55,12 @@ memArbiter = mealy step Nothing
           | otherwise = grant
 
         iResp =
-          MemBusResp
+          BusResp
             { ready = ready && isNothing dReq
             , rdata = if grant == Just ToInst then rdata else Nothing
             }
         dResp =
-          MemBusResp
+          BusResp
             { ready
             , rdata = if grant == Just ToData then rdata else Nothing
             }

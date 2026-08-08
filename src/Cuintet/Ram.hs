@@ -1,7 +1,7 @@
-module Cuintet.Memory (RamLane, memory, blockRamLanes, initRamLanes) where
+module Cuintet.Ram (RamLane, ram, blockRamLanes, initRamLanes) where
 
 import Clash.Prelude
-import Cuintet.Eei
+import Cuintet.Eei (Addr, BusReq (..), BusResp (BusResp), StoreLanes (StoreLanes))
 import Cuintet.Util (orNothing)
 import Data.Maybe (isJust)
 
@@ -17,7 +17,7 @@ newtype RamLane dom ramAddrWidth
       )
 
 -- | One-cycle-delayed memory.
-memory ::
+ram ::
   forall dom nBytes ramAddrWidth.
   ( HiddenClockResetEnable dom
   , KnownNat nBytes -- to be a power of 2
@@ -27,20 +27,20 @@ memory ::
   -- | one-cycle-delayed BRAM component by @blockRam@ family, one per byte lane.
   Vec nBytes (RamLane dom ramAddrWidth) ->
   -- | Memory read/write request.
-  Signal dom (Maybe (MemBusReq nBytes)) ->
+  Signal dom (Maybe (BusReq nBytes)) ->
   -- | Read value, requested at the previous clock.
-  Signal dom (MemBusResp nBytes)
-memory lanes req = MemBusResp True <$> rdata
+  Signal dom (BusResp nBytes)
+ram lanes req = BusResp True <$> rdata
   where
     toRamAddr :: Addr -> Unsigned ramAddrWidth
     toRamAddr a = resize (a `shiftR` natToNum @(CLog 2 nBytes))
 
     laneWrite laneIndex mreq = do
-      MemBusReq {addr, wdata} <- mreq
+      BusReq {addr, wdata} <- mreq
       StoreLanes bytes <- wdata
       (toRamAddr addr,) <$> bytes !! laneIndex
 
-    runLane laneIndex (RamLane ram) = ram raddr (laneWrite laneIndex <$> req)
+    runLane laneIndex (RamLane lane) = lane raddr (laneWrite laneIndex <$> req)
       where
         raddr = maybe (errorX "memory: no request") (toRamAddr . (.addr)) <$> req
 

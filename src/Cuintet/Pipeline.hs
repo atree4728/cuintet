@@ -1,9 +1,10 @@
-module Cuintet.Pipeline (IfId (..), IdEx (..), ExMa (..), MaWb (..), rdOf, idExRd, exMaRd, maWbRd) where
+module Cuintet.Pipeline (IfId (..), IdEx (..), ExMa (..), MaWb (..), pendingRd) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..))
-import Cuintet.Eei (Addr, Inst, XLen)
+import Cuintet.Eei (Addr, Inst, RegAddr, XLen)
 import Cuintet.Util (orNothing)
+import GHC.Records (HasField)
 
 data IfId = IfId
   { pc :: Addr
@@ -16,9 +17,9 @@ data IdEx = IdEx
   , instBits :: Inst
   , ctrl :: InstCtrl
   , imm :: BitVector XLen
-  , rs1Addr :: BitVector 5
-  , rs2Addr :: BitVector 5
-  , rdAddr :: BitVector 5
+  , rs1Addr :: RegAddr
+  , rs2Addr :: RegAddr
+  , rdAddr :: RegAddr
   , rs1Data :: BitVector XLen
   , rs2Data :: BitVector XLen
   }
@@ -29,9 +30,9 @@ data ExMa = ExMa
   , instBits :: Inst
   , ctrl :: InstCtrl
   , imm :: BitVector XLen
-  , rs1Addr :: BitVector 5
-  , rs2Addr :: BitVector 5
-  , rdAddr :: BitVector 5
+  , rs1Addr :: RegAddr
+  , rs2Addr :: RegAddr
+  , rdAddr :: RegAddr
   , rs1Data :: BitVector XLen
   , rs2Data :: BitVector XLen
   , op1 :: BitVector XLen
@@ -44,30 +45,26 @@ data ExMa = ExMa
 
 data MaWb = MaWb
   { pc :: Addr
-  , inst :: Inst
+  , instBits :: Inst
   , ctrl :: InstCtrl
   , imm :: BitVector XLen
-  , rs1Addr :: BitVector 5
-  , rs2Addr :: BitVector 5
+  , rs1Addr :: RegAddr
+  , rs2Addr :: RegAddr
+  , rdAddr :: RegAddr
   , rs1Data :: BitVector XLen
   , rs2Data :: BitVector XLen
   , op1 :: BitVector XLen
   , op2 :: BitVector XLen
   , aluResult :: BitVector XLen
   , branchTaken :: Maybe Bool
-  , wbReq :: Maybe (BitVector 5, BitVector XLen)
+  , wbReq :: Maybe (RegAddr, BitVector XLen)
   , csrRdata :: Maybe (BitVector XLen)
   }
   deriving (Generic, NFDataX)
 
-rdOf :: InstCtrl -> BitVector 5 -> Maybe (BitVector 5)
-rdOf InstCtrl {rwbEn} rdAddr = orNothing (rwbEn && rdAddr /= 0) rdAddr
-
-idExRd :: Maybe IdEx -> Maybe (BitVector 5)
-idExRd idExM = idExM >>= \idEx -> rdOf idEx.ctrl idEx.rdAddr
-
-exMaRd :: Maybe ExMa -> Maybe (BitVector 5)
-exMaRd exMaM = exMaM >>= \exMa -> rdOf exMa.ctrl exMa.rdAddr
-
-maWbRd :: Maybe MaWb -> Maybe (BitVector 5)
-maWbRd maWbM = maWbM >>= \maWb -> fst <$> maWb.wbReq
+pendingRd ::
+  ( HasField "ctrl" stage InstCtrl
+  , HasField "rdAddr" stage RegAddr
+  ) =>
+  stage -> Maybe RegAddr
+pendingRd stage = orNothing (stage.ctrl.rwbEn && stage.rdAddr /= 0) stage.rdAddr

@@ -64,18 +64,16 @@ library
   -- cabal-gild: discover src
   exposed-modules:
     Cuintet
-    Cuintet.Alu
-    Cuintet.BrUnit
+    Cuintet.BusArbiter
     Cuintet.Core
     Cuintet.CoreCtrl
     Cuintet.CsrUnit
     Cuintet.Debug
     Cuintet.Eei
     Cuintet.Fifo
-    Cuintet.MemArbiter
-    Cuintet.Memory
-    Cuintet.MemUnit
+    Cuintet.LoadStoreUnit
     Cuintet.Pipeline
+    Cuintet.Ram
     Cuintet.Stage.Decode
     Cuintet.Stage.Execute
     Cuintet.Stage.Writeback
