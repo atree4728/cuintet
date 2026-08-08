@@ -46,15 +46,14 @@ combinational logic.
 module Cuintet.Core (CoreIn (..), CoreOut (..), core) where
 
 import Clash.Prelude
-import Cuintet.Alu (alu)
-import Cuintet.BrUnit (brUnit)
-import Cuintet.CoreCtrl (InstCtrl (..), InstType (..), isBranchOp)
+import Cuintet.CoreCtrl (InstCtrl (..), isBranchOp)
 import Cuintet.CsrUnit (CsrAccess (..), CsrAddr (..), CsrFile, CsrReq (..), CsrResp (..), CsrTrap (..), csrUnitStep, initCsrFile, pattern ENVIRONMENT_CALL)
 import Cuintet.Eei (Addr, MemBusReq (MemBusReq, addr, wdata), MemBusResp (rdata, ready), MemReq, MemResp, SystemOp (..), XLen, instAt)
 import Cuintet.Fifo (FifoReq (..), FifoResp (..), fifo)
 import Cuintet.MemUnit (InstInfo (..), MemUnitReq (..), MemUnitResp (..), MemUnitState (..), memUnitStep)
-import Cuintet.Pipeline (IdEx (..), IfId (..), InstLog (..), idExRd)
+import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), InstLog (..), exMaRd, idExRd)
 import Cuintet.Stage.Decode (decode, hazard)
+import Cuintet.Stage.Execute (execute)
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust)
 
@@ -83,8 +82,6 @@ data CoreState = CoreState
   -- ^ Address being fetched.
   , ifFifoWdata :: Maybe IfId
   -- ^ The instruction waiting to be written.
-  , isNew :: Bool
-  -- ^ Whether the instruction at the FIFO's head is newly presented this cycle.
   , regFile :: Vec 32 (BitVector XLen)
   -- ^ Register file.
   , csrFile :: CsrFile
@@ -100,27 +97,10 @@ initState =
     { ifPc = 0
     , ifRequested = Nothing
     , ifFifoWdata = Nothing
-    , isNew = True
     , regFile = zeroBits :> replicate d31 (deepErrorX "register uninitialized")
     , csrFile = initCsrFile
     , memUnitState = Idle
     }
-
--- | Extract the two operands according to the instruction form.
-operands ::
-  InstCtrl ->
-  BitVector XLen ->
-  BitVector XLen ->
-  BitVector XLen ->
-  Addr ->
-  (BitVector XLen, BitVector XLen)
-operands InstCtrl {itype} imm rs1Data rs2Data pc = case itype of
-  RType -> (rs1Data, rs2Data)
-  BType -> (rs1Data, rs2Data)
-  IType -> (rs1Data, imm)
-  SType -> (rs1Data, imm)
-  UType -> (bitCoerce pc, imm)
-  JType -> (bitCoerce pc, imm)
 
 -- | Closes 'coreT' around the instruction FIFO.
 core ::
@@ -129,46 +109,48 @@ core ::
   Signal dom CoreOut
 core coreIn = coreOut
   where
-    (coreOut, instReq, idExReq) = unbundle $ mealy coreT initState (bundle (coreIn, instResp, idExResp))
+    (coreOut, instReq, idExReq, exMaReq) = unbundle $ mealy coreT initState (bundle (coreIn, instResp, idExResp, exMaResp))
     instResp = fifo d3 instReq
     idExResp = fifo d1 idExReq
+    exMaResp = fifo d1 exMaReq
 
 -- | One clock of every stage, all combinational.
 coreT ::
   CoreState ->
-  (CoreIn, FifoResp IfId, FifoResp IdEx) ->
-  (CoreState, (CoreOut, FifoReq IfId, FifoReq IdEx))
-coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp) = (state', (coreOut, instReq, idExReq))
+  (CoreIn, FifoResp IfId, FifoResp IdEx, FifoResp ExMa) ->
+  (CoreState, (CoreOut, FifoReq IfId, FifoReq IdEx, FifoReq ExMa))
+coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp) = (state', (coreOut, instReq, idExReq, exMaReq))
   where
     -- IF stage
     instReq = FifoReq {wdata = ifFifoWdata, rready = idIssue, flush = controlHazard}
 
     -- ID stage
     idValid = isJust instResp.rdata
-    ifId = fromMaybe (deepErrorX "coreT: IF-ID FIFO is empty") instResp.rdata
-    idEx' = decode regFile ifId
-    idIssue = idValid && not (hazard idEx' pending) && idExResp.wready && not controlHazard
+    idEx = decode regFile $ fromMaybe (deepErrorX "coreT: IF-ID FIFO is empty") instResp.rdata
+    idIssue = idValid && not (hazard idEx pending) && idExResp.wready && not controlHazard
       where
-        pending = idExRd idExResp.rdata :> Nil
-    idExReq = FifoReq {wdata = orNothing idIssue idEx', rready, flush = False}
+        pending = idExRd idExResp.rdata :> exMaRd exMaResp.rdata :> Nil
+    idExReq = FifoReq {wdata = orNothing idIssue idEx, rready = exIssue, flush = controlHazard}
 
     -- EX-WB stage
     exValid = isJust idExResp.rdata
-    idEx = fromMaybe (deepErrorX "coreT: ID-EX FIFO is empty") idExResp.rdata
+    exMa = execute $ fromMaybe (deepErrorX "coreT: ID-EX FIFO is empty") idExResp.rdata
+    exIssue = exValid && exMaResp.wready
 
-    (op1, op2) = operands idEx.ctrl idEx.imm idEx.rs1Data idEx.rs2Data idEx.pc
-    aluResult = alu idEx.ctrl op1 op2
+    maValid = isJust exMaResp.rdata
+    ExMa {..} = fromMaybe (deepErrorX "coreT: EX-MA FIFO is empty") exMaResp.rdata
+    exMaReq = FifoReq {wdata = orNothing exIssue exMa, rready, flush = False}
 
     -- EX: the CSR access, and the redirect that @ECALL@ and @MRET@ answer with.
     -- A system instruction never stalls, so the request is raised in the clock
     -- it commits and @csrFile@ is never updated twice.
     (csrFile', csrResp) = maybe (csrFile, Nothing) (fmap Just . csrUnitStep csrFile) csrReq
     csrReq
-      | not exValid = Nothing
-      | Just (SysCsr csrOp) <- idEx.ctrl.systemOp =
-          Just $ Access CsrAccess {csrAddr = CsrAddr (slice d11 d0 idEx.imm), csrOp, rs1Addr = idEx.rs1Addr, rs1Data = idEx.rs1Data}
-      | Just SysEcall <- idEx.ctrl.systemOp = Just $ Trap CsrTrap {pc = idEx.pc, mcause = ENVIRONMENT_CALL}
-      | Just SysMret <- idEx.ctrl.systemOp = Just Mret
+      | not maValid = Nothing
+      | Just (SysCsr csrOp) <- ctrl.systemOp =
+          Just $ Access CsrAccess {csrAddr = CsrAddr (slice d11 d0 imm), csrOp, rs1Addr, rs1Data}
+      | Just SysEcall <- ctrl.systemOp = Just $ Trap CsrTrap {pc, mcause = ENVIRONMENT_CALL}
+      | Just SysMret <- ctrl.systemOp = Just Mret
       | otherwise = Nothing
     csrRdata = case csrResp of Just (Accessed v) -> Just v; _ -> Nothing
     csrRedirect = case csrResp of Just (Redirect a) -> Just a; _ -> Nothing
@@ -178,25 +160,22 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp) = (state', (co
       memUnitStep
         memUnitState
         MemUnitReq
-          { inst = orNothing exValid InstInfo {isNew, ctrl = idEx.ctrl, addr = bitCoerce aluResult, wdata = idEx.rs2Data}
+          { inst = orNothing maValid InstInfo {ctrl, addr = bitCoerce aluResult, wdata = rs2Data}
           , memResp = dResp
           }
 
     -- WB: the instruction leaves once MA has let go of it, draining the FIFO.
     rready = not memUnitResp.stall
-    commit = exValid && rready
+    commit = maValid && rready
 
-    wbData
-      | idEx.ctrl.isLui = idEx.imm
-      | idEx.ctrl.isJump = bitCoerce (idEx.pc + 4)
-      | idEx.ctrl.isLoad = fromMaybe (deepErrorX "coreT: load committed without data") memUnitResp.rdata
+    wbData'
+      | ctrl.isLoad = fromMaybe (deepErrorX "coreT: load committed without data") memUnitResp.rdata
       | Just rdata <- csrRdata = rdata
-      | otherwise = aluResult
-    wbReq = orNothing (commit && idEx.ctrl.rwbEn && idEx.rdAddr /= 0) (idEx.rdAddr, wbData)
+      | otherwise = wbData
+    wbReq = orNothing (commit && ctrl.rwbEn && rdAddr /= 0) (rdAddr, wbData')
 
     -- Everything that redirects IF.
-    branchTaken = brUnit idEx.ctrl.funct3 op1 op2
-    controlHazard = commit && (isJust csrRedirect || idEx.ctrl.isJump || isBranchOp idEx.ctrl && branchTaken)
+    controlHazard = commit && (isJust csrRedirect || ctrl.isJump || isBranchOp ctrl && branchTaken)
 
     -- IF: the answer to the request issued when @ifRequested@ was set.
     fetched = (,) <$> ifRequested <*> iResp.rdata
@@ -205,8 +184,8 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp) = (state', (co
     -- next state
     (ifPc', ifRequested')
       | controlHazard, Just redirect <- csrRedirect = (redirect, Nothing)
-      | controlHazard && idEx.ctrl.isJump = (bitCoerce $ aluResult .&. complement 1, Nothing) -- aluResult is the destination
-      | controlHazard && isBranchOp idEx.ctrl = (idEx.pc + numConvert idEx.imm, Nothing)
+      | controlHazard && ctrl.isJump = (bitCoerce $ aluResult .&. complement 1, Nothing) -- aluResult is the destination
+      | controlHazard && isBranchOp ctrl = (pc + numConvert imm, Nothing)
       | accepted = (ifPc + 4, Just ifPc)
       | otherwise = (ifPc, ifRequested)
     ifFifoWdata'
@@ -228,18 +207,18 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp) = (state', (co
             orNothing
               commit
               InstLog
-                { pc = idEx.pc
-                , inst = idEx.instBits
-                , ctrl = idEx.ctrl
-                , imm = idEx.imm
-                , rs1Addr = idEx.rs1Addr
-                , rs2Addr = idEx.rs2Addr
-                , rs1Data = idEx.rs1Data
-                , rs2Data = idEx.rs2Data
+                { pc
+                , inst = instBits
+                , ctrl
+                , imm
+                , rs1Addr
+                , rs2Addr
+                , rs1Data
+                , rs2Data
                 , op1
                 , op2
                 , aluResult
-                , branchTaken = orNothing (exValid && isBranchOp idEx.ctrl) branchTaken
+                , branchTaken = orNothing (isBranchOp ctrl) branchTaken
                 , wbReq
                 , csrRdata
                 }
@@ -250,7 +229,6 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp) = (state', (co
         { ifPc = ifPc'
         , ifRequested = ifRequested'
         , ifFifoWdata = ifFifoWdata'
-        , isNew = not exValid || rready
         , regFile = maybe regFile (\(a, d) -> replace a d regFile) wbReq
         , csrFile = csrFile'
         , memUnitState = memUnitState'

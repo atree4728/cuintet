@@ -1,4 +1,4 @@
-module Cuintet.Pipeline (IfId (..), IdEx (..), InstLog (..), rdOf, idExRd) where
+module Cuintet.Pipeline (IfId (..), IdEx (..), ExMa (..), InstLog (..), rdOf, idExRd, exMaRd) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..))
@@ -21,6 +21,24 @@ data IdEx = IdEx
   , rdAddr :: BitVector 5
   , rs1Data :: BitVector XLen
   , rs2Data :: BitVector XLen
+  }
+  deriving (Generic, NFDataX)
+
+data ExMa = ExMa
+  { pc :: Addr
+  , instBits :: Inst
+  , ctrl :: InstCtrl
+  , imm :: BitVector XLen
+  , rs1Addr :: BitVector 5
+  , rs2Addr :: BitVector 5
+  , rdAddr :: BitVector 5
+  , rs1Data :: BitVector XLen
+  , rs2Data :: BitVector XLen
+  , op1 :: BitVector XLen
+  , op2 :: BitVector XLen
+  , aluResult :: BitVector XLen
+  , branchTaken :: Bool
+  , wbData :: BitVector XLen
   }
   deriving (Generic, NFDataX)
 
@@ -47,3 +65,6 @@ rdOf InstCtrl {rwbEn} rdAddr = orNothing (rwbEn && rdAddr /= 0) rdAddr
 
 idExRd :: Maybe IdEx -> Maybe (BitVector 5)
 idExRd idExM = idExM >>= \idEx -> rdOf idEx.ctrl idEx.rdAddr
+
+exMaRd :: Maybe ExMa -> Maybe (BitVector 5)
+exMaRd exMaM = exMaM >>= \exMa -> rdOf exMa.ctrl exMa.rdAddr

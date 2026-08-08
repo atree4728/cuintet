@@ -28,11 +28,11 @@ loadProg =
   , 0x02104103 -- lbu  x2, 0x21(x0) : x2 = 00000000000000be
   , 0x02201183 -- lh   x3, 0x22(x0) : x3 = ffffffffffffdead
   , 0x02205203 -- lhu  x4, 0x22(x0) : x4 = 000000000000dead
-  , 0x00000000
-  , 0x00000000
-  , 0x00000000
-  , 0x00000000
-  , 0xdeadbeef
+  , 0x00000013 -- nop
+  , 0x00000013
+  , 0x00000013
+  , 0x00000013
+  , 0xdeadbeef -- 0x20: the word the loads read
   ]
 
 storeProg :: [Inst]

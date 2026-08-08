@@ -33,9 +33,7 @@ import Data.Maybe (isJust, isNothing)
 
 -- | The instruction supplied to the memory unit.
 data InstInfo = InstInfo
-  { isNew :: Bool
-  -- ^ Whether the instruction is newly supplied this cycle.
-  , ctrl :: InstCtrl
+  { ctrl :: InstCtrl
   , addr :: Addr
   -- ^ The access address computed by the ALU.
   , wdata :: BitVector XLen
@@ -76,9 +74,8 @@ data MemUnitState
 memUnitStep :: MemUnitState -> MemUnitReq -> (MemUnitState, MemUnitResp)
 memUnitStep state MemUnitReq {inst, memResp} = (memUnitState, memUnitResp)
   where
-    isNewMemOp InstInfo {isNew, ctrl} = isNew && isMemOp ctrl
     memUnitState = case state of
-      Idle | Just i <- inst, isNewMemOp i -> WaitReady i.addr (access i.ctrl i.addr i.wdata)
+      Idle | Just i <- inst, isMemOp i.ctrl -> WaitReady i.addr (access i.ctrl i.addr i.wdata)
       WaitReady _ acc | memResp.ready -> WaitValid acc
       WaitValid _ | isJust memResp.rdata -> Idle
       _ -> state
@@ -92,7 +89,7 @@ memUnitStep state MemUnitReq {inst, memResp} = (memUnitState, memUnitResp)
           -- in 'WaitValid' until the response arrives.
           stall = case (inst, state) of
             (Nothing, _) -> False
-            (Just i, Idle) -> isNewMemOp i
+            (Just i, Idle) -> isMemOp i.ctrl
             (Just _, WaitReady _ _) -> True
             (Just _, WaitValid _) -> isNothing memResp.rdata
         , memReq = case state of
