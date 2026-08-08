@@ -7,7 +7,7 @@ import Cuintet.Core (CoreIn (..), CoreOut (..), core)
 import Cuintet.Eei (MemDataBytes)
 import Cuintet.MemArbiter (MemArbiterReq (..), MemArbiterResp (..), memArbiter)
 import Cuintet.Memory (RamLane, blockRamLanes, memory)
-import Cuintet.Pipeline (InstLog)
+import Cuintet.Pipeline (MaWb)
 
 createDomain vSystem {vName = "Dom50", vPeriod = hzToPeriod 50e6}
 
@@ -17,7 +17,7 @@ system ::
   ) =>
   -- | RAM lane for each byte of the word
   Vec MemDataBytes (RamLane dom ramAddrWidth) ->
-  Signal dom (Maybe InstLog)
+  Signal dom (Maybe MaWb)
 system lanes = (.instLog) <$> coreOut
   where
     coreOut = core coreIn
@@ -35,7 +35,7 @@ topEntity ::
   Clock Dom50 ->
   Reset Dom50 ->
   Enable Dom50 ->
-  Signal Dom50 (Maybe InstLog)
+  Signal Dom50 (Maybe MaWb)
 topEntity = exposeClockResetEnable $ system (blockRamLanes d19) -- BRAM size = 2^19 * 8 bytes = 4 MiB
 {-# ANN
   topEntity

@@ -2,7 +2,7 @@ module Tests.Cuintet.Core (tests) where
 
 import Clash.Prelude
 import Cuintet.Eei (Inst)
-import Cuintet.Pipeline (InstLog (..))
+import Cuintet.Pipeline (MaWb (..))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 import Tests.Cuintet.Sim (finalRegs, runProgram)

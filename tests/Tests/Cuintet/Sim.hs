@@ -5,7 +5,7 @@ import Clash.Sized.Vector (unsafeFromList)
 import Cuintet (system)
 import Cuintet.Eei (Inst, XLen)
 import Cuintet.Memory (initRamLanes)
-import Cuintet.Pipeline (InstLog (..))
+import Cuintet.Pipeline (MaWb (..))
 import Data.Maybe (catMaybes)
 import Prelude qualified as P
 
@@ -21,7 +21,7 @@ packInsts (l : h : rest) = h ++# l : packInsts rest
 memImage :: [Inst] -> Vec 128 (BitVector XLen)
 memImage prog = unsafeFromList (packInsts $ P.take 256 (prog P.++ P.repeat nop))
 
-runProgram :: Int -> [Inst] -> [InstLog]
+runProgram :: Int -> [Inst] -> [MaWb]
 runProgram n prog =
   P.take n (catMaybes (sampleN @System (32 + 24 * n) (system (initRamLanes (memImage prog)))))
 

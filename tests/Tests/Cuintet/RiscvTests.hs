@@ -12,7 +12,7 @@ import Clash.Sized.Vector (unsafeFromList)
 import Cuintet (system)
 import Cuintet.Eei (Inst, MemDataBytes)
 import Cuintet.Memory (initRamLanes)
-import Cuintet.Pipeline (InstLog (..))
+import Cuintet.Pipeline (MaWb (..))
 import Data.ByteString.Char8 qualified as BC
 import Data.FileEmbed (embedDir, makeRelativeToProject)
 import Data.List (sortOn)
@@ -75,7 +75,7 @@ runImage img = verdict (replicate d32 0) instLogs
   where
     instLogs = catMaybes (sampleN @System maxCycles (system (initRamLanes img)))
 
-    verdict :: Vec 32 (BitVector (MemDataBytes * 8)) -> [InstLog] -> Either String ()
+    verdict :: Vec 32 (BitVector (MemDataBytes * 8)) -> [MaWb] -> Either String ()
     verdict _ [] = Left (printf "no ecall within %d cycles" maxCycles)
     verdict regs (l : ls)
       | l.inst == ecall = report (regs !! testnum)

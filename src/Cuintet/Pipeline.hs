@@ -1,4 +1,4 @@
-module Cuintet.Pipeline (IfId (..), IdEx (..), ExMa (..), InstLog (..), rdOf, idExRd, exMaRd) where
+module Cuintet.Pipeline (IfId (..), IdEx (..), ExMa (..), MaWb (..), rdOf, idExRd, exMaRd, maWbRd) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..))
@@ -42,7 +42,7 @@ data ExMa = ExMa
   }
   deriving (Generic, NFDataX)
 
-data InstLog = InstLog
+data MaWb = MaWb
   { pc :: Addr
   , inst :: Inst
   , ctrl :: InstCtrl
@@ -68,3 +68,6 @@ idExRd idExM = idExM >>= \idEx -> rdOf idEx.ctrl idEx.rdAddr
 
 exMaRd :: Maybe ExMa -> Maybe (BitVector 5)
 exMaRd exMaM = exMaM >>= \exMa -> rdOf exMa.ctrl exMa.rdAddr
+
+maWbRd :: Maybe MaWb -> Maybe (BitVector 5)
+maWbRd maWbM = maWbM >>= \maWb -> fst <$> maWb.wbReq

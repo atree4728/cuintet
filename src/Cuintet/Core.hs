@@ -51,9 +51,10 @@ import Cuintet.CsrUnit (CsrAccess (..), CsrAddr (..), CsrFile, CsrReq (..), CsrR
 import Cuintet.Eei (Addr, MemBusReq (MemBusReq, addr, wdata), MemBusResp (rdata, ready), MemReq, MemResp, SystemOp (..), XLen, instAt)
 import Cuintet.Fifo (FifoReq (..), FifoResp (..), fifo)
 import Cuintet.MemUnit (InstInfo (..), MemUnitReq (..), MemUnitResp (..), MemUnitState (..), memUnitStep)
-import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), InstLog (..), exMaRd, idExRd)
+import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), MaWb (..), exMaRd, idExRd, maWbRd)
 import Cuintet.Stage.Decode (decode, hazard)
 import Cuintet.Stage.Execute (execute)
+import Cuintet.Stage.Writeback (writeback)
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust)
 
@@ -69,7 +70,7 @@ data CoreOut = CoreOut
   -- ^ Instruction fetch request.
   , dReq :: Maybe MemReq
   -- ^ Load/store request.
-  , instLog :: Maybe InstLog
+  , instLog :: Maybe MaWb
   }
 
 -- | Execution log of a single instruction, emitted only in the clock it commits.
@@ -109,18 +110,21 @@ core ::
   Signal dom CoreOut
 core coreIn = coreOut
   where
-    (coreOut, instReq, idExReq, exMaReq) = unbundle $ mealy coreT initState (bundle (coreIn, instResp, idExResp, exMaResp))
+    (coreOut, instReq, idExReq, exMaReq, maWbReq) = unbundle $ mealy coreT initState (bundle (coreIn, instResp, idExResp, exMaResp, maWbResp))
     instResp = fifo d3 instReq
     idExResp = fifo d1 idExReq
     exMaResp = fifo d1 exMaReq
+    maWbResp = fifo d1 maWbReq
 
 -- | One clock of every stage, all combinational.
 coreT ::
   CoreState ->
-  (CoreIn, FifoResp IfId, FifoResp IdEx, FifoResp ExMa) ->
-  (CoreState, (CoreOut, FifoReq IfId, FifoReq IdEx, FifoReq ExMa))
-coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp) = (state', (coreOut, instReq, idExReq, exMaReq))
+  (CoreIn, FifoResp IfId, FifoResp IdEx, FifoResp ExMa, FifoResp MaWb) ->
+  (CoreState, (CoreOut, FifoReq IfId, FifoReq IdEx, FifoReq ExMa, FifoReq MaWb))
+coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp, maWbResp) = (state', (coreOut, instReq, idExReq, exMaReq, maWbReq))
   where
+    pending = idExRd idExResp.rdata :> exMaRd exMaResp.rdata :> maWbRd maWbResp.rdata :> Nil
+
     -- IF stage
     instReq = FifoReq {wdata = ifFifoWdata, rready = idIssue, flush = controlHazard}
 
@@ -128,8 +132,6 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp) = (s
     idValid = isJust instResp.rdata
     idEx = decode regFile $ fromMaybe (deepErrorX "coreT: IF-ID FIFO is empty") instResp.rdata
     idIssue = idValid && not (hazard idEx pending) && idExResp.wready && not controlHazard
-      where
-        pending = idExRd idExResp.rdata :> exMaRd exMaResp.rdata :> Nil
     idExReq = FifoReq {wdata = orNothing idIssue idEx, rready = exIssue, flush = controlHazard}
 
     -- EX-WB stage
@@ -172,7 +174,25 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp) = (s
       | ctrl.isLoad = fromMaybe (deepErrorX "coreT: load committed without data") memUnitResp.rdata
       | Just rdata <- csrRdata = rdata
       | otherwise = wbData
-    wbReq = orNothing (commit && ctrl.rwbEn && rdAddr /= 0) (rdAddr, wbData')
+    maWb =
+      MaWb
+        { pc
+        , inst = instBits
+        , ctrl
+        , imm
+        , rs1Addr
+        , rs2Addr
+        , rs1Data
+        , rs2Data
+        , op1
+        , op2
+        , aluResult
+        , branchTaken = orNothing (isBranchOp ctrl) branchTaken
+        , wbReq = orNothing (ctrl.rwbEn && rdAddr /= 0) (rdAddr, wbData')
+        , csrRdata
+        }
+
+    maWbReq = FifoReq {wdata = orNothing commit maWb, rready = True, flush = False}
 
     -- Everything that redirects IF.
     controlHazard = commit && (isJust csrRedirect || ctrl.isJump || isBranchOp ctrl && branchTaken)
@@ -203,25 +223,7 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp) = (s
       CoreOut
         { iReq = orNothing instResp.wreadyTwo MemBusReq {addr = ifPc, wdata = Nothing}
         , dReq = memUnitResp.memReq
-        , instLog =
-            orNothing
-              commit
-              InstLog
-                { pc
-                , inst = instBits
-                , ctrl
-                , imm
-                , rs1Addr
-                , rs2Addr
-                , rs1Data
-                , rs2Data
-                , op1
-                , op2
-                , aluResult
-                , branchTaken = orNothing (isBranchOp ctrl) branchTaken
-                , wbReq
-                , csrRdata
-                }
+        , instLog = maWbResp.rdata
         }
 
     state' =
@@ -229,7 +231,7 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp) = (s
         { ifPc = ifPc'
         , ifRequested = ifRequested'
         , ifFifoWdata = ifFifoWdata'
-        , regFile = maybe regFile (\(a, d) -> replace a d regFile) wbReq
+        , regFile = writeback regFile maWbResp.rdata
         , csrFile = csrFile'
         , memUnitState = memUnitState'
         }
