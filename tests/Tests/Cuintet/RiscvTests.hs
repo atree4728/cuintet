@@ -10,9 +10,9 @@ module Tests.Cuintet.RiscvTests (tests) where
 import Clash.Prelude
 import Clash.Sized.Vector (unsafeFromList)
 import Cuintet (system)
-import Cuintet.Core (InstLog (..))
 import Cuintet.Eei (Inst, MemDataBytes)
 import Cuintet.Memory (initRamLanes)
+import Cuintet.Pipeline (InstLog (..))
 import Data.ByteString.Char8 qualified as BC
 import Data.FileEmbed (embedDir, makeRelativeToProject)
 import Data.List (sortOn)

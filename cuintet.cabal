@@ -72,10 +72,11 @@ library
     Cuintet.Debug
     Cuintet.Eei
     Cuintet.Fifo
-    Cuintet.InstDecoder
     Cuintet.MemArbiter
     Cuintet.Memory
     Cuintet.MemUnit
+    Cuintet.Pipeline
+    Cuintet.Stage.Decode
     Cuintet.Util
 
 common clash-exe

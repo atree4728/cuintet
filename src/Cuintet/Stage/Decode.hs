@@ -1,8 +1,19 @@
-module Cuintet.InstDecoder (instDecode) where
+module Cuintet.Stage.Decode (decode, hazard) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
 import Cuintet.Eei (Inst, Opcode (..), System12 (..), SystemOp (..), XLen)
+import Cuintet.Pipeline (IdEx (..), IfId (..))
+
+decode :: Vec 32 (BitVector XLen) -> IfId -> IdEx
+decode regFile IfId {pc, instBits} = IdEx {pc, instBits, ctrl, imm, rs1Addr, rs2Addr, rdAddr, rs1Data, rs2Data}
+  where
+    (ctrl, imm) = instDecode instBits
+    rs1Addr = slice d19 d15 instBits
+    rs2Addr = slice d24 d20 instBits
+    rdAddr = slice d11 d7 instBits
+    rs1Data = regFile !! rs1Addr
+    rs2Data = regFile !! rs2Addr
 
 instDecode :: Inst -> (InstCtrl, BitVector XLen)
 instDecode bits = (ctrl op, imm op)
@@ -78,3 +89,22 @@ instDecode bits = (ctrl op, imm op)
     ctrl SYSTEM    = instCtrl IType  True False False False False False
     ctrl _         = deepErrorX "ctrl: unknown opcode"
 {- FOURMOLU_ENABLE -}
+
+usesRs1, usesRs2 :: InstCtrl -> Bool
+usesRs1 InstCtrl {itype} = case itype of
+  UType -> False
+  JType -> False
+  _ -> True
+usesRs2 InstCtrl {itype} = case itype of
+  RType -> True
+  SType -> True
+  BType -> True
+  _ -> False
+
+hazard :: (KnownNat n) => IdEx -> Vec n (Maybe (BitVector 5)) -> Bool
+hazard IdEx {ctrl, rs1Addr, rs2Addr} = any conflicts
+  where
+    conflicts = maybe False $
+      \rd ->
+        usesRs1 ctrl && rd == rs1Addr
+          || usesRs2 ctrl && rd == rs2Addr

@@ -3,10 +3,11 @@
 module Cuintet (vDom50, topEntity, system) where
 
 import Clash.Prelude
-import Cuintet.Core (CoreIn (..), CoreOut (..), InstLog, core)
+import Cuintet.Core (CoreIn (..), CoreOut (..), core)
 import Cuintet.Eei (MemDataBytes)
 import Cuintet.MemArbiter (MemArbiterReq (..), MemArbiterResp (..), memArbiter)
 import Cuintet.Memory (RamLane, blockRamLanes, memory)
+import Cuintet.Pipeline (InstLog)
 
 createDomain vSystem {vName = "Dom50", vPeriod = hzToPeriod 50e6}
 
