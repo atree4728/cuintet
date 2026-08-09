@@ -1,3 +1,17 @@
+{- | MA: the memory access, the CSR access, and the redirect that resolves control flow.
+
+Unlike ID and EX this stage is not a pure function, because the responses of
+'loadStoreStep' and 'csrStep' feed back into its own decisions within the same
+clock: @stall@ decides whether the instruction commits, and the CSR response
+supplies both the value to write back and the redirect. Splitting the unit calls
+out of the stage would split the stage itself in two.
+
+@csrFile@ is architectural state and MA is its only writer, which is why a system
+instruction can raise its request on the clock it commits without @csrFile@ ever
+being updated twice. 'LoadStoreState' is not architectural; it is where a
+multi-cycle bus access has got to. They share one record only because MA owns
+both.
+-}
 module Cuintet.Stage.MemAccess (initMemAccessState, memAccess, MemAccessIn (..), MemAccessOut (..), MemAccessState (..)) where
 
 import Clash.Prelude
@@ -9,12 +23,16 @@ import Cuintet.Pipeline (ExMa (..), MaWb (..))
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust)
 
+-- | The registers MA owns.
 data MemAccessState = MemAccessState
   { csrFile :: CsrFile
+  -- ^ Architectural state; MA is its only writer.
   , loadStoreState :: LoadStoreState
+  -- ^ Where the multi-cycle bus access has got to.
   }
   deriving (Generic, NFDataX)
 
+-- | A cleared CSR file and no access in flight.
 initMemAccessState :: MemAccessState
 initMemAccessState =
   MemAccessState
@@ -24,15 +42,25 @@ initMemAccessState =
 
 data MemAccessIn = MemAccessIn
   { entry :: Maybe ExMa
+  -- ^ The instruction at the head of the EX-MA FIFO.
   , dResp :: MemResp
+  -- ^ Response to a load\/store request issued on an earlier clock.
   }
 
 data MemAccessOut = MemAccessOut
   { issue :: Maybe MaWb
+  -- ^ The instruction handed to WB, present only on the clock it commits.
   , redirect :: Maybe Addr
+  {- ^ Where IF must restart. Raised only on the clock the instruction commits,
+  so a stalled access does not rewrite the PC every clock.
+  -}
   , dReq :: Maybe MemReq
+  -- ^ Load\/store request, driven from 'LoadStoreState' and never from @dResp@.
   }
 
+{- | One clock of MA. The instruction may sit here for several of them; it leaves
+on the one where the access is done with it.
+-}
 memAccess :: MemAccessState -> MemAccessIn -> (MemAccessState, MemAccessOut)
 memAccess MemAccessState {..} MemAccessIn {..} =
   ( MemAccessState {csrFile = csrFile', loadStoreState = loadStoreState'}
@@ -61,10 +89,12 @@ memAccess MemAccessState {..} MemAccessIn {..} =
           , memResp = dResp
           }
 
+    -- the instruction leaves once the access has let go of it
     commit = valid && not loadStoreResp.stall
 
+    -- what to write back; whether and where is WB's decision
     wbData'
-      | ctrl.isLoad = fromMaybe (deepErrorX "coreT: load committed without data") loadStoreResp.rdata
+      | ctrl.isLoad = fromMaybe (deepErrorX "memAccess: load committed without data") loadStoreResp.rdata
       | Just rdata <- csrRdata = rdata
       | otherwise = wbData
 
@@ -79,6 +109,6 @@ memAccess MemAccessState {..} MemAccessIn {..} =
     redirect
       | not commit = Nothing
       | isJust csrRedirect = csrRedirect
-      | ctrl.isJump = Just (bitCoerce (aluResult .&. complement 1))
+      | ctrl.isJump = Just (bitCoerce (aluResult .&. complement 1)) -- aluResult is the destination
       | isBranchOp ctrl && branchTaken = Just (pc + numConvert imm)
       | otherwise = Nothing

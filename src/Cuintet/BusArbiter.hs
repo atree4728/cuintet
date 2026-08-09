@@ -1,6 +1,6 @@
 {- |
 Arbitrates a single-port memory between instruction fetch and load/store
-requests. See 'memArbiter'.
+requests. See 'busArbiter'.
 -}
 module Cuintet.BusArbiter (Grant (..), BusArbiterReq (..), BusArbiterResp (..), busArbiter) where
 
@@ -23,10 +23,10 @@ data BusArbiterReq = BusArbiterReq
   deriving (Generic, NFDataX)
 
 data BusArbiterResp = BusArbiterResp
-  { memReq :: Maybe MemReq
-  -- ^ Request to send to the memory.
-  , iResp :: MemResp
+  { iResp :: MemResp
   , dResp :: MemResp
+  , memReq :: Maybe MemReq
+  -- ^ Request to send to the memory.
   }
   deriving (Generic, NFDataX)
 

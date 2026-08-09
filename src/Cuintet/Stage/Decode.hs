@@ -1,3 +1,9 @@
+{- | ID: decodes the instruction, reads the register file, and decides whether to issue it.
+
+The stage holds no state. An instruction it does not issue is simply left at the
+head of the IF-ID FIFO and decoded again next clock, so neither a stall nor a
+flush needs anything rolled back.
+-}
 module Cuintet.Stage.Decode (decode, DecodeIn (..), DecodeOut (..)) where
 
 import Clash.Prelude
@@ -9,30 +15,35 @@ import Data.Maybe (fromMaybe, isJust)
 
 data DecodeIn = DecodeIn
   { entry :: Maybe IfId
+  -- ^ The instruction at the head of the IF-ID FIFO.
   , regFile :: RegFile
+  -- ^ Read combinationally out of the bank WB writes.
   , inflights :: Vec 3 (Maybe RegAddr)
+  -- ^ What the instructions already downstream will write back.
   , wready :: Bool
+  -- ^ Whether the ID-EX FIFO can accept a write.
   , flush :: Bool
+  -- ^ Whether MA is redirecting IF this clock.
   }
 
+-- | The instruction handed to EX, absent on a clock ID does not issue.
 newtype DecodeOut = DecodeOut {issue :: Maybe IdEx}
 
+-- | One clock of ID.
 decode :: DecodeIn -> DecodeOut
 decode DecodeIn {..} = DecodeOut {issue = orNothing issued idEx}
   where
-    idEx = mkIdEx regFile $ fromMaybe (deepErrorX "coreT: IF-ID FIFO is empty") entry
-    issued = isJust entry && not (hazard idEx inflights) && wready && not flush
-
-mkIdEx :: Vec 32 (BitVector XLen) -> IfId -> IdEx
-mkIdEx regFile IfId {pc, instBits} = IdEx {pc, instBits, ctrl, imm, rs1Addr, rs2Addr, rdAddr, rs1Data, rs2Data}
-  where
+    IfId {pc, instBits} = fromMaybe (deepErrorX "decode: IF-ID FIFO is empty") entry
     (ctrl, imm) = instDecode instBits
     rs1Addr = slice d19 d15 instBits
     rs2Addr = slice d24 d20 instBits
     rdAddr = slice d11 d7 instBits
     rs1Data = regFile !! rs1Addr
     rs2Data = regFile !! rs2Addr
+    idEx = IdEx {..}
+    issued = isJust entry && not (hazard idEx inflights) && wready && not flush
 
+-- | The control flags and the immediate, both a function of the opcode alone.
 instDecode :: Inst -> (InstCtrl, BitVector XLen)
 instDecode instBits = (ctrl op, imm op)
   where
@@ -67,7 +78,6 @@ instDecode instBits = (ctrl op, imm op)
     funct3 = slice d14 d12 instBits
     funct7 = slice d31 d25 instBits
 
-    -- @funct3@ tells a CSR access from the rest; @immIG@ /is/ the @funct12@ field.
     systemOp :: Opcode -> Maybe SystemOp
     systemOp SYSTEM
       | funct3 /= 0 = Just $ SysCsr (unpack funct3)
@@ -108,6 +118,7 @@ instDecode instBits = (ctrl op, imm op)
     ctrl _         = deepErrorX "ctrl: unknown opcode"
 {- FOURMOLU_ENABLE -}
 
+-- | Whether the instruction form actually reads that source register.
 usesRs1, usesRs2 :: InstCtrl -> Bool
 usesRs1 InstCtrl {itype} = case itype of
   UType -> False
@@ -119,6 +130,9 @@ usesRs2 InstCtrl {itype} = case itype of
   BType -> True
   _ -> False
 
+{- | Whether a source register of this instruction is still to be written by one
+of the instructions downstream, given as 'Cuintet.Pipeline.pendingRd' each.
+-}
 hazard :: (KnownNat n) => IdEx -> Vec n (Maybe RegAddr) -> Bool
 hazard IdEx {ctrl, rs1Addr, rs2Addr} = any conflicts
   where

@@ -48,12 +48,23 @@ lane vector is turned back into a word.
 -}
 type XLenBytes = XLen `Div` 8
 
+{- | A physical memory address, counted in bytes as the ISA has it, and as wide
+as a register.
+
+It says nothing about how the memory behind it is built: the bus word width and
+the byte lanes are the memory's business, and an address keeps naming the same
+byte whatever they are.
+-}
 type Addr = Unsigned XLen
 
+-- | An instruction word. RV64I has the 32-bit form only.
 type Inst = BitVector ILen
 
+-- | The integer registers. @x0@ is kept zero by never being written, so reading
+-- it needs no special case.
 type RegFile = Vec 32 (BitVector XLen)
 
+-- | A register index; the @rs1@, @rs2@ or @rd@ field verbatim.
 type RegAddr = BitVector 5
 
 -- | Whether a narrower-than-register load fills the high bits with its sign or zero.
@@ -96,6 +107,8 @@ deriveBitPack [t|AccessWidth|]
 -- | The byte offset of an access within its word, the lane 0 being the least significant.
 type LaneOffset = Index XLenBytes
 
+-- | The offset of the address within its word, i.e. the low bits of it that the
+-- memory itself ignores.
 laneOffset :: Addr -> LaneOffset
 laneOffset a = numConvert (truncateB (pack a) :: BitVector (CLog 2 XLenBytes))
 
@@ -131,6 +144,8 @@ laneMask width off = reverse $ bitCoerce mask
     mask = ones `shiftL` numConvert off
     ones = complement (complement 0 `shiftL` numConvert (sizeBytes width))
 
+-- | The instruction sitting at the address, picked out of the bus word that
+-- contains it.
 instAt :: Addr -> BitVector (MemDataBytes * 8) -> Inst
 instAt addr busWord = truncateB (busWord `shiftR` bitOffset (laneOffset addr))
 
@@ -154,6 +169,10 @@ data BusReq nBytes = BusReq
   }
   deriving (Generic, NFDataX)
 
+{- | The memory's half of the bus: whether it takes a request this cycle, and
+the word read for one it took earlier. The two are independent, so a request may
+go out while the answer to the previous one is still coming back.
+-}
 data BusResp nBytes = BusResp
   { ready :: Bool
   -- ^ Whether to accept a memory access request.
@@ -162,10 +181,14 @@ data BusResp nBytes = BusResp
   }
   deriving (Generic, NFDataX)
 
+-- | The width of the memory bus, in bytes. One register wide, so a naturally
+-- aligned access is always contained in a single bus word.
 type MemDataBytes = XLenBytes
 
+-- | 'BusReq' at the width the memory bus is.
 type MemReq = BusReq MemDataBytes
 
+-- | 'BusResp' at the width the memory bus is.
 type MemResp = BusResp MemDataBytes
 
 {- | The @opcode@ field. RV64I names only a handful of the 128 patterns, so this
@@ -221,6 +244,8 @@ data ShiftRight = Logical | Arithmetic
 deriveDefaultAnnotation [t|ShiftRight|]
 deriveBitPack [t|ShiftRight|]
 
+-- | What a CSR access does to the register, laid out as @funct3@ bits 1-0. The
+-- fourth pattern is the @funct3@ that names no CSR instruction.
 data CsrType
   = ReadWrite
   | ReadSet
@@ -243,6 +268,10 @@ data CsrType
 
 deriveBitPack [t|CsrType|]
 
+{- | A CSR access: what it does, and where its operand comes from. Laid out so
+that it /is/ the @funct3@ field, bit 2 choosing between @rs1@ and the 5-bit
+immediate that takes its place.
+-}
 data CsrOp
   = CsrReg CsrType
   | CsrImm CsrType

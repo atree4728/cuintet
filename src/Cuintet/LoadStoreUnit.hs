@@ -1,9 +1,10 @@
 {- |
-Memory unit: executes load\/store instructions by sending the address
+Load\/store unit: executes load\/store instructions by sending the address
 computed by the ALU to the memory bus.
 
-An access takes at least 3 cycles ('Idle' → 'WaitReady' → 'WaitValid'),
-during which the core must stall (no write back, no instruction fetch).
+An access takes at least 3 cycles ('Idle' → 'WaitReady' → 'WaitValid'), during
+which it holds MA with @stall@. The stages above keep running until the FIFOs
+between them fill up.
 
 The memory is addressed in bus words of 'MemDataBytes' bytes and ignores the
 offset within one, so it always returns the bus word containing the target.
@@ -30,7 +31,7 @@ import Cuintet.Eei (AccessWidth (..), Addr, BusReq (..), BusResp (..), LaneOffse
 import Cuintet.Util (orNothing)
 import Data.Maybe (isJust, isNothing)
 
--- | The instruction supplied to the memory unit.
+-- | The instruction supplied to the load\/store unit.
 data InstInfo = InstInfo
   { ctrl :: InstCtrl
   , addr :: Addr
@@ -69,7 +70,7 @@ data LoadStoreState
     WaitValid Access
   deriving (Generic, NFDataX)
 
--- | The state transision of the memory unit for a single cycle.
+-- | One cycle of the load\/store unit.
 loadStoreStep :: LoadStoreState -> LoadStoreReq -> (LoadStoreState, LoadStoreResp)
 loadStoreStep state LoadStoreReq {inst, memResp} = (memUnitState, memUnitResp)
   where

@@ -1,3 +1,12 @@
+{- |
+The payloads that cross the stage boundaries, one record per FIFO.
+
+Each stage passes on everything it was given and appends what it computed, so
+the records grow down the pipe and 'MaWb' carries the whole history of an
+instruction. That is what makes it usable as the core's execution log, which
+'Cuintet.Debug.showInstLog' prints. Nothing is dropped and only @wbData@ is ever
+rewritten, by MA for a load or a CSR read.
+-}
 module Cuintet.Pipeline (IfId (..), IdEx (..), ExMa (..), MaWb (..), pendingRd) where
 
 import Clash.Prelude
@@ -6,12 +15,14 @@ import Cuintet.Eei (Addr, Inst, RegAddr, XLen)
 import Cuintet.Util (orNothing)
 import GHC.Records (HasField)
 
+-- | What IF fetched: the instruction word and the address it came from.
 data IfId = IfId
   { pc :: Addr
   , instBits :: Inst
   }
   deriving (Generic, NFDataX)
 
+-- | 'IfId' plus the decoded control, the immediate, and the register operands.
 data IdEx = IdEx
   { pc :: Addr
   , instBits :: Inst
@@ -25,6 +36,7 @@ data IdEx = IdEx
   }
   deriving (Generic, NFDataX)
 
+-- | 'IdEx' plus what the ALU and the branch unit produced.
 data ExMa = ExMa
   { pc :: Addr
   , instBits :: Inst
@@ -38,11 +50,15 @@ data ExMa = ExMa
   , op1 :: BitVector XLen
   , op2 :: BitVector XLen
   , aluResult :: BitVector XLen
+  -- ^ Also the access address of a load\/store and the target of a jump.
   , branchTaken :: Bool
+  -- ^ Meaningful only for a B-type instruction.
   , wbData :: BitVector XLen
+  -- ^ The value to write back as far as EX can tell.
   }
   deriving (Generic, NFDataX)
 
+-- | 'ExMa' plus what the memory and CSR accesses produced.
 data MaWb = MaWb
   { pc :: Addr
   , instBits :: Inst
@@ -57,11 +73,20 @@ data MaWb = MaWb
   , op2 :: BitVector XLen
   , aluResult :: BitVector XLen
   , branchTaken :: Maybe Bool
+  -- ^ 'Nothing' unless the instruction is a branch.
   , wbData :: BitVector XLen
+  -- ^ The loaded word, the old CSR value, or what EX computed.
   , csrRdata :: Maybe (BitVector XLen)
+  -- ^ The old CSR value, for a CSR access.
   }
   deriving (Generic, NFDataX)
 
+{- | The register this instruction writes, if any: the single definition of it,
+shared by the interlock in ID and the write in WB.
+
+It is stated over the fields rather than a payload type so that it applies at
+every stage the instruction passes through.
+-}
 pendingRd ::
   ( HasField "ctrl" stage InstCtrl
   , HasField "rdAddr" stage RegAddr

@@ -1,3 +1,13 @@
+{- | EX: operand selection, the ALU, and the branch condition.
+
+A pure function with no state of its own; it issues whenever the EX-MA FIFO has
+room. Every instruction goes through the ALU, including those that only need an
+address: a load\/store adds @rs1@ and the immediate here, and MA takes the result
+as its access address.
+
+The branch condition is evaluated here but not acted on. Where control flow goes
+is decided in MA, so that an instruction redirects IF only once it is known to commit.
+-}
 module Cuintet.Stage.Execute (execute, ExecuteIn (..), ExecuteOut (..)) where
 
 import Clash.Prelude
@@ -9,19 +19,28 @@ import Data.Maybe (fromMaybe, isJust)
 
 data ExecuteIn = ExecuteIn
   { entry :: Maybe IdEx
+  -- ^ The instruction at the head of the ID-EX FIFO.
   , wready :: Bool
+  -- ^ Whether the EX-MA FIFO can accept a write.
   }
 
 newtype ExecuteOut = ExecuteOut
   { issue :: Maybe ExMa
+  -- ^ The instruction handed to MA.
   }
 
+-- | One clock of EX.
 execute :: ExecuteIn -> ExecuteOut
 execute ExecuteIn {..} = ExecuteOut {issue = orNothing issued exMa}
   where
     issued = isJust entry && wready
-    exMa = mkExMa $ fromMaybe (deepErrorX "coreT: ID-EX FIFO is empty") entry
+    exMa = mkExMa $ fromMaybe (deepErrorX "execute: ID-EX FIFO is empty") entry
 
+{- | Run the instruction through the ALU and the branch unit.
+
+@wbData@ is the value to write back as far as EX can tell; MA replaces it for a
+load or a CSR read.
+-}
 mkExMa :: IdEx -> ExMa
 mkExMa IdEx {..} = ExMa {op1, op2, aluResult, branchTaken, ..}
   where
@@ -51,6 +70,7 @@ operands InstCtrl {itype} imm rs1Data rs2Data pc = case itype of
   UType -> (bitCoerce pc, imm)
   JType -> (bitCoerce pc, imm)
 
+-- | The ALU. An instruction that is not an ALU operation gets a plain add, which is what a load\/store address, a jump target and @auipc@ all are.
 alu :: InstCtrl -> BitVector XLen -> BitVector XLen -> BitVector XLen
 alu InstCtrl {itype, isAluOp, isOp32, funct3, funct7} op1 op2
   | not isAluOp = op1 + op2
@@ -78,6 +98,7 @@ alu InstCtrl {itype, isAluOp, isOp32, funct3, funct7} op1 op2
       where
         signed x = bitCoerce x :: Signed n
 
+-- | The branch condition, selected by @funct3@. Meaningful only for a B-type instruction; the caller decides whether to look at it.
 branchUnit :: BitVector 3 -> BitVector XLen -> BitVector XLen -> Bool
 branchUnit funct3 op1 op2 = case funct3 of
   0b000 -> beq

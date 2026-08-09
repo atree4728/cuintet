@@ -1,47 +1,59 @@
 {- |
-The core in terms of the classical IF, ID, EX, MA and WB stages. Only IF is
-pipelined, against the rest, through the instruction FIFO; ID through WB form a
-single combinational cone that handles one instruction at a time.
+The core in terms of the classical IF, ID, EX, MA and WB stages, each in its own
+@Cuintet.Stage.*@ module. This module is the wiring: it holds the registers,
+calls the five stages, and drives the four FIFOs between them.
 
-In the diagrams below, @[x]@ is a register, i.e. a clock boundary, and @(x)@ is
+In the diagram below, @[x]@ is a register, i.e. a clock boundary, and @(x)@ is
 combinational logic.
 
 @
-    IF    [ifPc] --> iReq --> memory --> iResp --> [ifFifoWdata] --> [fifo]
-                                                                       |
-    ===================================================================|===
-      the FIFO output is the only register boundary between the stages |
-    ===================================================================|===
-                                                                       |
-    ID    (instDecode), [regFile] read, (operands) <--------------------+
+    IF    [next] --> iReq --> memory --> iResp --> [staged]
+      ^                                              |
+      |                                        [IF-ID FIFO]
+      |                                              |
+    ID|   (decode), [regFile] read, (interlock) <----+
+      |     |
+      |   [ID-EX FIFO]
+      |     |
+    EX|   (operands), (alu), (branchUnit)
+      |     |
+      |   [EX-MA FIFO]
+      |     |
+    MA|   (csrStep) --> [csrFile]
+      |   (loadStoreStep) --> [loadStoreState] --> dReq
+      +-- (redirect), which also flushes the IF-ID and ID-EX FIFOs
             |
-    EX    (alu), (brUnit), (csrUnitStep) --> [csrFile]
+          [MA-WB FIFO]
             |
-    MA    (memUnitStep) --> [memUnitState] --> dReq
-            |
-    WB    [regFile] write, (control hazard) --> [ifPc] + FIFO flush
+    WB    [regFile] write --> instLog
 @
 
-[IF]: Runs ahead on its own. Each of the three arrows out of a register takes a
-  clock, so an instruction reaches the head of the FIFO three clocks after its
-  request goes out, while the throughput stays at one instruction per clock.
-  The FIFO absorbs the difference between that and the rate ID drains it at.
+Every stage consumes its input exactly on the clock it produces an output, so a
+FIFO's @rready@ is the @isJust@ of the next stage's @issue@ and no stage needs to
+be told about a stall further down. Only the IF-ID and ID-EX FIFOs are flushed on
+a redirect: the EX-MA and MA-WB FIFOs hold instructions at least as old as the
+one that redirected, including that instruction itself, and all of them must
+still retire.
 
-[ID]: Decoding and the register file read. Holds no state; @regFile@ is read
-  combinationally out of the register bank that WB writes.
+Neither @iReq@ nor @dReq@ may depend combinationally on @iResp@ or @dResp@, or a
+combinational loop closes through 'Cuintet.BusArbiter.busArbiter'. Both are
+driven out of registers, @iReq@ from IF's and @dReq@ from MA's.
 
-[EX]: The ALU, the branch condition, and the CSR access. @csrFile@ is the only
-  thing here that carries over to the next clock.
+[IF]: 'Cuintet.Stage.Fetch.fetch'. Runs ahead on its own; the IF-ID FIFO absorbs
+  the difference between its rate and the rate ID drains it at.
 
-[MA]: The one stage that takes more than a clock. @memUnitStep@ walks
-  @memUnitState@ through @Idle@, @WaitReady@ and @WaitValid@, driving @dReq@
-  from the register rather than straight from the ALU, and stalls ID through WB
-  until the data comes back.
+[ID]: 'Cuintet.Stage.Decode.decode'. Holds no state. It stalls itself by not
+  issuing when the instruction reads a register that an instruction already
+  downstream will write, so a flush needs no rollback.
 
-[WB]: The write back and the control hazard, which redirects @ifPc@ and flushes
-  everything IF has fetched so far. An instruction commits on the clock where it
-  is valid and MA does not stall; draining the FIFO and writing back both follow
-  that condition.
+[EX]: 'Cuintet.Stage.Execute.execute'. A pure function.
+
+[MA]: 'Cuintet.Stage.MemAccess.memAccess'. The one stage that can take more than
+  a clock. It owns @csrFile@ and the load\/store unit's state, and it is where
+  control flow is resolved.
+
+[WB]: 'Cuintet.Stage.Writeback.writeback'. Never stalls, which is what lets MA
+  start an access without checking the MA-WB FIFO for room.
 -}
 module Cuintet.Core (CoreIn (..), CoreOut (..), core) where
 
@@ -69,15 +81,15 @@ data CoreOut = CoreOut
   , dReq :: Maybe MemReq
   -- ^ Load/store request.
   , instLog :: Maybe MaWb
+  -- ^ Execution log of a single instruction, emitted only in the clock it retires.
   }
 
--- | Execution log of a single instruction, emitted only in the clock it commits.
-
--- | Core state. The @if@ prefix is short for instruction fetch.
+{- | The core's registers. Each stage owns its own, except @regFile@, which WB
+writes and ID reads.
+-}
 data CoreState = CoreState
   { fetchState :: FetchState
   , regFile :: RegFile
-  -- ^ Register file.
   , memAccessState :: MemAccessState
   }
   deriving (Generic, NFDataX)
@@ -90,20 +102,22 @@ initState =
     , memAccessState = initMemAccessState
     }
 
--- | Closes 'coreT' around the instruction FIFO.
+{- | Closes 'coreT' around the four stage FIFOs. IF-ID is the deep one, since it
+is what lets IF run ahead; the rest only need to hold a single instruction.
+-}
 core ::
   (HiddenClockResetEnable dom) =>
   Signal dom CoreIn ->
   Signal dom CoreOut
 core coreIn = coreOut
   where
-    (coreOut, instReq, idExReq, exMaReq, maWbReq) = unbundle $ mealy coreT initState (bundle (coreIn, instResp, idExResp, exMaResp, maWbResp))
-    instResp = fifo d3 instReq
+    (coreOut, ifIdReq, idExReq, exMaReq, maWbReq) = unbundle $ mealy coreT initState (bundle (coreIn, ifIdResp, idExResp, exMaResp, maWbResp))
+    ifIdResp = fifo d3 ifIdReq
     idExResp = fifo d1 idExReq
     exMaResp = fifo d1 exMaReq
     maWbResp = fifo d1 maWbReq
 
--- | One clock of every stage, all combinational.
+-- | One clock of every stage.
 coreT ::
   CoreState ->
   (CoreIn, FifoResp IfId, FifoResp IdEx, FifoResp ExMa, FifoResp MaWb) ->
@@ -116,12 +130,14 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, ifIdResp, idExResp, exMaResp, maWb
     (memAccessState', maOut) = memAccess memAccessState MemAccessIn {entry = exMaResp.rdata, dResp}
     (regFile', wbOut) = writeback regFile WriteBackIn {entry = maWbResp.rdata}
 
+    -- what the instructions downstream of ID will write back
     inflights =
       (idExResp.rdata >>= pendingRd)
         :> (exMaResp.rdata >>= pendingRd)
         :> (maWbResp.rdata >>= pendingRd)
         :> Nil
 
+    -- a stage consumes its input exactly on the clock it produces an output
     ifIdReq = FifoReq {wdata = ifOut.issue, rready = isJust idOut.issue, flush = isJust maOut.redirect}
     idExReq = FifoReq {wdata = idOut.issue, rready = isJust exOut.issue, flush = isJust maOut.redirect}
     exMaReq = FifoReq {wdata = exOut.issue, rready = isJust maOut.issue, flush = False}
