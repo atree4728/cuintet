@@ -46,11 +46,12 @@ combinational logic.
 module Cuintet.Core (CoreIn (..), CoreOut (..), core) where
 
 import Clash.Prelude
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, RegFile, instAt)
+import Cuintet.Eei (MemReq, MemResp, RegFile)
 import Cuintet.Fifo (FifoReq (..), FifoResp (..), fifo)
 import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), MaWb (..), pendingRd)
 import Cuintet.Stage.Decode (decode, hazard)
 import Cuintet.Stage.Execute (execute)
+import Cuintet.Stage.Fetch (FetchIn (..), FetchOut (..), FetchState (..), fetch, initFetchState)
 import Cuintet.Stage.MemAccess (MemAccessIn (..), MemAccessOut (..), MemAccessState (..), initMemAccessState, memAccess)
 import Cuintet.Stage.Writeback (WritebackIn (..), WritebackOut (..), initRegFile, writeback)
 import Cuintet.Util (orNothing)
@@ -75,12 +76,7 @@ data CoreOut = CoreOut
 
 -- | Core state. The @if@ prefix is short for instruction fetch.
 data CoreState = CoreState
-  { next :: Addr
-  -- ^ Program counter.
-  , fetching :: Maybe Addr
-  -- ^ Address being fetched.
-  , staged :: Maybe IfId
-  -- ^ The instruction waiting to be written.
+  { fetchState :: FetchState
   , regFile :: RegFile
   -- ^ Register file.
   , memAccessState :: MemAccessState
@@ -90,9 +86,7 @@ data CoreState = CoreState
 initState :: CoreState
 initState =
   CoreState
-    { next = 0
-    , fetching = Nothing
-    , staged = Nothing
+    { fetchState = initFetchState
     , regFile = initRegFile
     , memAccessState = initMemAccessState
     }
@@ -123,10 +117,12 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp, maWb
         :> (maWbResp.rdata >>= pendingRd)
         :> Nil
 
+    (fetchState', ifOut) = fetch fetchState FetchIn {iResp, fifo = instResp, redirect = maOut.redirect}
     (memAccessState', maOut) = memAccess memAccessState MemAccessIn {entry = exMaResp.rdata, dResp}
+    (regFile', wbOut) = writeback regFile WriteBackIn {entry = maWbResp.rdata}
 
     -- IF stage
-    instReq = FifoReq {wdata = staged, rready = idIssue, flush = controlHazard}
+    instReq = FifoReq {wdata = ifOut.issue, rready = idIssue, flush = controlHazard}
 
     -- ID stage
     idValid = isJust instResp.rdata
@@ -144,39 +140,16 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp, maWb
     maWbReq = FifoReq {wdata = maOut.issue, rready = True, flush = False}
     controlHazard = isJust maOut.redirect
 
-    (regFile', wbOut) = writeback regFile WriteBackIn {entry = maWbResp.rdata}
-    -- IF: the answer to the request issued when @ifRequested@ was set.
-    fetched = (,) <$> fetching <*> iResp.rdata
-    accepted = instResp.wreadyTwo && iResp.ready
-
-    -- next state
-    (next', fetching')
-      | Just target <- maOut.redirect = (target, Nothing)
-      | accepted = (next + 4, Just next)
-      | otherwise = (next, fetching)
-    staged'
-      | controlHazard = Nothing
-      | Just (addr, busWord) <- fetched = Just IfId {pc = addr, instBits = instAt addr busWord}
-      | instResp.wready = Nothing
-      | otherwise = staged -- pending
-
-    -- Neither request may depend combinationally on @iResp@ or @dResp@, or a
-    -- combinational loop closes through @memArbiter@. Both are driven straight
-    -- from registers: @iReq@ from @ifPc@ and the FIFO, @dReq@ from
-    -- @memUnitState@. A fetch goes out only when the FIFO has room for the
-    -- pending write and this one both.
     coreOut =
       CoreOut
-        { iReq = orNothing instResp.wreadyTwo BusReq {addr = next, wdata = Nothing}
+        { iReq = ifOut.iReq
         , dReq = maOut.dReq
         , instLog = wbOut.retired
         }
 
     state' =
       CoreState
-        { next = next'
-        , fetching = fetching'
-        , staged = staged'
+        { fetchState = fetchState'
         , regFile = regFile'
         , memAccessState = memAccessState'
         }
