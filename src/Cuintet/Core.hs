@@ -46,14 +46,12 @@ combinational logic.
 module Cuintet.Core (CoreIn (..), CoreOut (..), core) where
 
 import Clash.Prelude
-import Cuintet.CoreCtrl (InstCtrl (..), isBranchOp)
-import Cuintet.CsrUnit (CsrAccess (..), CsrAddr (..), CsrFile, CsrReq (..), CsrResp (..), CsrTrap (..), csrStep, initCsrFile, pattern ENVIRONMENT_CALL)
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, RegFile, SystemOp (..), instAt)
+import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, RegFile, instAt)
 import Cuintet.Fifo (FifoReq (..), FifoResp (..), fifo)
-import Cuintet.LoadStoreUnit (InstInfo (..), LoadStoreReq (..), LoadStoreResp (..), LoadStoreState (..), loadStoreStep)
 import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), MaWb (..), pendingRd)
 import Cuintet.Stage.Decode (decode, hazard)
 import Cuintet.Stage.Execute (execute)
+import Cuintet.Stage.MemAccess (MemAccessIn (..), MemAccessOut (..), MemAccessState (..), initMemAccessState, memAccess)
 import Cuintet.Stage.Writeback (WritebackIn (..), WritebackOut (..), initRegFile, writeback)
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust)
@@ -85,10 +83,7 @@ data CoreState = CoreState
   -- ^ The instruction waiting to be written.
   , regFile :: RegFile
   -- ^ Register file.
-  , csrFile :: CsrFile
-  -- ^ CSR file.
-  , loadStoreState :: LoadStoreState
-  -- ^ Memory unit state.
+  , memAccessState :: MemAccessState
   }
   deriving (Generic, NFDataX)
 
@@ -99,8 +94,7 @@ initState =
     , fetching = Nothing
     , staged = Nothing
     , regFile = initRegFile
-    , csrFile = initCsrFile
-    , loadStoreState = Idle
+    , memAccessState = initMemAccessState
     }
 
 -- | Closes 'coreT' around the instruction FIFO.
@@ -129,6 +123,8 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp, maWb
         :> (maWbResp.rdata >>= pendingRd)
         :> Nil
 
+    (memAccessState', maOut) = memAccess memAccessState MemAccessIn {entry = exMaResp.rdata, dResp}
+
     -- IF stage
     instReq = FifoReq {wdata = staged, rready = idIssue, flush = controlHazard}
 
@@ -143,76 +139,19 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp, maWb
     exMa = execute $ fromMaybe (deepErrorX "coreT: ID-EX FIFO is empty") idExResp.rdata
     exIssue = exValid && exMaResp.wready
 
-    maValid = isJust exMaResp.rdata
-    ExMa {..} = fromMaybe (deepErrorX "coreT: EX-MA FIFO is empty") exMaResp.rdata
-    exMaReq = FifoReq {wdata = orNothing exIssue exMa, rready, flush = False}
+    exMaReq = FifoReq {wdata = orNothing exIssue exMa, rready = isJust maOut.issue, flush = False}
 
-    -- EX: the CSR access, and the redirect that @ECALL@ and @MRET@ answer with.
-    -- A system instruction never stalls, so the request is raised in the clock
-    -- it commits and @csrFile@ is never updated twice.
-    (csrFile', csrResp) = maybe (csrFile, Nothing) (fmap Just . csrStep csrFile) csrReq
-    csrReq
-      | not maValid = Nothing
-      | Just (SysCsr csrOp) <- ctrl.systemOp =
-          Just $ Access CsrAccess {csrAddr = CsrAddr (slice d11 d0 imm), csrOp, rs1Addr, rs1Data}
-      | Just SysEcall <- ctrl.systemOp = Just $ Trap CsrTrap {pc, mcause = ENVIRONMENT_CALL}
-      | Just SysMret <- ctrl.systemOp = Just Mret
-      | otherwise = Nothing
-    csrRdata = case csrResp of Just (Accessed v) -> Just v; _ -> Nothing
-    csrRedirect = case csrResp of Just (Redirect a) -> Just a; _ -> Nothing
-
-    -- MA
-    (loadStoreState', loadStoreResp) =
-      loadStoreStep
-        loadStoreState
-        LoadStoreReq
-          { inst = orNothing maValid InstInfo {ctrl, addr = bitCoerce aluResult, wdata = rs2Data}
-          , memResp = dResp
-          }
-
-    -- WB: the instruction leaves once MA has let go of it, draining the FIFO.
-    rready = not loadStoreResp.stall
-    commit = maValid && rready
-
-    wbData'
-      | ctrl.isLoad = fromMaybe (deepErrorX "coreT: load committed without data") loadStoreResp.rdata
-      | Just rdata <- csrRdata = rdata
-      | otherwise = wbData
-    maWb =
-      MaWb
-        { pc
-        , instBits
-        , ctrl
-        , imm
-        , rs1Addr
-        , rs2Addr
-        , rdAddr
-        , rs1Data
-        , rs2Data
-        , op1
-        , op2
-        , aluResult
-        , branchTaken = orNothing (isBranchOp ctrl) branchTaken
-        , wbData = wbData'
-        , csrRdata
-        }
-
-    maWbReq = FifoReq {wdata = orNothing commit maWb, rready = True, flush = False}
+    maWbReq = FifoReq {wdata = maOut.issue, rready = True, flush = False}
+    controlHazard = isJust maOut.redirect
 
     (regFile', wbOut) = writeback regFile WriteBackIn {entry = maWbResp.rdata}
-
-    -- Everything that redirects IF.
-    controlHazard = commit && (isJust csrRedirect || ctrl.isJump || isBranchOp ctrl && branchTaken)
-
     -- IF: the answer to the request issued when @ifRequested@ was set.
     fetched = (,) <$> fetching <*> iResp.rdata
     accepted = instResp.wreadyTwo && iResp.ready
 
     -- next state
     (next', fetching')
-      | controlHazard, Just redirect <- csrRedirect = (redirect, Nothing)
-      | controlHazard && ctrl.isJump = (bitCoerce $ aluResult .&. complement 1, Nothing) -- aluResult is the destination
-      | controlHazard && isBranchOp ctrl = (pc + numConvert imm, Nothing)
+      | Just target <- maOut.redirect = (target, Nothing)
       | accepted = (next + 4, Just next)
       | otherwise = (next, fetching)
     staged'
@@ -229,7 +168,7 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp, maWb
     coreOut =
       CoreOut
         { iReq = orNothing instResp.wreadyTwo BusReq {addr = next, wdata = Nothing}
-        , dReq = loadStoreResp.memReq
+        , dReq = maOut.dReq
         , instLog = wbOut.retired
         }
 
@@ -239,6 +178,5 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp, maWb
         , fetching = fetching'
         , staged = staged'
         , regFile = regFile'
-        , csrFile = csrFile'
-        , loadStoreState = loadStoreState'
+        , memAccessState = memAccessState'
         }

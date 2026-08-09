@@ -76,6 +76,7 @@ library
     Cuintet.Ram
     Cuintet.Stage.Decode
     Cuintet.Stage.Execute
+    Cuintet.Stage.MemAccess
     Cuintet.Stage.Writeback
     Cuintet.Util
 
