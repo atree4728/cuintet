@@ -1,12 +1,30 @@
-module Cuintet.Stage.Decode (decode, hazard) where
+module Cuintet.Stage.Decode (decode, DecodeIn (..), DecodeOut (..)) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
-import Cuintet.Eei (Inst, Opcode (..), RegAddr, System12 (..), SystemOp (..), XLen)
+import Cuintet.Eei (Inst, Opcode (..), RegAddr, RegFile, System12 (..), SystemOp (..), XLen)
 import Cuintet.Pipeline (IdEx (..), IfId (..))
+import Cuintet.Util (orNothing)
+import Data.Maybe (fromMaybe, isJust)
 
-decode :: Vec 32 (BitVector XLen) -> IfId -> IdEx
-decode regFile IfId {pc, instBits} = IdEx {pc, instBits, ctrl, imm, rs1Addr, rs2Addr, rdAddr, rs1Data, rs2Data}
+data DecodeIn = DecodeIn
+  { entry :: Maybe IfId
+  , regFile :: RegFile
+  , inflights :: Vec 3 (Maybe RegAddr)
+  , wready :: Bool
+  , flush :: Bool
+  }
+
+newtype DecodeOut = DecodeOut {issue :: Maybe IdEx}
+
+decode :: DecodeIn -> DecodeOut
+decode DecodeIn {..} = DecodeOut {issue = orNothing issued idEx}
+  where
+    idEx = mkIdEx regFile $ fromMaybe (deepErrorX "coreT: IF-ID FIFO is empty") entry
+    issued = isJust entry && not (hazard idEx inflights) && wready && not flush
+
+mkIdEx :: Vec 32 (BitVector XLen) -> IfId -> IdEx
+mkIdEx regFile IfId {pc, instBits} = IdEx {pc, instBits, ctrl, imm, rs1Addr, rs2Addr, rdAddr, rs1Data, rs2Data}
   where
     (ctrl, imm) = instDecode instBits
     rs1Addr = slice d19 d15 instBits
@@ -16,15 +34,15 @@ decode regFile IfId {pc, instBits} = IdEx {pc, instBits, ctrl, imm, rs1Addr, rs2
     rs2Data = regFile !! rs2Addr
 
 instDecode :: Inst -> (InstCtrl, BitVector XLen)
-instDecode bits = (ctrl op, imm op)
+instDecode instBits = (ctrl op, imm op)
   where
-    op = unpack $ slice d6 d0 bits
+    op = unpack $ slice d6 d0 instBits
 
-    immIG = slice d31 d20 bits
-    immSG = slice d31 d25 bits ++# slice d11 d7 bits
-    immBG = slice d31 d31 bits ++# slice d7 d7 bits ++# slice d30 d25 bits ++# slice d11 d8 bits
-    immUG = slice d31 d12 bits
-    immJG = slice d31 d31 bits ++# slice d19 d12 bits ++# slice d20 d20 bits ++# slice d30 d21 bits
+    immIG = slice d31 d20 instBits
+    immSG = slice d31 d25 instBits ++# slice d11 d7 instBits
+    immBG = slice d31 d31 instBits ++# slice d7 d7 instBits ++# slice d30 d25 instBits ++# slice d11 d8 instBits
+    immUG = slice d31 d12 instBits
+    immJG = slice d31 d31 instBits ++# slice d19 d12 instBits ++# slice d20 d20 instBits ++# slice d30 d21 instBits
 
     immI = signExtend immIG
     immS = signExtend immSG
@@ -46,8 +64,8 @@ instDecode bits = (ctrl op, imm op)
     imm SYSTEM = immI -- use [11:0]
     imm _ = deepErrorX "imm: opcode carries no immediate"
 
-    funct3 = slice d14 d12 bits
-    funct7 = slice d31 d25 bits
+    funct3 = slice d14 d12 instBits
+    funct7 = slice d31 d25 instBits
 
     -- @funct3@ tells a CSR access from the rest; @immIG@ /is/ the @funct12@ field.
     systemOp :: Opcode -> Maybe SystemOp

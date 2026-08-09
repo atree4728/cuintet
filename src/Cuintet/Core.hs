@@ -49,7 +49,7 @@ import Clash.Prelude
 import Cuintet.Eei (MemReq, MemResp, RegFile)
 import Cuintet.Fifo (FifoReq (..), FifoResp (..), fifo)
 import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), MaWb (..), pendingRd)
-import Cuintet.Stage.Decode (decode, hazard)
+import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
 import Cuintet.Stage.Execute (execute)
 import Cuintet.Stage.Fetch (FetchIn (..), FetchOut (..), FetchState (..), fetch, initFetchState)
 import Cuintet.Stage.MemAccess (MemAccessIn (..), MemAccessOut (..), MemAccessState (..), initMemAccessState, memAccess)
@@ -118,19 +118,13 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp, maWb
         :> Nil
 
     (fetchState', ifOut) = fetch fetchState FetchIn {iResp, fifo = instResp, redirect = maOut.redirect}
+    idOut = decode DecodeIn {entry = instResp.rdata, regFile, inflights, wready = idExResp.wready, flush = isJust maOut.redirect}
     (memAccessState', maOut) = memAccess memAccessState MemAccessIn {entry = exMaResp.rdata, dResp}
     (regFile', wbOut) = writeback regFile WriteBackIn {entry = maWbResp.rdata}
 
-    -- IF stage
-    instReq = FifoReq {wdata = ifOut.issue, rready = idIssue, flush = controlHazard}
+    instReq = FifoReq {wdata = ifOut.issue, rready = isJust idOut.issue, flush = isJust maOut.redirect}
+    idExReq = FifoReq {wdata = idOut.issue, rready = exIssue, flush = controlHazard}
 
-    -- ID stage
-    idValid = isJust instResp.rdata
-    idEx = decode regFile $ fromMaybe (deepErrorX "coreT: IF-ID FIFO is empty") instResp.rdata
-    idIssue = idValid && not (hazard idEx inflights) && idExResp.wready && not controlHazard
-    idExReq = FifoReq {wdata = orNothing idIssue idEx, rready = exIssue, flush = controlHazard}
-
-    -- EX-WB stage
     exValid = isJust idExResp.rdata
     exMa = execute $ fromMaybe (deepErrorX "coreT: ID-EX FIFO is empty") idExResp.rdata
     exIssue = exValid && exMaResp.wready
