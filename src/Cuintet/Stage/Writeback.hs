@@ -1,8 +1,19 @@
-module Cuintet.Stage.Writeback (writeback) where
+module Cuintet.Stage.Writeback (WritebackIn (..), WritebackOut (..), writeback, initRegFile) where
 
 import Clash.Prelude
-import Cuintet.Eei (RegFile, XLen)
-import Cuintet.Pipeline (MaWb (..))
+import Cuintet.Eei (RegFile)
+import Cuintet.Pipeline (MaWb (..), pendingRd)
 
-writeback :: RegFile -> Maybe MaWb -> Vec 32 (BitVector XLen)
-writeback regFile instLogM = maybe regFile (\(a, d) -> replace a d regFile) (instLogM >>= (.wbReq))
+newtype WritebackIn = WriteBackIn {entry :: Maybe MaWb}
+
+newtype WritebackOut = WriteBackOut {retired :: Maybe MaWb}
+
+initRegFile :: RegFile
+initRegFile = zeroBits :> replicate d31 (deepErrorX "register uninitialized")
+
+writeback :: RegFile -> WritebackIn -> (RegFile, WritebackOut)
+writeback regFile WriteBackIn {entry} = (regFile', WriteBackOut {retired = entry})
+  where
+    regFile' = case entry of
+      Just maWb | Just rdAddr <- pendingRd maWb -> replace rdAddr maWb.wbData regFile
+      _ -> regFile

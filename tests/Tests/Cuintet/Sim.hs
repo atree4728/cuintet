@@ -4,7 +4,7 @@ import Clash.Prelude
 import Clash.Sized.Vector (unsafeFromList)
 import Cuintet (system)
 import Cuintet.Eei (Inst, RegFile, XLen)
-import Cuintet.Pipeline (MaWb (..))
+import Cuintet.Pipeline (MaWb (..), pendingRd)
 import Cuintet.Ram (initRamLanes)
 import Data.Maybe (catMaybes)
 import Prelude qualified as P
@@ -28,4 +28,4 @@ runProgram n prog =
 finalRegs :: Int -> [Inst] -> RegFile
 finalRegs n prog = P.foldl apply (replicate d32 0) (runProgram n prog)
   where
-    apply regs l = maybe regs (\(a, d) -> replace a d regs) l.wbReq
+    apply regs l = maybe regs (\a -> replace a l.wbData regs) (pendingRd l)

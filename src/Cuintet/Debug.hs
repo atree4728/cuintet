@@ -2,7 +2,7 @@ module Cuintet.Debug (showInstLog, showInstLogs) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (itype), instCode)
-import Cuintet.Pipeline (MaWb (..))
+import Cuintet.Pipeline (MaWb (..), pendingRd)
 import Data.List qualified as L
 import Text.Printf (printf)
 
@@ -12,7 +12,7 @@ import Text.Printf (printf)
 >>> import Cuintet.Pipeline (MaWb (..))
 >>> import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
 >>> ctrl = InstCtrl{itype = IType, rwbEn = True, isLui = False, isAluOp = True, isOp32 = False, isJump = False, isLoad = False, systemOp = Nothing, funct3 = 0, funct7 = 0}
->>> l = MaWb{pc = 12, instBits = 0x00110193, ctrl, imm = 1, rs1Addr = 2, rs2Addr = 1, rdAddr = 3, rs1Data = 42, rs2Data = 0, op1 = 42, op2 = 1, aluResult = 43, wbReq = Just (3, 43), branchTaken = Nothing, csrRdata = Nothing}
+>>> l = MaWb{pc = 12, instBits = 0x00110193, ctrl, imm = 1, rs1Addr = 2, rs2Addr = 1, rdAddr = 3, rs1Data = 42, rs2Data = 0, op1 = 42, op2 = 1, aluResult = 43, wbData = 43, branchTaken = Nothing, csrRdata = Nothing}
 >>> putStrLn (showInstLog l)
 0000000c : 00110193
   itype   : 000010
@@ -23,18 +23,6 @@ import Text.Printf (printf)
   op2     : 00000001
   alu res : 0000002b
   reg[ 3] <= 0000002b
-
-@wbReq@ is optional:
-
->>> putStrLn (showInstLog l{wbReq = Nothing})
-0000000c : 00110193
-  itype   : 000010
-  imm     : 00000001
-  rs1[ 2] : 0000002a
-  rs2[ 1] : 00000000
-  op1     : 0000002a
-  op2     : 00000001
-  alu res : 0000002b
 -}
 showInstLog :: MaWb -> String
 showInstLog l =
@@ -50,7 +38,7 @@ showInstLog l =
       , printf "  alu res : %08x" (toInteger l.aluResult)
       ]
         L.++ maybe [] (\branchTaken -> [printf "  br take : %s" (show branchTaken)]) l.branchTaken
-        L.++ maybe [] (\(rdAddr, wbData) -> [printf "  reg[%2d] <= %08x" (toInteger rdAddr) (toInteger wbData)]) l.wbReq
+        L.++ maybe [] (\rdAddr -> [printf "  reg[%2d] <= %08x" (toInteger rdAddr) (toInteger l.wbData)]) (pendingRd l)
         L.++ maybe [] (\csrRdata -> [printf "  csr rdata : %08x" (toInteger csrRdata)]) l.csrRdata
     )
 

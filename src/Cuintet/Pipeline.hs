@@ -57,7 +57,7 @@ data MaWb = MaWb
   , op2 :: BitVector XLen
   , aluResult :: BitVector XLen
   , branchTaken :: Maybe Bool
-  , wbReq :: Maybe (RegAddr, BitVector XLen)
+  , wbData :: BitVector XLen
   , csrRdata :: Maybe (BitVector XLen)
   }
   deriving (Generic, NFDataX)

@@ -54,7 +54,7 @@ import Cuintet.LoadStoreUnit (InstInfo (..), LoadStoreReq (..), LoadStoreResp (.
 import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), MaWb (..), pendingRd)
 import Cuintet.Stage.Decode (decode, hazard)
 import Cuintet.Stage.Execute (execute)
-import Cuintet.Stage.Writeback (writeback)
+import Cuintet.Stage.Writeback (WritebackIn (..), WritebackOut (..), initRegFile, writeback)
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust)
 
@@ -98,7 +98,7 @@ initState =
     { next = 0
     , fetching = Nothing
     , staged = Nothing
-    , regFile = zeroBits :> replicate d31 (deepErrorX "register uninitialized")
+    , regFile = initRegFile
     , csrFile = initCsrFile
     , loadStoreState = Idle
     }
@@ -193,11 +193,13 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp, maWb
         , op2
         , aluResult
         , branchTaken = orNothing (isBranchOp ctrl) branchTaken
-        , wbReq = orNothing (ctrl.rwbEn && rdAddr /= 0) (rdAddr, wbData')
+        , wbData = wbData'
         , csrRdata
         }
 
     maWbReq = FifoReq {wdata = orNothing commit maWb, rready = True, flush = False}
+
+    (regFile', wbOut) = writeback regFile WriteBackIn {entry = maWbResp.rdata}
 
     -- Everything that redirects IF.
     controlHazard = commit && (isJust csrRedirect || ctrl.isJump || isBranchOp ctrl && branchTaken)
@@ -228,7 +230,7 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp, maWb
       CoreOut
         { iReq = orNothing instResp.wreadyTwo BusReq {addr = next, wdata = Nothing}
         , dReq = loadStoreResp.memReq
-        , instLog = maWbResp.rdata
+        , instLog = wbOut.retired
         }
 
     state' =
@@ -236,7 +238,7 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp, maWb
         { next = next'
         , fetching = fetching'
         , staged = staged'
-        , regFile = writeback regFile maWbResp.rdata
+        , regFile = regFile'
         , csrFile = csrFile'
         , loadStoreState = loadStoreState'
         }
