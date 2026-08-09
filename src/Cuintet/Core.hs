@@ -50,12 +50,11 @@ import Cuintet.Eei (MemReq, MemResp, RegFile)
 import Cuintet.Fifo (FifoReq (..), FifoResp (..), fifo)
 import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), MaWb (..), pendingRd)
 import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
-import Cuintet.Stage.Execute (execute)
+import Cuintet.Stage.Execute (ExecuteIn (..), ExecuteOut (..), execute)
 import Cuintet.Stage.Fetch (FetchIn (..), FetchOut (..), FetchState (..), fetch, initFetchState)
 import Cuintet.Stage.MemAccess (MemAccessIn (..), MemAccessOut (..), MemAccessState (..), initMemAccessState, memAccess)
 import Cuintet.Stage.Writeback (WritebackIn (..), WritebackOut (..), initRegFile, writeback)
-import Cuintet.Util (orNothing)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (isJust)
 
 data CoreIn = CoreIn
   { iResp :: MemResp
@@ -109,41 +108,25 @@ coreT ::
   CoreState ->
   (CoreIn, FifoResp IfId, FifoResp IdEx, FifoResp ExMa, FifoResp MaWb) ->
   (CoreState, (CoreOut, FifoReq IfId, FifoReq IdEx, FifoReq ExMa, FifoReq MaWb))
-coreT CoreState {..} (~CoreIn {iResp, dResp}, instResp, idExResp, exMaResp, maWbResp) = (state', (coreOut, instReq, idExReq, exMaReq, maWbReq))
+coreT CoreState {..} (~CoreIn {iResp, dResp}, ifIdResp, idExResp, exMaResp, maWbResp) = (state', (coreOut, ifIdReq, idExReq, exMaReq, maWbReq))
   where
+    (fetchState', ifOut) = fetch fetchState FetchIn {iResp, fifo = ifIdResp, redirect = maOut.redirect}
+    idOut = decode DecodeIn {entry = ifIdResp.rdata, regFile, inflights, wready = idExResp.wready, flush = isJust maOut.redirect}
+    exOut = execute ExecuteIn {entry = idExResp.rdata, wready = exMaResp.wready}
+    (memAccessState', maOut) = memAccess memAccessState MemAccessIn {entry = exMaResp.rdata, dResp}
+    (regFile', wbOut) = writeback regFile WriteBackIn {entry = maWbResp.rdata}
+
     inflights =
       (idExResp.rdata >>= pendingRd)
         :> (exMaResp.rdata >>= pendingRd)
         :> (maWbResp.rdata >>= pendingRd)
         :> Nil
 
-    (fetchState', ifOut) = fetch fetchState FetchIn {iResp, fifo = instResp, redirect = maOut.redirect}
-    idOut = decode DecodeIn {entry = instResp.rdata, regFile, inflights, wready = idExResp.wready, flush = isJust maOut.redirect}
-    (memAccessState', maOut) = memAccess memAccessState MemAccessIn {entry = exMaResp.rdata, dResp}
-    (regFile', wbOut) = writeback regFile WriteBackIn {entry = maWbResp.rdata}
-
-    instReq = FifoReq {wdata = ifOut.issue, rready = isJust idOut.issue, flush = isJust maOut.redirect}
-    idExReq = FifoReq {wdata = idOut.issue, rready = exIssue, flush = controlHazard}
-
-    exValid = isJust idExResp.rdata
-    exMa = execute $ fromMaybe (deepErrorX "coreT: ID-EX FIFO is empty") idExResp.rdata
-    exIssue = exValid && exMaResp.wready
-
-    exMaReq = FifoReq {wdata = orNothing exIssue exMa, rready = isJust maOut.issue, flush = False}
-
+    ifIdReq = FifoReq {wdata = ifOut.issue, rready = isJust idOut.issue, flush = isJust maOut.redirect}
+    idExReq = FifoReq {wdata = idOut.issue, rready = isJust exOut.issue, flush = isJust maOut.redirect}
+    exMaReq = FifoReq {wdata = exOut.issue, rready = isJust maOut.issue, flush = False}
     maWbReq = FifoReq {wdata = maOut.issue, rready = True, flush = False}
-    controlHazard = isJust maOut.redirect
 
-    coreOut =
-      CoreOut
-        { iReq = ifOut.iReq
-        , dReq = maOut.dReq
-        , instLog = wbOut.retired
-        }
+    coreOut = CoreOut {iReq = ifOut.iReq, dReq = maOut.dReq, instLog = wbOut.retired}
 
-    state' =
-      CoreState
-        { fetchState = fetchState'
-        , regFile = regFile'
-        , memAccessState = memAccessState'
-        }
+    state' = CoreState {fetchState = fetchState', regFile = regFile', memAccessState = memAccessState'}

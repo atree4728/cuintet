@@ -1,9 +1,39 @@
-module Cuintet.Stage.Execute (execute) where
+module Cuintet.Stage.Execute (execute, ExecuteIn (..), ExecuteOut (..)) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
 import Cuintet.Eei (Addr, IOp (..), ShiftRight (..), XLen)
 import Cuintet.Pipeline (ExMa (..), IdEx (..))
+import Cuintet.Util (orNothing)
+import Data.Maybe (fromMaybe, isJust)
+
+data ExecuteIn = ExecuteIn
+  { entry :: Maybe IdEx
+  , wready :: Bool
+  }
+
+newtype ExecuteOut = ExecuteOut
+  { issue :: Maybe ExMa
+  }
+
+execute :: ExecuteIn -> ExecuteOut
+execute ExecuteIn {..} = ExecuteOut {issue = orNothing issued exMa}
+  where
+    issued = isJust entry && wready
+    exMa = mkExMa $ fromMaybe (deepErrorX "coreT: ID-EX FIFO is empty") entry
+
+mkExMa :: IdEx -> ExMa
+mkExMa IdEx {..} = ExMa {op1, op2, aluResult, branchTaken, ..}
+  where
+    (op1, op2) = operands ctrl imm rs1Data rs2Data pc
+    aluResult = alu ctrl op1 op2
+
+    branchTaken = branchUnit ctrl.funct3 op1 op2
+
+    wbData
+      | ctrl.isLui = imm
+      | ctrl.isJump = bitCoerce (pc + 4)
+      | otherwise = aluResult
 
 -- | Extract the two operands according to the instruction form.
 operands ::
@@ -61,16 +91,3 @@ branchUnit funct3 op1 op2 = case funct3 of
     beq = op1 == op2
     blt = (bitCoerce op1 :: Signed XLen) < (bitCoerce op2 :: Signed XLen)
     bltu = (bitCoerce op1 :: Unsigned XLen) < (bitCoerce op2 :: Unsigned XLen)
-
-execute :: IdEx -> ExMa
-execute IdEx {..} = ExMa {op1, op2, aluResult, branchTaken, ..}
-  where
-    (op1, op2) = operands ctrl imm rs1Data rs2Data pc
-    aluResult = alu ctrl op1 op2
-
-    branchTaken = branchUnit ctrl.funct3 op1 op2
-
-    wbData
-      | ctrl.isLui = imm
-      | ctrl.isJump = bitCoerce (pc + 4)
-      | otherwise = aluResult
