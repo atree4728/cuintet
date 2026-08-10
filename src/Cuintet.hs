@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module Cuintet (vDom50, topEntity, system) where
+module Cuintet (vDom27, tangnano9k, system) where
 
 import Clash.Prelude
 import Cuintet.BusArbiter (BusArbiterReq (..), BusArbiterResp (..), busArbiter)
@@ -28,26 +28,23 @@ system lanes = coreOut
     memReq = (.memReq) <$> arbResp
     memResp = ram lanes memReq
 
-createDomain vSystem {vName = "Dom50", vPeriod = hzToPeriod 27e6}
+createDomain vSystem {vName = "Dom27", vPeriod = hzToPeriod 27e6, vResetPolarity = ActiveLow}
 
 -- | top entity for Tang Nano 9k, see https://wiki.sipeed.com/hardware/en/tang/Tang-Nano-9K/Nano-9K.html
-topEntity ::
-  Clock Dom50 ->
-  Reset Dom50 ->
-  Enable Dom50 ->
-  Signal Dom50 (BitVector 6)
-topEntity = exposeClockResetEnable $ truncateB . (.led) <$> system (blockRamLanes d12) -- BRAM size = 2^12 * 8 B = 32 KB
+tangnano9k ::
+  Clock Dom27 ->
+  Reset Dom27 ->
+  Signal Dom27 (BitVector 6)
+tangnano9k clk rst =
+  withClockResetEnable clk rst enableGen $
+    complement . truncateB . (.led) <$> system (blockRamLanes d12) -- BRAM size = 2^12 * 8 B = 32 KB
 {-# ANN
-  topEntity
+  tangnano9k
   ( Synthesize
       { t_name = "cuintet"
-      , t_inputs =
-          [ PortName "CLK"
-          , PortName "RST"
-          , PortName "EN"
-          ]
-      , t_output = PortName "DOUT"
+      , t_inputs = [PortName "clk", PortName "rst_n"]
+      , t_output = PortName "led"
       }
   )
   #-}
-{-# OPAQUE topEntity #-}
+{-# OPAQUE tangnano9k #-}

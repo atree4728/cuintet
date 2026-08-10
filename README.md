@@ -19,6 +19,18 @@ cabal run unittests
 cabal run doctests
 ```
 
+To open the REPL, use:
+
+```
+cabal run clashi
+```
+
+To see the document, use:
+
+```
+cabal haddock --open
+```
+
 ### riscv-tests
 
 `unittests` also runs the `rv64ui-p-*` suite from
@@ -34,33 +46,8 @@ git submodule update --init
 ./tests/riscv-tests/gen.sh
 ```
 
-This needs `riscv64-unknown-elf-gcc` with `rv64i` multilib; override the
-toolchain with `RISCV_PREFIX`.
 
-`fence_i` and `ma_data` are left out, since Zifencei and misaligned accesses
-are not implemented.
-
-The tests are linked against a cut-down environment in `tests/riscv-tests/env/`,
-because the upstream `env/p` initialises PMP, address translation and trap
-delegation, and reports through the `tohost` MMIO word. Instead a test leaves
-its verdict in `gp` and executes `ecall`, and the testbench halts there.
-
-riscv-tests and the environment it is derived from are Copyright (c) 2012-2015,
-The Regents of the University of California; see `tests/riscv-tests/LICENSE`.
-
-To open the REPL, use:
-
-```
-cabal run clashi
-```
-
-To see the document, use:
-
-```
-cabal haddock --open
-```
-
-## Compiling to HDL
+## Synthesis
 
 To compile the project to SystemVerilog, run:
 
@@ -70,4 +57,14 @@ cabal run clash -- Cuintet --systemverilog
 
 You can find the SystemVerilog files in `systemverilog/`.
 
-Also, Clash is able to compile into either VHDL or Verilog HDL.
+Synthesising for the Tang Nano 9K needs [just](https://github.com/casey/just) and
+[oss-cad-suite](https://github.com/YosysHQ/oss-cad-suite-build) on `PATH`:
+
+```bash
+just prog   # build the bitstream and load it into SRAM
+just flash  # build the bitstream and write it to the on-board flash
+```
+
+`just --list` shows the individual steps.
+
+The core does not fit on the GW1N-9C yet, so place and route currently fails.

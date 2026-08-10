@@ -17,3 +17,5 @@ dist-newstyle/
 /verilog
 /vhdl
 /systemverilog
+
+/build
