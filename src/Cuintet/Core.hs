@@ -58,7 +58,8 @@ driven out of registers, @iReq@ from IF's and @dReq@ from MA's.
 module Cuintet.Core (CoreIn (..), CoreOut (..), core) where
 
 import Clash.Prelude
-import Cuintet.Eei (MemReq, MemResp, RegFile)
+import Cuintet.CsrUnit (CsrFile (led))
+import Cuintet.Eei (MemReq, MemResp, RegFile, XLen)
 import Cuintet.Fifo (FifoReq (..), FifoResp (..), fifo)
 import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), MaWb (..), pendingRd)
 import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
@@ -82,11 +83,10 @@ data CoreOut = CoreOut
   -- ^ Load/store request.
   , instLog :: Maybe MaWb
   -- ^ Execution log of a single instruction, emitted only in the clock it retires.
+  , led :: BitVector XLen
   }
 
-{- | The core's registers. Each stage owns its own, except @regFile@, which WB
-writes and ID reads.
--}
+-- | The core's registers. Each stage owns its own, except @regFile@, which WB writes and ID reads.
 data CoreState = CoreState
   { fetchState :: FetchState
   , regFile :: RegFile
@@ -102,9 +102,7 @@ initState =
     , memAccessState = initMemAccessState
     }
 
-{- | Closes 'coreT' around the four stage FIFOs. IF-ID is the deep one, since it
-is what lets IF run ahead; the rest only need to hold a single instruction.
--}
+-- | Closes 'coreT' around the four stage FIFOs. IF-ID is the deep one, since it is what lets IF run ahead; the rest only need to hold a single instruction.
 core ::
   (HiddenClockResetEnable dom) =>
   Signal dom CoreIn ->
@@ -143,6 +141,6 @@ coreT CoreState {..} (~CoreIn {iResp, dResp}, ifIdResp, idExResp, exMaResp, maWb
     exMaReq = FifoReq {wdata = exOut.issue, rready = isJust maOut.issue, flush = False}
     maWbReq = FifoReq {wdata = maOut.issue, rready = True, flush = False}
 
-    coreOut = CoreOut {iReq = ifOut.iReq, dReq = maOut.dReq, instLog = wbOut.retired}
+    coreOut = CoreOut {iReq = ifOut.iReq, dReq = maOut.dReq, instLog = wbOut.retired, led = memAccessState.csrFile.led}
 
     state' = CoreState {fetchState = fetchState', regFile = regFile', memAccessState = memAccessState'}

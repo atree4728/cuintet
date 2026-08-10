@@ -3,6 +3,7 @@ module Tests.Cuintet.Sim (memImage, runProgram, finalRegs, packInsts) where
 import Clash.Prelude
 import Clash.Sized.Vector (unsafeFromList)
 import Cuintet (system)
+import Cuintet.Core (CoreOut (..))
 import Cuintet.Eei (Inst, RegFile, XLen)
 import Cuintet.Pipeline (MaWb (..), pendingRd)
 import Cuintet.Ram (initRamLanes)
@@ -23,7 +24,7 @@ memImage prog = unsafeFromList (packInsts $ P.take 256 (prog P.++ P.repeat nop))
 
 runProgram :: Int -> [Inst] -> [MaWb]
 runProgram n prog =
-  P.take n (catMaybes (sampleN @System (32 + 24 * n) (system (initRamLanes (memImage prog)))))
+  P.take n $ catMaybes $ sampleN @System (32 + 24 * n) $ (.instLog) <$> system $ initRamLanes $ memImage prog
 
 finalRegs :: Int -> [Inst] -> RegFile
 finalRegs n prog = P.foldl apply (replicate d32 0) (runProgram n prog)

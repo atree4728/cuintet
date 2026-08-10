@@ -43,13 +43,10 @@ type XLen = 64
 -- | The maximum width of instructions which the implementation supports.
 type ILen = 32
 
-{- | Widths of the buses are counted in bytes; @* 8@ appears only where a byte
-lane vector is turned back into a word.
--}
+-- | Widths of the buses are counted in bytes; @* 8@ appears only where a byte lane vector is turned back into a word.
 type XLenBytes = XLen `Div` 8
 
-{- | A physical memory address, counted in bytes as the ISA has it, and as wide
-as a register.
+{- | A physical memory address, counted in bytes as the ISA has it, and as wide as a register.
 
 It says nothing about how the memory behind it is built: the bus word width and
 the byte lanes are the memory's business, and an address keeps naming the same
@@ -60,8 +57,7 @@ type Addr = Unsigned XLen
 -- | An instruction word. RV64I has the 32-bit form only.
 type Inst = BitVector ILen
 
--- | The integer registers. @x0@ is kept zero by never being written, so reading
--- it needs no special case.
+-- | The integer registers. @x0@ is kept zero by never being written, so reading it needs no special case.
 type RegFile = Vec 32 (BitVector XLen)
 
 -- | A register index; the @rs1@, @rs2@ or @rd@ field verbatim.
@@ -107,8 +103,9 @@ deriveBitPack [t|AccessWidth|]
 -- | The byte offset of an access within its word, the lane 0 being the least significant.
 type LaneOffset = Index XLenBytes
 
--- | The offset of the address within its word, i.e. the low bits of it that the
--- memory itself ignores.
+{- | The offset of the address within its word, i.e. the low bits of it that the
+memory itself ignores.
+-}
 laneOffset :: Addr -> LaneOffset
 laneOffset a = numConvert (truncateB (pack a) :: BitVector (CLog 2 XLenBytes))
 
@@ -125,18 +122,14 @@ sizeBytes = \case
   DoubleWord -> 8
   WidthIllegal -> deepErrorX "sizeBytes: illegal access width"
 
-{- | Whether the access is naturally aligned, i.e. contained in a single word.
-@sizeBytes - 1@ is exactly the mask of offset bits that must be zero.
--}
+-- | Whether the access is naturally aligned, i.e. contained in a single word. @sizeBytes - 1@ is exactly the mask of offset bits that must be zero.
 aligned :: AccessWidth -> LaneOffset -> Bool
 aligned width off = pack off .&. mask == 0
   where
     mask :: BitVector (CLog 2 XLenBytes)
     mask = truncateB (pack (sizeBytes width - 1))
 
-{- | The byte lanes the access covers, the lane 0 being the least significant:
-@sizeBytes@ ones shifted up by the offset.
--}
+-- | The byte lanes the access covers, the lane 0 being the least significant: @sizeBytes@ ones shifted up by the offset.
 laneMask :: forall nBytes. (KnownNat nBytes) => AccessWidth -> LaneOffset -> Vec nBytes Bool
 laneMask width off = reverse $ bitCoerce mask
   where
@@ -144,8 +137,7 @@ laneMask width off = reverse $ bitCoerce mask
     mask = ones `shiftL` numConvert off
     ones = complement (complement 0 `shiftL` numConvert (sizeBytes width))
 
--- | The instruction sitting at the address, picked out of the bus word that
--- contains it.
+-- | The instruction sitting at the address, picked out of the bus word that contains it.
 instAt :: Addr -> BitVector (MemDataBytes * 8) -> Inst
 instAt addr busWord = truncateB (busWord `shiftR` bitOffset (laneOffset addr))
 
@@ -181,8 +173,9 @@ data BusResp nBytes = BusResp
   }
   deriving (Generic, NFDataX)
 
--- | The width of the memory bus, in bytes. One register wide, so a naturally
--- aligned access is always contained in a single bus word.
+{- | The width of the memory bus, in bytes. One register wide, so a naturally
+aligned access is always contained in a single bus word.
+-}
 type MemDataBytes = XLenBytes
 
 -- | 'BusReq' at the width the memory bus is.
@@ -244,8 +237,9 @@ data ShiftRight = Logical | Arithmetic
 deriveDefaultAnnotation [t|ShiftRight|]
 deriveBitPack [t|ShiftRight|]
 
--- | What a CSR access does to the register, laid out as @funct3@ bits 1-0. The
--- fourth pattern is the @funct3@ that names no CSR instruction.
+{- | What a CSR access does to the register, laid out as @funct3@ bits 1-0. The
+fourth pattern is the @funct3@ that names no CSR instruction.
+-}
 data CsrType
   = ReadWrite
   | ReadSet

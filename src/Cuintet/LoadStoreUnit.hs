@@ -98,8 +98,7 @@ loadStoreStep state LoadStoreReq {inst, memResp} = (memUnitState, memUnitResp)
             _ -> Nothing
         }
 
-{- | The access an instruction requests. The width is @funct3@ read directly;
-the offset comes from the address.
+{- | The access an instruction requests. The width is @funct3@ read directly; the offset comes from the address.
 
 A misaligned access traps in RISC-V, but there is no trap mechanism yet, so it
 is rejected as 'deepErrorX'. An illegal @funct3@ is rejected the same way, by

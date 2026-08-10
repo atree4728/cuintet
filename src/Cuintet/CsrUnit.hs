@@ -6,7 +6,7 @@ module Cuintet.CsrUnit (
   CsrAccess (..),
   CsrTrap (..),
   CsrResp (..),
-  CsrFile,
+  CsrFile (led),
   initCsrFile,
   csrStep,
 ) where
@@ -19,10 +19,11 @@ import Data.Maybe (fromMaybe)
 newtype CsrAddr = CsrAddr (BitVector 12)
   deriving newtype (BitPack, Generic, NFDataX)
 
-pattern MTVEC, MEPC, MCAUSE :: CsrAddr
+pattern MTVEC, MEPC, MCAUSE, LED :: CsrAddr
 pattern MTVEC = CsrAddr 0x305
 pattern MEPC = CsrAddr 0x341
 pattern MCAUSE = CsrAddr 0x342
+pattern LED = CsrAddr 0x800
 
 {- | The reason a trap was taken. No exception code in use here goes above 15,
 so the code is kept narrow and widened only where @mcause@ is read.
@@ -49,6 +50,7 @@ data CsrFile = CsrFile
   { mtvecBase :: BitVector 62 -- (XLen - 2); see https://github.com/clash-lang/clash-compiler/issues/3100
   , mepcAligned :: BitVector 62 -- (XLen - 2)
   , mcause :: MCause
+  , led :: BitVector XLen
   }
   deriving (Generic, NFDataX)
 
@@ -104,6 +106,9 @@ csrStep file (Access CsrAccess {..})
       let old = file.mepcAligned ++# (0 :: BitVector 2)
        in (file {mepcAligned = slice d63 d2 (csrWrite csrType old wdata)}, Accessed old)
   | MCAUSE <- csrAddr = (file, Accessed (mcauseValue file.mcause))
+  | LED <- csrAddr =
+      let old = file.led
+       in (file {led = csrWrite csrType old wdata}, Accessed old)
   | otherwise = deepErrorX "csrStep: unimplemented CSR instruction"
   where
     (wvalue, csrType) = case csrOp of
@@ -115,4 +120,4 @@ csrStep file (Access CsrAccess {..})
       _ -> orNothing (rs1Addr /= 0) wvalue
 
 initCsrFile :: CsrFile
-initCsrFile = CsrFile {mtvecBase = 0, mepcAligned = 0, mcause = MCause False 0}
+initCsrFile = CsrFile {mtvecBase = 0, mepcAligned = 0, mcause = MCause False 0, led = 0}

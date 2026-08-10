@@ -6,10 +6,7 @@ import Clash.Prelude
 import Cuintet.BusArbiter (BusArbiterReq (..), BusArbiterResp (..), busArbiter)
 import Cuintet.Core (CoreIn (..), CoreOut (..), core)
 import Cuintet.Eei (MemDataBytes)
-import Cuintet.Pipeline (MaWb)
 import Cuintet.Ram (RamLane, blockRamLanes, ram)
-
-createDomain vSystem {vName = "Dom50", vPeriod = hzToPeriod 50e6}
 
 system ::
   ( HiddenClockResetEnable dom
@@ -17,8 +14,8 @@ system ::
   ) =>
   -- | RAM lane for each byte of the word
   Vec MemDataBytes (RamLane dom ramAddrWidth) ->
-  Signal dom (Maybe MaWb)
-system lanes = (.instLog) <$> coreOut
+  Signal dom CoreOut
+system lanes = coreOut
   where
     coreOut = core coreIn
     coreIn = mkCoreIn <$> arbResp
@@ -31,12 +28,15 @@ system lanes = (.instLog) <$> coreOut
     memReq = (.memReq) <$> arbResp
     memResp = ram lanes memReq
 
+createDomain vSystem {vName = "Dom50", vPeriod = hzToPeriod 27e6}
+
+-- | top entity for Tang Nano 9k, see https://wiki.sipeed.com/hardware/en/tang/Tang-Nano-9K/Nano-9K.html
 topEntity ::
   Clock Dom50 ->
   Reset Dom50 ->
   Enable Dom50 ->
-  Signal Dom50 (Maybe MaWb)
-topEntity = exposeClockResetEnable $ system (blockRamLanes d19) -- BRAM size = 2^19 * 8 bytes = 4 MiB
+  Signal Dom50 (BitVector 6)
+topEntity = exposeClockResetEnable $ truncateB . (.led) <$> system (blockRamLanes d12) -- BRAM size = 2^12 * 8 B = 32 KB
 {-# ANN
   topEntity
   ( Synthesize

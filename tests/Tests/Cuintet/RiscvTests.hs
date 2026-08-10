@@ -10,6 +10,7 @@ module Tests.Cuintet.RiscvTests (tests) where
 import Clash.Prelude
 import Clash.Sized.Vector (unsafeFromList)
 import Cuintet (system)
+import Cuintet.Core (CoreOut (..))
 import Cuintet.Eei (Inst, MemDataBytes)
 import Cuintet.Pipeline (MaWb (..), pendingRd)
 import Cuintet.Ram (initRamLanes)
@@ -73,7 +74,7 @@ write-backs the core logs, and reads the verdict out of 'testnum'.
 runImage :: Vec (2 ^ RamAddrWidth) (BitVector (MemDataBytes * 8)) -> Either String ()
 runImage img = verdict (replicate d32 0) instLogs
   where
-    instLogs = catMaybes (sampleN @System maxCycles (system (initRamLanes img)))
+    instLogs = catMaybes $ sampleN @System maxCycles $ (.instLog) <$> system (initRamLanes img)
 
     verdict :: Vec 32 (BitVector (MemDataBytes * 8)) -> [MaWb] -> Either String ()
     verdict _ [] = Left (printf "no ecall within %d cycles" maxCycles)
