@@ -8,23 +8,20 @@ simulation stops there.
 module Tests.Cuintet.RiscvTests (tests) where
 
 import Clash.Prelude
-import Clash.Sized.Vector (unsafeFromList)
 import Cuintet (system)
 import Cuintet.Core (CoreOut (..))
 import Cuintet.Eei (Inst, MemDataBytes)
+import Cuintet.Image (hexImage)
 import Cuintet.Pipeline (MaWb (..), destReg)
 import Cuintet.Unit.Ram (initRamLanes)
 import Data.ByteString.Char8 qualified as BC
 import Data.FileEmbed (embedDir, makeRelativeToProject)
 import Data.List (sortOn)
 import Data.Maybe (catMaybes)
-import Numeric (readHex)
 import System.FilePath (takeBaseName)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase)
-import Tests.Cuintet.Sim (packInsts)
 import Text.Printf (printf)
-import Prelude qualified as P
 
 {- | Bus words of memory the core is given.  The images are linked at
 @0x80000000@, which 'Cuintet.Memory.memory' truncates to word zero, so an
@@ -54,20 +51,6 @@ is recompiled; @cabal clean@ forces that.
 images :: [(FilePath, BC.ByteString)]
 images = $(makeRelativeToProject "tests/riscv-tests/hex" >>= embedDir)
 
--- | Decodes an image, zero-padded to the size of the memory.
-image :: FilePath -> BC.ByteString -> Vec (2 ^ RamAddrWidth) (BitVector (MemDataBytes * 8))
-image path bs
-  | P.length ws > maxInsts = errorWithoutStackTrace (printf "%s: RAM size is insufficient" path)
-  | otherwise = unsafeFromList (packInsts $ P.take maxInsts (ws P.++ P.repeat 0))
-  where
-    ws = P.zipWith (parseWord path) [1 ..] (P.lines (BC.unpack bs))
-    maxInsts = 2 * natToNum @(2 ^ RamAddrWidth)
-
-parseWord :: FilePath -> Int -> String -> Inst
-parseWord path lineNo s = case readHex s of
-  [(w, "")] -> fromInteger (w :: Integer)
-  _ -> errorWithoutStackTrace (printf "%s:%d: not a hex word: %s" path lineNo s)
-
 {- | Runs an image until its @ecall@, rebuilding the register file from the
 write-backs the core logs, and reads the verdict out of 'testnum'.
 -}
@@ -90,6 +73,6 @@ tests :: TestTree
 tests =
   testGroup
     "riscv-tests"
-    [ testCase (takeBaseName path) (either assertFailure pure (runImage (image path bs)))
+    [ testCase (takeBaseName path) (either assertFailure pure $ runImage $ hexImage path $ BC.unpack bs)
     | (path, bs) <- sortOn fst images
     ]

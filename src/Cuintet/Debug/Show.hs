@@ -1,4 +1,4 @@
-module Cuintet.Debug (showInstLog, showInstLogs) where
+module Cuintet.Debug.Show (showInstLog, showInstLogs) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (itype), instCode)

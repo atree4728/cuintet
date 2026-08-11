@@ -1,11 +1,27 @@
 module Tests.Cuintet.Core (tests) where
 
 import Clash.Prelude
-import Cuintet.Eei (Inst)
-import Cuintet.Pipeline (MaWb (..))
+import Cuintet (system)
+import Cuintet.Core (CoreOut (..), CoreTrace (..))
+import Cuintet.Eei (Inst, RegFile)
+import Cuintet.Image (memImage)
+import Cuintet.Pipeline (MaWb (..), destReg)
+import Cuintet.Unit.Ram (initRamLanes)
+import Data.Maybe (mapMaybe)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
-import Tests.Cuintet.Sim (finalRegs, runProgram)
+import Prelude qualified as P
+
+runProgram :: Int -> [Inst] -> [MaWb]
+runProgram n prog =
+  P.take n $ mapMaybe (.instLog) traces
+  where
+    traces = sampleN @System (32 + 24 * n) $ (.trace) $ system $ initRamLanes $ memImage prog
+
+finalRegs :: Int -> [Inst] -> RegFile
+finalRegs n prog = P.foldl apply (replicate d32 0) (runProgram n prog)
+  where
+    apply regs l = maybe regs (\a -> replace a l.wbData regs) (destReg l)
 
 aluProg :: [Inst]
 aluProg =
@@ -129,7 +145,7 @@ tests =
   testGroup
     "Cuintet.Core"
     [ testCase "Commit each instruction once, in order" $ do
-        -- ((.pc) <$> runProgram 8 aluProg) @?= [0, 4, 8, 12, 16, 20, 24, 28]
+        ((.pc) <$> runProgram 8 aluProg) @?= [0, 4, 8, 12, 16, 20, 24, 28]
         (finalRegs 3 aluProg !! (3 :: Int)) @?= 0x00100024
     , testCase "Load the value that was stored using store" $ do
         ((.pc) <$> runProgram 8 loadStoreProg) @?= [0, 4, 8, 12, 16, 20, 24, 28]
@@ -169,8 +185,9 @@ tests =
         let regs = finalRegs 4 ecallProg
         (regs !! (1 :: Int)) @?= 0xb
         (regs !! (2 :: Int)) @?= 0x4
-    , testCase "mret" $
-        ((.pc) <$> runProgram 3 mretProg) @?= [0x0, 0x04, 0x10]
+    , testCase "mret"
+        $ ((.pc) <$> runProgram 3 mretProg)
+        @?= [0x0, 0x04, 0x10]
     , testCase "Interlock a data dependency" $ do
         let regs = finalRegs 2 dataHazardProg
         (regs !! (2 :: Int)) @?= 2

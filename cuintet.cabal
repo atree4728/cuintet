@@ -66,8 +66,9 @@ library
     Cuintet
     Cuintet.Core
     Cuintet.CoreCtrl
-    Cuintet.Debug
+    Cuintet.Debug.Show
     Cuintet.Eei
+    Cuintet.Image
     Cuintet.Pipeline
     Cuintet.Stage.Decode
     Cuintet.Stage.Execute
@@ -124,7 +125,6 @@ test-suite unittests
   other-modules:
     Tests.Cuintet.Core
     Tests.Cuintet.RiscvTests
-    Tests.Cuintet.Sim
 
   build-depends:
     bytestring,
