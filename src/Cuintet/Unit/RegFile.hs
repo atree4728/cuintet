@@ -8,7 +8,7 @@ decodes; writing takes effect at the next clock edge. Nothing ever writes @x0@,
 since 'Cuintet.Pipeline.destReg' rejects it, but the RAM starts out undefined,
 so reads of it are forced to zero.
 -}
-module Cuintet.RegFile (RegReq (..), RegResp (..), regFile, mkRegReq) where
+module Cuintet.Unit.RegFile (RegReq (..), RegResp (..), regFile, mkRegReq) where
 
 import Clash.Prelude
 import Control.Arrow (first)

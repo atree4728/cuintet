@@ -1,4 +1,4 @@
-module Cuintet.Ram (RamLane, ram, blockRamLanes, initRamLanes) where
+module Cuintet.Unit.Ram (RamLane, ram, blockRamLanes, initRamLanes) where
 
 import Clash.Prelude
 import Cuintet.Eei (Addr, BusReq (..), BusResp (BusResp), StoreLanes (StoreLanes))

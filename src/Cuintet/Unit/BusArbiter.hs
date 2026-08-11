@@ -2,7 +2,7 @@
 Arbitrates a single-port memory between instruction fetch and load/store
 requests. See 'busArbiter'.
 -}
-module Cuintet.BusArbiter (Grant (..), BusArbiterReq (..), BusArbiterResp (..), busArbiter) where
+module Cuintet.Unit.BusArbiter (Grant (..), BusArbiterReq (..), BusArbiterResp (..), busArbiter) where
 
 import Clash.Prelude
 import Cuintet.Eei (BusResp (..), MemReq, MemResp)

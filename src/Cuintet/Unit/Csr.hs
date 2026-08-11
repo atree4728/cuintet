@@ -1,4 +1,4 @@
-module Cuintet.CsrUnit (
+module Cuintet.Unit.Csr (
   CsrAddr (..),
   MCause (..),
   pattern ENVIRONMENT_CALL,

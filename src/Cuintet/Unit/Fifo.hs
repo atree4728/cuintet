@@ -1,5 +1,5 @@
 -- | FIFO that stores up to 2^@width@ - 1 elements of type @dat@.
-module Cuintet.Fifo (FifoReq (..), FifoResp (..), fifo) where
+module Cuintet.Unit.Fifo (FifoReq (..), FifoResp (..), fifo) where
 
 import Clash.Prelude
 import Cuintet.Util (orNothing)

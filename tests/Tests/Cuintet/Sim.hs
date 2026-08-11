@@ -6,7 +6,7 @@ import Cuintet (system)
 import Cuintet.Core (CoreOut (..))
 import Cuintet.Eei (Inst, RegFile, XLen)
 import Cuintet.Pipeline (MaWb (..), destReg)
-import Cuintet.Ram (initRamLanes)
+import Cuintet.Unit.Ram (initRamLanes)
 import Data.Maybe (catMaybes)
 import Prelude qualified as P
 

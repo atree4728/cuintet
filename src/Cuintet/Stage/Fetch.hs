@@ -16,8 +16,8 @@ module Cuintet.Stage.Fetch (FetchState (..), initFetchState, FetchIn (..), Fetch
 
 import Clash.Prelude
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, instAt)
-import Cuintet.Fifo (FifoResp (..))
 import Cuintet.Pipeline (IfId (..))
+import Cuintet.Unit.Fifo (FifoResp (..))
 import Cuintet.Util (orNothing)
 import Data.Maybe (isJust)
 

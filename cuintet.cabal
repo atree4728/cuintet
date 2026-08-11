@@ -64,22 +64,22 @@ library
   -- cabal-gild: discover src
   exposed-modules:
     Cuintet
-    Cuintet.BusArbiter
     Cuintet.Core
     Cuintet.CoreCtrl
-    Cuintet.CsrUnit
     Cuintet.Debug
     Cuintet.Eei
-    Cuintet.Fifo
-    Cuintet.LoadStoreUnit
     Cuintet.Pipeline
-    Cuintet.Ram
-    Cuintet.RegFile
     Cuintet.Stage.Decode
     Cuintet.Stage.Execute
     Cuintet.Stage.Fetch
     Cuintet.Stage.MemAccess
     Cuintet.Stage.Writeback
+    Cuintet.Unit.BusArbiter
+    Cuintet.Unit.Csr
+    Cuintet.Unit.Fifo
+    Cuintet.Unit.LoadStore
+    Cuintet.Unit.Ram
+    Cuintet.Unit.RegFile
     Cuintet.Util
 
 common clash-exe

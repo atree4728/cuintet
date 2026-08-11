@@ -16,10 +16,10 @@ module Cuintet.Stage.MemAccess (initMemAccessState, memAccess, MemAccessIn (..),
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), isBranchOp)
-import Cuintet.CsrUnit (CsrAccess (..), CsrAddr (..), CsrFile, CsrReq (..), CsrResp (..), CsrTrap (..), csrStep, initCsrFile, pattern ENVIRONMENT_CALL)
 import Cuintet.Eei (Addr, MemReq, MemResp, SystemOp (..))
-import Cuintet.LoadStoreUnit (InstInfo (..), LoadStoreReq (..), LoadStoreResp (..), LoadStoreState (..), loadStoreStep)
 import Cuintet.Pipeline (ExMa (..), MaWb (..))
+import Cuintet.Unit.Csr (CsrAccess (..), CsrAddr (..), CsrFile, CsrReq (..), CsrResp (..), CsrTrap (..), csrStep, initCsrFile, pattern ENVIRONMENT_CALL)
+import Cuintet.Unit.LoadStore (InstInfo (..), LoadStoreReq (..), LoadStoreResp (..), LoadStoreState (..), loadStoreStep)
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust)
 

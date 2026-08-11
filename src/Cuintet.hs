@@ -3,10 +3,10 @@
 module Cuintet (vDom27, tangnano9k, system) where
 
 import Clash.Prelude
-import Cuintet.BusArbiter (BusArbiterReq (..), BusArbiterResp (..), busArbiter)
 import Cuintet.Core (CoreIn (..), CoreOut (..), core)
 import Cuintet.Eei (MemDataBytes)
-import Cuintet.Ram (RamLane, initRamLanes, ram)
+import Cuintet.Unit.BusArbiter (BusArbiterReq (..), BusArbiterResp (..), busArbiter)
+import Cuintet.Unit.Ram (RamLane, initRamLanes, ram)
 
 system ::
   ( HiddenClockResetEnable dom

@@ -64,16 +64,16 @@ driven out of registers, @iReq@ from IF's and @dReq@ from MA's.
 module Cuintet.Core (CoreIn (..), CoreOut (..), core) where
 
 import Clash.Prelude
-import Cuintet.CsrUnit (CsrFile (led))
 import Cuintet.Eei (MemReq, MemResp, XLen)
-import Cuintet.Fifo (FifoReq (..), FifoResp (..), fifo)
 import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), MaWb (..), destReg)
-import Cuintet.RegFile (RegReq (..), RegResp, mkRegReq, regFile)
 import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
 import Cuintet.Stage.Execute (ExecuteIn (..), ExecuteOut (..), execute)
 import Cuintet.Stage.Fetch (FetchIn (..), FetchOut (..), FetchState (..), fetch, initFetchState)
 import Cuintet.Stage.MemAccess (MemAccessIn (..), MemAccessOut (..), MemAccessState (..), initMemAccessState, memAccess)
 import Cuintet.Stage.Writeback (WritebackIn (..), WritebackOut (..), writeback)
+import Cuintet.Unit.Csr (CsrFile (led))
+import Cuintet.Unit.Fifo (FifoReq (..), FifoResp (..), fifo)
+import Cuintet.Unit.RegFile (RegReq (..), RegResp, mkRegReq, regFile)
 import Data.Maybe (isJust)
 
 data CoreIn = CoreIn

@@ -10,7 +10,7 @@ import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
 import Cuintet.Eei (Inst, Opcode (..), RegAddr, System12 (..), SystemOp (..), XLen)
 import Cuintet.Pipeline (IdEx (..), IfId (..), srcRegs)
-import Cuintet.RegFile (RegResp (..))
+import Cuintet.Unit.RegFile (RegResp (..))
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust)
 

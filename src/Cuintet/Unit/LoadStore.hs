@@ -13,7 +13,7 @@ word by 'formatRdata'; narrower stores (SB\/SH\/SW) mask off the byte lanes
 outside the access by 'storeLanes'. Accesses that are not naturally aligned are
 rejected as 'deepErrorX' by 'access', so one never straddles two bus words.
 -}
-module Cuintet.LoadStoreUnit (
+module Cuintet.Unit.LoadStore (
   AccessWidth (..),
   InstInfo (..),
   LoadFmt (..),

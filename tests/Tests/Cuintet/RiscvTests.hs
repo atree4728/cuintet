@@ -13,7 +13,7 @@ import Cuintet (system)
 import Cuintet.Core (CoreOut (..))
 import Cuintet.Eei (Inst, MemDataBytes)
 import Cuintet.Pipeline (MaWb (..), destReg)
-import Cuintet.Ram (initRamLanes)
+import Cuintet.Unit.Ram (initRamLanes)
 import Data.ByteString.Char8 qualified as BC
 import Data.FileEmbed (embedDir, makeRelativeToProject)
 import Data.List (sortOn)
