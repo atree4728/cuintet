@@ -74,6 +74,7 @@ library
     Cuintet.LoadStoreUnit
     Cuintet.Pipeline
     Cuintet.Ram
+    Cuintet.RegFile
     Cuintet.Stage.Decode
     Cuintet.Stage.Execute
     Cuintet.Stage.Fetch

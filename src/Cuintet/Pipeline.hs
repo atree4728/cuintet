@@ -7,7 +7,7 @@ instruction. That is what makes it usable as the core's execution log, which
 'Cuintet.Debug.showInstLog' prints. Nothing is dropped and only @wbData@ is ever
 rewritten, by MA for a load or a CSR read.
 -}
-module Cuintet.Pipeline (IfId (..), IdEx (..), ExMa (..), MaWb (..), pendingRd) where
+module Cuintet.Pipeline (IfId (..), IdEx (..), ExMa (..), MaWb (..), srcRegs, destReg) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..))
@@ -81,15 +81,14 @@ data MaWb = MaWb
   }
   deriving (Generic, NFDataX)
 
+srcRegs :: Inst -> (RegAddr, RegAddr)
+srcRegs instBits = (slice d19 d15 instBits, slice d24 d20 instBits)
+
 {- | The register this instruction writes, if any: the single definition of it,
 shared by the interlock in ID and the write in WB.
 
 It is stated over the fields rather than a payload type so that it applies at
 every stage the instruction passes through.
 -}
-pendingRd ::
-  ( HasField "ctrl" stage InstCtrl
-  , HasField "rdAddr" stage RegAddr
-  ) =>
-  stage -> Maybe RegAddr
-pendingRd stage = orNothing (stage.ctrl.rwbEn && stage.rdAddr /= 0) stage.rdAddr
+destReg :: (HasField "ctrl" stage InstCtrl, HasField "rdAddr" stage RegAddr) => stage -> Maybe RegAddr
+destReg stage = orNothing (stage.ctrl.rwbEn && stage.rdAddr /= 0) stage.rdAddr

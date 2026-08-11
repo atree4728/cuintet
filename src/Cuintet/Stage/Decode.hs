@@ -8,16 +8,17 @@ module Cuintet.Stage.Decode (decode, DecodeIn (..), DecodeOut (..)) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
-import Cuintet.Eei (Inst, Opcode (..), RegAddr, RegFile, System12 (..), SystemOp (..), XLen)
-import Cuintet.Pipeline (IdEx (..), IfId (..))
+import Cuintet.Eei (Inst, Opcode (..), RegAddr, System12 (..), SystemOp (..), XLen)
+import Cuintet.Pipeline (IdEx (..), IfId (..), srcRegs)
+import Cuintet.RegFile (RegResp (..))
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust)
 
 data DecodeIn = DecodeIn
   { entry :: Maybe IfId
   -- ^ The instruction at the head of the IF-ID FIFO.
-  , regFile :: RegFile
-  -- ^ Read combinationally out of the bank WB writes.
+  , regResp :: RegResp
+  -- ^ read registers
   , inflights :: Vec 3 (Maybe RegAddr)
   -- ^ What the instructions already downstream will write back.
   , wready :: Bool
@@ -35,11 +36,9 @@ decode DecodeIn {..} = DecodeOut {issue = orNothing issued idEx}
   where
     IfId {pc, instBits} = fromMaybe (deepErrorX "decode: IF-ID FIFO is empty") entry
     (ctrl, imm) = instDecode instBits
-    rs1Addr = slice d19 d15 instBits
-    rs2Addr = slice d24 d20 instBits
+    (rs1Addr, rs2Addr) = srcRegs instBits
     rdAddr = slice d11 d7 instBits
-    rs1Data = regFile !! rs1Addr
-    rs2Data = regFile !! rs2Addr
+    RegResp {rs1Data, rs2Data} = regResp
     idEx = IdEx {..}
     issued = isJust entry && not (hazard idEx inflights) && wready && not flush
 

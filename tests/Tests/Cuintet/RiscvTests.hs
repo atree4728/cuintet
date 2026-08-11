@@ -12,7 +12,7 @@ import Clash.Sized.Vector (unsafeFromList)
 import Cuintet (system)
 import Cuintet.Core (CoreOut (..))
 import Cuintet.Eei (Inst, MemDataBytes)
-import Cuintet.Pipeline (MaWb (..), pendingRd)
+import Cuintet.Pipeline (MaWb (..), destReg)
 import Cuintet.Ram (initRamLanes)
 import Data.ByteString.Char8 qualified as BC
 import Data.FileEmbed (embedDir, makeRelativeToProject)
@@ -80,7 +80,7 @@ runImage img = verdict (replicate d32 0) instLogs
     verdict _ [] = Left (printf "no ecall within %d cycles" maxCycles)
     verdict regs (l : ls)
       | l.instBits == ecall = report (regs !! testnum)
-      | otherwise = verdict (maybe regs (\a -> replace a l.wbData regs) (pendingRd l)) ls
+      | otherwise = verdict (maybe regs (\a -> replace a l.wbData regs) (destReg l)) ls
 
     report gp
       | gp == 1 = Right ()

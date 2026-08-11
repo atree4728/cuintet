@@ -6,7 +6,7 @@ import Clash.Prelude
 import Cuintet.BusArbiter (BusArbiterReq (..), BusArbiterResp (..), busArbiter)
 import Cuintet.Core (CoreIn (..), CoreOut (..), core)
 import Cuintet.Eei (MemDataBytes)
-import Cuintet.Ram (RamLane, blockRamLanes, ram)
+import Cuintet.Ram (RamLane, initRamLanes, ram)
 
 system ::
   ( HiddenClockResetEnable dom
@@ -37,7 +37,19 @@ tangnano9k ::
   Signal Dom27 (BitVector 6)
 tangnano9k clk rst =
   withClockResetEnable clk rst enableGen $
-    complement . truncateB . (.led) <$> system (blockRamLanes d12) -- BRAM size = 2^12 * 8 B = 32 KB
+    complement . truncateB . (.led) <$> system (initRamLanes prog) -- BRAM size = 2^12 * 8 B = 32 KB
+  where
+    prog :: Vec 8 (BitVector 64)
+    prog =
+      0x24008093000f40b7
+        :> 0x0011011300000113
+        :> 0x800031f3fe209ee3
+        :> 0x8001907300118193
+        :> 0x0000006700000067
+        :> 0
+        :> 0
+        :> 0
+        :> Nil
 {-# ANN
   tangnano9k
   ( Synthesize

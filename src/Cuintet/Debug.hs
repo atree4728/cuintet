@@ -2,7 +2,7 @@ module Cuintet.Debug (showInstLog, showInstLogs) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (itype), instCode)
-import Cuintet.Pipeline (MaWb (..), pendingRd)
+import Cuintet.Pipeline (MaWb (..), destReg)
 import Data.List qualified as L
 import Text.Printf (printf)
 
@@ -38,7 +38,7 @@ showInstLog l =
       , printf "  alu res : %08x" (toInteger l.aluResult)
       ]
         L.++ maybe [] (\branchTaken -> [printf "  br take : %s" (show branchTaken)]) l.branchTaken
-        L.++ maybe [] (\rdAddr -> [printf "  reg[%2d] <= %08x" (toInteger rdAddr) (toInteger l.wbData)]) (pendingRd l)
+        L.++ maybe [] (\rdAddr -> [printf "  reg[%2d] <= %08x" (toInteger rdAddr) (toInteger l.wbData)]) (destReg l)
         L.++ maybe [] (\csrRdata -> [printf "  csr rdata : %08x" (toInteger csrRdata)]) l.csrRdata
     )
 
