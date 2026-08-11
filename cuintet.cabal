@@ -66,6 +66,7 @@ library
     Cuintet
     Cuintet.Core
     Cuintet.CoreCtrl
+    Cuintet.Debug.Konata
     Cuintet.Debug.Show
     Cuintet.Eei
     Cuintet.Image
@@ -100,6 +101,13 @@ executable clash
 executable clashi
   import: clash-exe
   main-is: bin/Clashi.hs
+
+executable konata
+  import: common-options
+  main-is: bin/Konata.hs
+  build-depends:
+    cuintet,
+    filepath,
 
 test-suite doctests
   type: exitcode-stdio-1.0

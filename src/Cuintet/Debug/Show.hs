@@ -1,9 +1,9 @@
-module Cuintet.Debug.Show (showInstLog, showInstLogs) where
+module Cuintet.Debug.Show (showInstLog, instLogLines, showInstLogs, hex) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (itype), instCode)
 import Cuintet.Pipeline (MaWb (..), destReg)
-import Data.List qualified as L
+import Data.List (intercalate)
 import Text.Printf (printf)
 
 {- | Displays the log for a single command in a human-friendly format. Write back is optional.
@@ -23,24 +23,38 @@ import Text.Printf (printf)
   op2     : 00000001
   alu res : 0000002b
   reg[ 3] <= 0000002b
+
+A field the instruction does not have is undefined, not zero:
+
+>>> import Clash.Prelude (deepErrorX)
+>>> lines (showInstLog l{rs2Data = deepErrorX "never written"}) !! 4
+"  rs2[ 1] : xxxxxxxx"
 -}
 showInstLog :: MaWb -> String
-showInstLog l =
-  L.intercalate
-    "\n"
-    ( [ printf "%08x : %08x" (toInteger l.pc) (toInteger l.instBits)
-      , printf "  itype   : %06b" (toInteger $ instCode l.ctrl.itype)
-      , printf "  imm     : %08x" (toInteger (if hasUndefined l.imm then zeroBits else l.imm))
-      , printf "  rs1[%2d] : %08x" (toInteger l.rs1Addr) (toInteger l.rs1Data)
-      , printf "  rs2[%2d] : %08x" (toInteger l.rs2Addr) (toInteger l.rs2Data)
-      , printf "  op1     : %08x" (toInteger l.op1)
-      , printf "  op2     : %08x" (toInteger l.op2)
-      , printf "  alu res : %08x" (toInteger l.aluResult)
-      ]
-        L.++ maybe [] (\branchTaken -> [printf "  br take : %s" (show branchTaken)]) l.branchTaken
-        L.++ maybe [] (\rdAddr -> [printf "  reg[%2d] <= %08x" (toInteger rdAddr) (toInteger l.wbData)]) (destReg l)
-        L.++ maybe [] (\csrRdata -> [printf "  csr rdata : %08x" (toInteger csrRdata)]) l.csrRdata
-    )
+showInstLog = intercalate "\n" . instLogLines
+
+-- | 'showInstLog' one line at a time, for callers that put each on a line of their own.
+instLogLines :: MaWb -> [String]
+instLogLines l =
+  [ printf "%s : %s" (hex l.pc) (hex l.instBits)
+  , printf "  itype   : %06b" (toInteger $ instCode l.ctrl.itype)
+  , printf "  imm     : %s" (hex l.imm)
+  , printf "  rs1[%2d] : %s" (toInteger l.rs1Addr) (hex l.rs1Data)
+  , printf "  rs2[%2d] : %s" (toInteger l.rs2Addr) (hex l.rs2Data)
+  , printf "  op1     : %s" (hex l.op1)
+  , printf "  op2     : %s" (hex l.op2)
+  , printf "  alu res : %s" (hex l.aluResult)
+  ]
+    <> maybe [] (\branchTaken -> [printf "  br take : %s" (show branchTaken)]) l.branchTaken
+    <> maybe [] (\rdAddr -> [printf "  reg[%2d] <= %s" (toInteger rdAddr) (hex l.wbData)]) (destReg l)
+    <> maybe [] (\csrRdata -> [printf "  csr rdata : %s" (hex csrRdata)]) l.csrRdata
+
+hex :: (BitPack a) => a -> String
+hex a
+  | hasUndefined bv = "xxxxxxxx"
+  | otherwise = printf "%08x" (toInteger bv)
+  where
+    bv = pack a
 
 showInstLogs :: [Maybe MaWb] -> String
-showInstLogs xs = L.intercalate "\n" $ L.map (maybe "(Nothing)" showInstLog) xs
+showInstLogs xs = intercalate "\n" $ maybe "(Nothing)" showInstLog <$> xs

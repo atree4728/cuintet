@@ -17,12 +17,12 @@ packInsts [_] = error "packInsts: odd number of instructions"
 packInsts (l : h : rest) = h ++# l : packInsts rest
 
 memImage :: [Inst] -> Vec 128 (BitVector XLen)
-memImage prog = unsafeFromList (packInsts $ P.take 256 (prog P.++ P.repeat nop))
+memImage prog = unsafeFromList (packInsts $ P.take 256 (prog <> P.repeat nop))
 
 hexImage :: forall n. (KnownNat n) => FilePath -> String -> Vec n (BitVector XLen)
 hexImage path src
   | P.length ws > maxInsts = error (printf "%s: RAM size is insufficient" path)
-  | otherwise = unsafeFromList (packInsts $ P.take maxInsts (ws P.++ P.repeat nop))
+  | otherwise = unsafeFromList (packInsts $ P.take maxInsts (ws <> P.repeat nop))
   where
     maxInsts = 2 * natToNum @n
     ws = P.zipWith parseWord [1 :: Int ..] (P.lines src)

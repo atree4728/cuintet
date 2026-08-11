@@ -1,4 +1,4 @@
-hdl_dir := "systemverilog/Cuintet.tangnano9k"
+hdl_dir := "build/systemverilog"
 out_dir := "build/tangnano9k"
 cst := "fpga/tangnano9k/cuintet.cst"
 
@@ -12,12 +12,12 @@ default:
 
 # Clash -> SystemVerilog
 hdl:
-    cabal run clash -fclash-debug-transformations -- Cuintet --systemverilog
+    cabal run clash -- Cuintet --systemverilog -fclash-hdldir {{ hdl_dir }}
 
 # SystemVerilog -> JSON netlist
 synth: hdl
     mkdir -p {{ out_dir }}
-    yosys -m slang -p 'read_slang --top cuintet {{ hdl_dir }}/cuintet_types.sv {{ hdl_dir }}/cuintet.sv; synth_gowin -json {{ out_dir }}/cuintet.json'
+    yosys -m slang -p 'read_slang --top cuintet {{ hdl_dir }}/Cuintet.tangnano9k/cuintet_types.sv {{ hdl_dir }}/Cuintet.tangnano9k/cuintet.sv; synth_gowin -json {{ out_dir }}/cuintet.json'
 
 # place & route
 pnr: synth

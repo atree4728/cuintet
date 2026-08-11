@@ -31,6 +31,12 @@ To see the document, use:
 cabal haddock --open
 ```
 
+To log the core as Kanata format, use:
+
+```
+cabal run konata
+```
+
 ### riscv-tests
 
 `unittests` also runs the `rv64ui-p-*` and `rv64um-p-*` suites from
