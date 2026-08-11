@@ -48,7 +48,7 @@ ram lanes req = BusResp True <$> rdata
     rready = delay False $ isJust <$> req
     rdata = orNothing <$> rready <*> prevRdata
 
--- | Uninitialized byte lanes, for synthesis.
+-- | Uninitialized byte lanes of a given size.
 blockRamLanes ::
   forall dom nBytes ramAddrWidth.
   ( HiddenClockResetEnable dom
@@ -59,7 +59,7 @@ blockRamLanes ::
   Vec nBytes (RamLane dom ramAddrWidth)
 blockRamLanes ramAddrWidth = repeat (RamLane $ blockRamU NoClearOnReset (pow2SNat ramAddrWidth))
 
--- | Byte lanes preloaded with a word-wise image, for simulation.
+-- | Byte lanes preloaded with a word-wise image, sized after it.
 initRamLanes ::
   forall nBytes dom ramAddrWidth.
   ( HiddenClockResetEnable dom

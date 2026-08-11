@@ -81,6 +81,11 @@ data MaWb = MaWb
   }
   deriving (Generic, NFDataX)
 
+{- | The @rs1@ and @rs2@ fields, shared by ID and the register file read.
+
+The read is addressed from the instruction word before it is decoded, so this
+has to be readable off the raw bits.
+-}
 srcRegs :: Inst -> (RegAddr, RegAddr)
 srcRegs instBits = (slice d19 d15 instBits, slice d24 d20 instBits)
 

@@ -11,7 +11,7 @@ combinational logic.
       ^                                              |
       |                                        [IF-ID FIFO]
       |                                              |
-    ID|   (decode), [regFile] read, (interlock) <----+
+    ID|   (decode), regFile read, (interlock) <------+
       |     |
       |   [ID-EX FIFO]
       |     |
@@ -25,7 +25,7 @@ combinational logic.
             |
           [MA-WB FIFO]
             |
-    WB    [regFile] write --> instLog
+    WB    regFile write --> instLog
 @
 
 Every stage consumes its input exactly on the clock it produces an output, so a
@@ -54,6 +54,12 @@ driven out of registers, @iReq@ from IF's and @dReq@ from MA's.
 
 [WB]: 'Cuintet.Stage.Writeback.writeback'. Never stalls, which is what lets MA
   start an access without checking the MA-WB FIFO for room.
+
+[regFile]: 'Cuintet.RegFile.regFile'. The one piece of state that is not in
+  'CoreState', because it is a RAM rather than a register. It is read
+  asynchronously, addressed straight off the IF-ID FIFO head so the read
+  overlaps decoding, and WB's write takes effect at the next clock edge. The
+  interlock in ID is what keeps a reader from getting ahead of that write.
 -}
 module Cuintet.Core (CoreIn (..), CoreOut (..), core) where
 
@@ -87,14 +93,14 @@ data CoreOut = CoreOut
   , led :: BitVector XLen
   }
 
--- | The core's registers. Each stage owns its own, except @regFile@, which WB writes and ID reads.
+-- | The core's registers, one per stage that has any. The register file is not here; see 'Cuintet.RegFile.regFile'.
 data CoreState = CoreState {fetchState :: FetchState, memAccessState :: MemAccessState}
   deriving (Generic, NFDataX)
 
 initState :: CoreState
 initState = CoreState {fetchState = initFetchState, memAccessState = initMemAccessState}
 
--- | Closes 'coreT' around the four stage FIFOs. IF-ID is the deep one, since it is what lets IF run ahead; the rest only need to hold a single instruction.
+-- | Closes 'coreT' around the register file and the four stage FIFOs. IF-ID is the deep one, since it is what lets IF run ahead; the rest only need to hold a single instruction.
 core ::
   (HiddenClockResetEnable dom) =>
   Signal dom CoreIn ->
@@ -129,8 +135,10 @@ coreT CoreState {..} (~CoreIn {..}, regResp, ifIdResp, idExResp, exMaResp, maWbR
         :> (maWbResp.rdata >>= destReg)
         :> Nil
 
-    -- a stage consumes its input exactly on the clock it produces an output
+    -- read for whatever ID is about to decode, write for whatever WB has just retired
     regReq = mkRegReq ifIdResp.rdata wbOut.write
+
+    -- a stage consumes its input exactly on the clock it produces an output
     ifIdReq = FifoReq {wdata = ifOut.issue, rready = isJust idOut.issue, flush = isJust maOut.redirect}
     idExReq = FifoReq {wdata = idOut.issue, rready = isJust exOut.issue, flush = isJust maOut.redirect}
     exMaReq = FifoReq {wdata = exOut.issue, rready = isJust maOut.issue, flush = False}

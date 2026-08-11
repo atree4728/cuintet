@@ -1,4 +1,4 @@
-{- | ID: decodes the instruction, reads the register file, and decides whether to issue it.
+{- | ID: decodes the instruction, takes in the registers it reads, and decides whether to issue it.
 
 The stage holds no state. An instruction it does not issue is simply left at the
 head of the IF-ID FIFO and decoded again next clock, so neither a stall nor a
@@ -18,7 +18,7 @@ data DecodeIn = DecodeIn
   { entry :: Maybe IfId
   -- ^ The instruction at the head of the IF-ID FIFO.
   , regResp :: RegResp
-  -- ^ read registers
+  -- ^ The operands, read out of 'Cuintet.RegFile.regFile' for that same entry.
   , inflights :: Vec 3 (Maybe RegAddr)
   -- ^ What the instructions already downstream will write back.
   , wready :: Bool
@@ -130,7 +130,7 @@ usesRs2 InstCtrl {itype} = case itype of
   _ -> False
 
 {- | Whether a source register of this instruction is still to be written by one
-of the instructions downstream, given as 'Cuintet.Pipeline.pendingRd' each.
+of the instructions downstream, given as 'Cuintet.Pipeline.destReg' each.
 -}
 hazard :: (KnownNat n) => IdEx -> Vec n (Maybe RegAddr) -> Bool
 hazard IdEx {ctrl, rs1Addr, rs2Addr} = any conflicts
