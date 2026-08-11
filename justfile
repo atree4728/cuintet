@@ -12,7 +12,7 @@ default:
 
 # Clash -> SystemVerilog
 hdl:
-    cabal run clash -- Cuintet --systemverilog
+    cabal run clash -fclash-debug-transformations -- Cuintet --systemverilog
 
 # SystemVerilog -> JSON netlist
 synth: hdl

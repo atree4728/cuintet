@@ -66,7 +66,3 @@ Synthesising for the Tang Nano 9K needs [just](https://github.com/casey/just) an
 just prog   # build the bitstream and load it into SRAM
 just flash  # build the bitstream and write it to the on-board flash
 ```
-
-`just --list` shows the individual steps.
-
-The core does not fit on the GW1N-9C yet, so place and route currently fails.
