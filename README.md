@@ -33,7 +33,7 @@ cabal haddock --open
 
 ### riscv-tests
 
-`unittests` also runs the `rv64ui-p-*` suite from
+`unittests` also runs the `rv64ui-p-*` and `rv64um-p-*` suites from
 [riscv-tests](https://github.com/riscv-software-src/riscv-tests). The images are
 assembled ahead of time and checked in under `tests/riscv-tests/hex/`, so no
 RISC-V toolchain is needed to run them.
@@ -43,7 +43,9 @@ environment in `tests/riscv-tests/env/`:
 
 ```sh
 git submodule update --init
-./tests/riscv-tests/gen.sh
+./tests/riscv-tests/gen.sh            # every suite
+./tests/riscv-tests/gen.sh rv64um     # one suite
+./tests/riscv-tests/gen.sh rv64ui add # one test
 ```
 
 
