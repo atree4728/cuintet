@@ -1,9 +1,8 @@
 module Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState (..), mkMulDivInst, mulDivStep) where
 
 import Clash.Prelude
-import Control.Arrow (left)
 import Cuintet.CoreCtrl (InstCtrl (..))
-import Cuintet.Eei (MulDivType (..), MulOp (..), Sign (..), XLen)
+import Cuintet.Eei (DivOp (..), MulDivType (..), MulOp (..), Sign (..), XLen)
 import Cuintet.Pipeline (IdEx (..))
 import Data.Function (applyWhen)
 import Data.Maybe (isJust, isNothing)
@@ -29,68 +28,68 @@ data MulDivResp = MulDivResp
   , result :: Maybe (BitVector XLen)
   }
 
-data Work
-  = Multiplying
-      { counter :: Index (XLen + 1)
-      , result, op1zext, op2zext :: BitVector (XLen * 2)
-      }
-  | Dividing {}
+data MulDivState = Idle | Busy {remaining :: Index (XLen + 1), acc :: BitVector (XLen * 2)}
   deriving (Generic, NFDataX)
 
-data MulDivState = Idle | Busy Work | Done (BitVector XLen)
-  deriving (Generic, NFDataX)
-
+-- | One clock of the unit.
 mulDivStep :: MulDivState -> MulDivReq -> (MulDivState, MulDivResp)
-mulDivStep state MulDivReq {..} = (state', MulDivResp {..})
+mulDivStep _ MulDivReq {inst = Nothing} = (Idle, MulDivResp {stall = False, result = Nothing})
+mulDivStep state MulDivReq {inst = Just inst, wready} = (state', MulDivResp {stall = isNothing result, result})
   where
-    progress = case (state, inst) of
-      (Idle, Just i) -> left Busy $ start i
-      (Busy w, Just i) -> left Busy $ step i w
-      (Done r, _) -> Right r
-      _ -> Left Idle
-    result = either (const Nothing) Just progress
-    stall = isJust inst && isNothing result
+    work = mkWork inst
+    result = case state of
+      Busy {remaining = 0, acc} -> Just $ finish work acc
+      _ -> Nothing
     state'
-      | isNothing inst = Idle
-      | Right r <- progress = if wready then Idle else Done r
-      | Left s <- progress = s
+      | isJust result = if wready then Idle else state
+      | otherwise = case state of
+          Idle -> Busy {remaining = maxBound, acc = zeroExtend work.streamed}
+          Busy {remaining, acc} -> Busy {remaining = remaining - 1, acc = step work acc}
 
-mulOperands :: MulOp -> BitVector XLen -> BitVector XLen -> (Bool, BitVector (XLen * 2), BitVector (XLen * 2))
-mulOperands mulOp op1 op2 = (neg1 /= neg2, magnitude neg1 op1, magnitude neg2 op2)
+data Working = Working
+  { mulDivType :: MulDivType
+  , isOp32 :: Bool
+  , neg1, neg2 :: Bool
+  , held, streamed :: BitVector XLen
+  }
+
+mkWork :: MulDivInst -> Working
+mkWork MulDivInst {..} = Working {..}
   where
-    (neg1, neg2) = case mulOp of
-      MulLow -> (False, False)
-      MulHighHom Unsigned -> (False, False)
-      MulHighHom Signed -> (isNegative op1, isNegative op2)
-      MulHighHetero -> (isNegative op1, False)
-    isNegative x = msb x == high
-    magnitude neg = zeroExtend . applyWhen neg negate
+    (sign1, sign2) = case mulDivType of
+      Multiply MulLow -> (Unsigned, Unsigned)
+      Multiply (MulHighHom sign) -> (sign, sign)
+      Multiply MulHighHetero -> (Signed, Unsigned)
+      Division (Div sign) -> (sign, sign)
+      Division (Rem sign) -> (sign, sign)
 
-start :: MulDivInst -> Either Work (BitVector XLen)
-start MulDivInst {..}
-  | Multiply mulOp <- mulDivType =
-      let (_, op1zext, op2zext) = mulOperands mulOp op1 op2
-       in Left $ Multiplying {counter = 0, result = 0, op1zext, op2zext}
-  | Division _ <- mulDivType = Right 0
+    (held, streamed) = case mulDivType of
+      Multiply _ -> (mag1, mag2) -- multiplicand, multiplier
+      Division _ -> (mag2, mag1) -- divisor, dividend
+    (neg1, mag1) = magnitude sign1 op1
+    (neg2, mag2) = magnitude sign2 op2
 
-step :: MulDivInst -> Work -> Either Work (BitVector XLen)
-step MulDivInst {..} Multiplying {..}
-  | counter == natToNum @XLen = Right $ finish mulDivType
-  | otherwise =
-      Left $
-        Multiplying
-          { counter = counter + 1
-          , result = applyWhen (op2zext `testBit` fromIntegral counter) (+ op1zext) result
-          , op1zext = op1zext `shiftL` 1
-          , op2zext
-          }
-  where
-    -- the half of the signed product the instruction asks for; @MULW@ keeps the low word only
-    finish (Multiply mulOp) = applyWhen isOp32 word $ if mulOp == MulLow then lower else upper
+    magnitude sign x = (neg, applyWhen neg negate narrowed)
       where
-        (neg, _, _) = mulOperands mulOp op1 op2
-        (upper, lower) = split $ applyWhen neg negate result
-    finish _ = deepErrorX "mulDiv: division is not implemented"
+        narrowed = applyWhen isOp32 word x
+        word y = case sign of
+          Signed -> signExtend (truncateB y :: BitVector 32)
+          Unsigned -> zeroExtend (truncateB y :: BitVector 32)
+        neg = sign == Signed && msb narrowed == high
 
+step :: Working -> BitVector (XLen * 2) -> BitVector (XLen * 2)
+step Working {..} acc = case mulDivType of
+  Multiply _ -> truncateB (added `shiftR` 1)
+  Division _ -> acc
+  where
+    added :: BitVector (XLen * 2 + 1)
+    added = applyWhen (lsb acc == high) (+ (zeroExtend held `shiftL` natToNum @XLen)) (zeroExtend acc)
+
+finish :: Working -> BitVector (XLen * 2) -> BitVector XLen
+finish Working {..} acc = applyWhen isOp32 word $ case mulDivType of
+  Multiply MulLow -> lower
+  Multiply _ -> upper
+  Division _ -> 0
+  where
+    (upper, lower) = split $ applyWhen (neg1 /= neg2) negate acc
     word x = signExtend (truncateB x :: BitVector 32)
-step _ Dividing = Right 0

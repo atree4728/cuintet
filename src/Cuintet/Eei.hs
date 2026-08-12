@@ -24,6 +24,7 @@ module Cuintet.Eei (
   IOp (..),
   ShiftRight (..),
   MulOp (..),
+  DivOp (..),
   MulDivType (..),
   CsrType (..),
   CsrOp (..),

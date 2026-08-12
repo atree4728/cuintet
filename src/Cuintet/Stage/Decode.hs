@@ -86,7 +86,6 @@ instDecode instBits = (ctrl op, imm op)
         | otherwise -> Just SysIllegal
       _ -> Nothing
 
-    -- @funct7 = 1@ on @OP@ or @OP-32@ is the M extension; every other @funct7@ there is RV64I.
     mulDiv :: Maybe MulDivType
     mulDiv = case op of
       OP_REG -> extM
