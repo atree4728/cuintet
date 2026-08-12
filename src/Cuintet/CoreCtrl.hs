@@ -8,7 +8,7 @@ module Cuintet.CoreCtrl (
 ) where
 
 import Clash.Prelude
-import Cuintet.Eei (SystemOp)
+import Cuintet.Eei (MulDivType, SystemOp)
 
 -- | RISC-V instruction type
 data InstType
@@ -44,6 +44,7 @@ data InstCtrl = InstCtrl
   -- ^ Whether to be jump instruction.
   , isLoad :: Bool
   -- ^ Whether to be load instruction.
+  , mulDiv :: Maybe MulDivType
   , systemOp :: Maybe SystemOp
   -- ^ What the instruction asks of the execution environment; 'Nothing' unless @SYSTEM@.
   , funct3 :: BitVector 3

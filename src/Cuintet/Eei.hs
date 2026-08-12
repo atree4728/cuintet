@@ -23,6 +23,7 @@ module Cuintet.Eei (
   Opcode (LUI, AUIPC, JAL, JALR, BRANCH, LOAD, STORE, OP_IMM, OP_REG, OP_IMM_32, OP_REG_32, MISC_MEM, SYSTEM),
   IOp (..),
   ShiftRight (..),
+  MulDivType (..),
   CsrType (..),
   CsrOp (..),
   System12 (System12, ECALL, MRET),
@@ -236,6 +237,55 @@ data ShiftRight = Logical | Arithmetic
 
 deriveDefaultAnnotation [t|ShiftRight|]
 deriveBitPack [t|ShiftRight|]
+
+data MulOp = MulLow | MulHighHom Sign | MulHighHetero
+  deriving (Generic, NFDataX)
+
+data DivOp = Div Sign | Rem Sign
+  deriving (Generic, NFDataX)
+
+data MulDivType = Multiply MulOp | Division DivOp
+  deriving (Generic, NFDataX)
+
+{-# ANN
+  module
+  ( DataReprAnn
+      $(liftQ [t|MulOp|])
+      2
+      [ ConstrRepr 'MulLow 0b11 0b00 []
+      , ConstrRepr 'MulHighHom 0b01 0b01 [0b10]
+      , ConstrRepr 'MulHighHetero 0b11 0b10 []
+      ]
+  )
+  #-}
+
+deriveBitPack [t|MulOp|]
+
+{-# ANN
+  module
+  ( DataReprAnn
+      $(liftQ [t|DivOp|])
+      2
+      [ ConstrRepr 'Div 0b10 0b00 [0b01]
+      , ConstrRepr 'Rem 0b10 0b10 [0b01]
+      ]
+  )
+  #-}
+
+deriveBitPack [t|DivOp|]
+
+{-# ANN
+  module
+  ( DataReprAnn
+      $(liftQ [t|MulDivType|])
+      3
+      [ ConstrRepr 'Multiply 0b100 0b000 [0b011]
+      , ConstrRepr 'Division 0b100 0b100 [0b011]
+      ]
+  )
+  #-}
+
+deriveBitPack [t|MulDivType|]
 
 {- | What a CSR access does to the register, laid out as @funct3@ bits 1-0. The
 fourth pattern is the @funct3@ that names no CSR instruction.

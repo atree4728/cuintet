@@ -80,6 +80,7 @@ library
     Cuintet.Unit.Csr
     Cuintet.Unit.Fifo
     Cuintet.Unit.LoadStore
+    Cuintet.Unit.MulDiv
     Cuintet.Unit.Ram
     Cuintet.Unit.RegFile
     Cuintet.Util

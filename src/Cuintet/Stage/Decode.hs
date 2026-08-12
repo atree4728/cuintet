@@ -8,7 +8,7 @@ module Cuintet.Stage.Decode (decode, DecodeIn (..), DecodeOut (..)) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
-import Cuintet.Eei (Inst, Opcode (..), RegAddr, System12 (..), SystemOp (..), XLen)
+import Cuintet.Eei (Inst, MulDivType, Opcode (..), RegAddr, System12 (..), SystemOp (..), XLen)
 import Cuintet.Pipeline (IdEx (..), IfId (..), srcRegs)
 import Cuintet.Unit.RegFile (RegResp (..))
 import Cuintet.Util (orNothing)
@@ -77,27 +77,18 @@ instDecode instBits = (ctrl op, imm op)
     funct3 = slice d14 d12 instBits
     funct7 = slice d31 d25 instBits
 
-    systemOp :: Opcode -> Maybe SystemOp
-    systemOp SYSTEM
+    systemOp :: Maybe SystemOp
+    systemOp
+      | SYSTEM <- op = Nothing
       | funct3 /= 0 = Just $ SysCsr (unpack funct3)
       | ECALL <- System12 immIG = Just SysEcall
       | MRET <- System12 immIG = Just SysMret
       | otherwise = Just SysIllegal
-    systemOp _ = Nothing
 
-    instCtrl itype rwbEn isLui isAluOp isOp32 isJump isLoad =
-      InstCtrl
-        { itype
-        , rwbEn
-        , isLui
-        , isAluOp
-        , isOp32
-        , isJump
-        , isLoad
-        , systemOp = systemOp op
-        , funct3
-        , funct7
-        }
+    mulDiv :: Maybe MulDivType
+    mulDiv = orNothing (funct7 /= 1) (unpack funct3)
+
+    instCtrl itype rwbEn isLui isAluOp isOp32 isJump isLoad = InstCtrl {..}
 
     ctrl :: Opcode -> InstCtrl
 {- FOURMOLU_DISABLE -}

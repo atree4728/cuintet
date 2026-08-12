@@ -73,6 +73,7 @@ import Cuintet.Stage.MemAccess (MemAccessIn (..), MemAccessOut (..), MemAccessSt
 import Cuintet.Stage.Writeback (WritebackIn (..), WritebackOut (..), writeback)
 import Cuintet.Unit.Csr (CsrFile (led))
 import Cuintet.Unit.Fifo (FifoReq (..), FifoResp (..), fifo)
+import Cuintet.Unit.MulDiv (MulDivState (..))
 import Cuintet.Unit.RegFile (RegReq (..), RegResp, mkRegReq, regFile)
 import Data.Maybe (isJust)
 
@@ -97,12 +98,13 @@ data CoreOut = CoreOut
 -- | The core's registers, one per stage that has any. The register file is not here; see 'Cuintet.RegFile.regFile'.
 data CoreState = CoreState
   { fetchState :: FetchState
+  , mulDivState :: MulDivState
   , memAccessState :: MemAccessState
   }
   deriving (Generic, NFDataX)
 
 initState :: CoreState
-initState = CoreState {fetchState = initFetchState, memAccessState = initMemAccessState}
+initState = CoreState {fetchState = initFetchState, mulDivState = Idle, memAccessState = initMemAccessState}
 
 data CoreTrace = CoreTrace
   { fetchStart :: Maybe Addr
@@ -140,7 +142,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, ifIdResp, idExResp, exMaResp, maWbR
   where
     (fetchState', ifOut) = fetch fetchState FetchIn {iResp, fifo = ifIdResp, redirect = maOut.redirect}
     idOut = decode DecodeIn {entry = ifIdResp.rdata, regResp, inflights, wready = idExResp.wready, flush}
-    exOut = execute ExecuteIn {entry = idExResp.rdata, wready = exMaResp.wready}
+    (mulDivState', exOut) = execute mulDivState ExecuteIn {entry = idExResp.rdata, wready = exMaResp.wready}
     (memAccessState', maOut) = memAccess memAccessState MemAccessIn {entry = exMaResp.rdata, dResp}
     wbOut = writeback WriteBackIn {entry = maWbResp.rdata}
 
@@ -174,4 +176,4 @@ coreT CoreState {..} (~CoreIn {..}, regResp, ifIdResp, idExResp, exMaResp, maWbR
         , flush
         }
 
-    state' = CoreState {fetchState = fetchState', memAccessState = memAccessState'}
+    state' = CoreState {fetchState = fetchState', mulDivState = mulDivState', memAccessState = memAccessState'}

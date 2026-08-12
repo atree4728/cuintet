@@ -1,12 +1,18 @@
-{- | EX: operand selection, the ALU, and the branch condition.
+{- | EX: operand selection, the ALU, the branch condition, and the multiply\/divide unit.
 
-A pure function with no state of its own; it issues whenever the EX-MA FIFO has
-room. Every instruction goes through the ALU, including those that only need an
-address: a load\/store adds @rs1@ and the immediate here, and MA takes the result
-as its access address.
+An instruction issues whenever the EX-MA FIFO has room and the multiply\/divide
+unit is not still holding it. Every instruction goes through the ALU, including
+those that only need an address: a load\/store adds @rs1@ and the immediate here,
+and MA takes the result as its access address.
 
 The branch condition is evaluated here but not acted on. Where control flow goes
 is decided in MA, so that an instruction redirects IF only once it is known to commit.
+
+'MulDivState' is the one register EX owns and the only reason the stage is not a
+pure function. An M-extension instruction holds EX for as many clocks as the unit
+needs, during which the ID-EX FIFO keeps it at its head; that is what lets
+'mulDivStep' read the instruction back on the clock it finishes rather than
+latching a copy of it.
 -}
 module Cuintet.Stage.Execute (execute, ExecuteIn (..), ExecuteOut (..)) where
 
@@ -14,6 +20,7 @@ import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
 import Cuintet.Eei (Addr, IOp (..), ShiftRight (..), XLen)
 import Cuintet.Pipeline (ExMa (..), IdEx (..))
+import Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState, mkMulDivInst, mulDivStep)
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust)
 
@@ -29,20 +36,24 @@ newtype ExecuteOut = ExecuteOut
   -- ^ The instruction handed to MA.
   }
 
--- | One clock of EX.
-execute :: ExecuteIn -> ExecuteOut
-execute ExecuteIn {..} = ExecuteOut {issue = orNothing issued exMa}
+-- | One clock of EX. A multiply or divide sits here for several of them; it leaves on the one the unit produces its result.
+execute :: MulDivState -> ExecuteIn -> (MulDivState, ExecuteOut)
+execute mulDivState ExecuteIn {..} = (mulDivState', exOut)
   where
-    issued = isJust entry && wready
-    exMa = mkExMa $ fromMaybe (deepErrorX "execute: ID-EX FIFO is empty") entry
+    (mulDivState', mulDivResp) = mulDivStep mulDivState MulDivReq {inst = mkMulDivInst =<< entry, wready}
+
+    -- the instruction leaves once the multiply/divide unit has let go of it
+    issued = isJust entry && wready && not mulDivResp.stall
+    exMa = mkExMa mulDivResp.result $ fromMaybe (deepErrorX "execute: ID-EX FIFO is empty") entry
+    exOut = ExecuteOut {issue = orNothing issued exMa}
 
 {- | Run the instruction through the ALU and the branch unit.
 
 @wbData@ is the value to write back as far as EX can tell; MA replaces it for a
 load or a CSR read.
 -}
-mkExMa :: IdEx -> ExMa
-mkExMa IdEx {..} = ExMa {op1, op2, aluResult, branchTaken, ..}
+mkExMa :: Maybe (BitVector XLen) -> IdEx -> ExMa
+mkExMa mulDivResult IdEx {..} = ExMa {op1, op2, aluResult, branchTaken, ..}
   where
     (op1, op2) = operands ctrl imm rs1Data rs2Data pc
     aluResult = alu ctrl op1 op2
@@ -50,6 +61,7 @@ mkExMa IdEx {..} = ExMa {op1, op2, aluResult, branchTaken, ..}
     branchTaken = branchUnit ctrl.funct3 op1 op2
 
     wbData
+      | isJust ctrl.mulDiv = fromMaybe (deepErrorX "execute: muldiv committed without a result") mulDivResult
       | ctrl.isLui = imm
       | ctrl.isJump = bitCoerce (pc + 4)
       | otherwise = aluResult
