@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/atree4728/cuintet/actions/workflows/ci.yml/badge.svg)](https://github.com/atree4728/cuintet/actions/workflows/ci.yml)
 
-*Cuintet* is a *5*-stage pipelined RISC-V CPU written in *Clash*, which implements `RV64I_Zicsr`.
+*Cuintet* is a *5*-stage pipelined RISC-V CPU written in *Clash*, which implements `RV64IM_Zicsr`.
 
 ## Building and testing
 

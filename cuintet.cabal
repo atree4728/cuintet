@@ -81,6 +81,8 @@ library
     Cuintet.Unit.Fifo
     Cuintet.Unit.LoadStore
     Cuintet.Unit.MulDiv
+    Cuintet.Unit.MulDiv.Div
+    Cuintet.Unit.MulDiv.Mul
     Cuintet.Unit.Ram
     Cuintet.Unit.RegFile
     Cuintet.Util
@@ -114,7 +116,7 @@ executable coremark
   import: common-options
   main-is: bin/Coremark.hs
   build-depends:
-    cuintet,
+    cuintet
 
 test-suite doctests
   type: exitcode-stdio-1.0
