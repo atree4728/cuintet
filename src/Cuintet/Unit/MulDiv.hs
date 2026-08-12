@@ -55,21 +55,27 @@ mulDivStep state MulDivReq {..} = (state', MulDivResp {..})
       | Right r <- progress = if wready then Idle else Done r
       | Left s <- progress = s
 
+mulOperands :: MulOp -> BitVector XLen -> BitVector XLen -> (Bool, BitVector (XLen * 2), BitVector (XLen * 2))
+mulOperands mulOp op1 op2 = (neg1 /= neg2, magnitude neg1 op1, magnitude neg2 op2)
+  where
+    (neg1, neg2) = case mulOp of
+      MulLow -> (False, False)
+      MulHighHom Unsigned -> (False, False)
+      MulHighHom Signed -> (isNegative op1, isNegative op2)
+      MulHighHetero -> (isNegative op1, False)
+    isNegative x = msb x == high
+    magnitude neg = zeroExtend . applyWhen neg negate
+
 start :: MulDivInst -> Either Work (BitVector XLen)
 start MulDivInst {..}
-  | Multiply _ <- mulDivType =
-      Left $
-        Multiplying
-          { counter = 0
-          , result = 0
-          , op1zext = zeroExtend op1
-          , op2zext = zeroExtend op2
-          }
-  | otherwise = Right 0
+  | Multiply mulOp <- mulDivType =
+      let (_, op1zext, op2zext) = mulOperands mulOp op1 op2
+       in Left $ Multiplying {counter = 0, result = 0, op1zext, op2zext}
+  | Division _ <- mulDivType = Right 0
 
 step :: MulDivInst -> Work -> Either Work (BitVector XLen)
-step MulDivInst {mulDivType} Multiplying {..}
-  | counter == natToNum @XLen = Right $ half mulDivType
+step MulDivInst {..} Multiplying {..}
+  | counter == natToNum @XLen = Right $ finish mulDivType
   | otherwise =
       Left $
         Multiplying
@@ -79,8 +85,12 @@ step MulDivInst {mulDivType} Multiplying {..}
           , op2zext
           }
   where
-    (upper, lower) = split result
-    half (Multiply MulLow) = lower
-    half (Multiply (MulHighHom Unsigned)) = upper
-    half _ = deepErrorX "mulDiv: only MUL and MULHU are implemented"
+    -- the half of the signed product the instruction asks for; @MULW@ keeps the low word only
+    finish (Multiply mulOp) = applyWhen isOp32 word $ if mulOp == MulLow then lower else upper
+      where
+        (neg, _, _) = mulOperands mulOp op1 op2
+        (upper, lower) = split $ applyWhen neg negate result
+    finish _ = deepErrorX "mulDiv: division is not implemented"
+
+    word x = signExtend (truncateB x :: BitVector 32)
 step _ Dividing = Right 0
