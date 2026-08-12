@@ -93,7 +93,7 @@ csrWrite ReadSet oldValue newValueM = maybe oldValue (oldValue .|.) newValueM
 csrWrite ReadClear oldValue newValueM = maybe oldValue ((oldValue .&.) . complement) newValueM
 csrWrite CSRIllegal _ _ = deepErrorX "csrWrite: illegal System instruction"
 
--- | One clock of the CSR file. @mcycle@ counts clocks, so it ticks whether or not there is a request; the request, if any, then sees the ticked file.
+-- | One clock of the CSR file.
 csrStep :: CsrFile -> Maybe CsrReq -> (CsrFile, Maybe CsrResp)
 csrStep file = maybe (ticked, Nothing) (fmap Just . serve ticked)
   where

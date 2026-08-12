@@ -5,7 +5,7 @@ import Cuintet.CoreCtrl (InstCtrl (..))
 import Cuintet.Eei (DivOp (..), MulDivType (..), MulOp (..), Sign (..), XLen)
 import Cuintet.Pipeline (IdEx (..))
 import Cuintet.Unit.MulDiv.Div (DivOperands (..), DivResult (..), DivState, divInit, divResult, divStep)
-import Cuintet.Unit.MulDiv.Mul (MulOperands (..), MulState, mulInit, mulResult, mulStep)
+import Cuintet.Unit.MulDiv.Mul (MulOperands (..), MulResult (..), MulState, mulInit, mulResult, mulStep)
 import Data.Function (applyWhen)
 import Data.Maybe (isJust, isNothing)
 
@@ -49,7 +49,7 @@ mulDivStep state MulDivReq {inst = Just inst, wready} = (state', MulDivResp {sta
             MulHighHetero -> ((Signed, Unsigned), fst)
           ops = mulOperands signs inst
           next = maybe (mulInit ops) (mulStep ops) running
-          finish prod = sextWord inst.isOp32 $ pick (bitCoerce prod)
+          finish mres = sextWord inst.isOp32 $ pick (bitCoerce mres.product)
       Division op -> (finish <$> (divResult =<< running), Dividing next)
         where
           running = case state of

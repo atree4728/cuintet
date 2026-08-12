@@ -9,18 +9,19 @@ data DivOperands = DivOperands {dividend, divisor :: Unsigned XLen}
 data DivResult = DivResult {quotient, remainder :: Unsigned XLen}
   deriving (Generic, NFDataX)
 
-data DivState
-  = Running {remaining :: Index XLen, acc :: Unsigned (XLen * 2)}
-  | Done DivResult
+data Progress = Progress {remaining :: Index XLen, acc :: Unsigned (XLen * 2)}
+  deriving (Generic, NFDataX)
+
+data DivState = Running Progress | Done DivResult
   deriving (Generic, NFDataX)
 
 divInit :: DivOperands -> DivState
-divInit DivOperands {dividend} = Running {remaining = maxBound, acc = extend dividend}
+divInit DivOperands {dividend} = Running Progress {remaining = maxBound, acc = extend dividend}
 
 divStep :: DivOperands -> DivState -> DivState
 divStep DivOperands {divisor} = \case
-  Running {remaining = 0, acc} -> Done (toResult (advance acc))
-  Running {remaining, acc} -> Running {remaining = remaining - 1, acc = advance acc}
+  Running Progress {remaining = 0, acc} -> Done (toResult (advance acc))
+  Running Progress {remaining, acc} -> Running Progress {remaining = remaining - 1, acc = advance acc}
   Done {} -> deepErrorX "div: stepped after completion"
   where
     upperDivisor :: Unsigned (XLen * 2 + 1)
@@ -40,4 +41,4 @@ divStep DivOperands {divisor} = \case
 divResult :: DivState -> Maybe DivResult
 divResult = \case
   Done result -> Just result
-  Running {} -> Nothing
+  Running _ -> Nothing
