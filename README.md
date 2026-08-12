@@ -54,6 +54,36 @@ git submodule update --init
 ./tests/riscv-tests/gen.sh rv64ui add # one test
 ```
 
+### CoreMark
+
+[CoreMark](https://github.com/eembc/coremark) runs bare-metal on the core, one
+iteration of the default 2000-byte workload:
+
+```sh
+cabal run coremark
+```
+
+The core has no I/O, so the port in `bench/coremark/` stubs out `ee_printf` and
+CoreMark reports nothing: `crt0.S` executes `ecall` once `main` has returned, and
+the driver halts there. Reaching that `ecall` is what says the run completed.
+
+The image is checked in as `bench/coremark/coremark.hex`, so running it needs no
+RISC-V toolchain. Rebuild it after changing the port:
+
+```sh
+git submodule update --init
+./bench/coremark/gen.sh
+```
+
+Two things the port has to do for this core in particular:
+
+- `crt0.S` clears the integer registers, which start out undefined. A register
+  the program never writes -- the vararg `a1`-`a7` that the `ee_printf` stub
+  spills, say -- would otherwise put undefined bytes in memory.
+- `.text` ends in a run of NOPs. IF runs ahead of the instruction that redirects
+  it, so the `ret` ending the last function is followed into whatever comes
+  next, and the decoder rejects an opcode it does not name.
+
 
 ## Synthesis
 

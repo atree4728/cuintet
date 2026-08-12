@@ -1,3 +1,6 @@
 [submodule "vendor/riscv-tests"]
 	path = vendor/riscv-tests
 	url = https://github.com/riscv-software-src/riscv-tests.git
+[submodule "vendor/coremark"]
+	path = vendor/coremark
+	url = https://github.com/eembc/coremark.git

@@ -110,6 +110,12 @@ executable konata
     cuintet,
     filepath,
 
+executable coremark
+  import: common-options
+  main-is: bin/Coremark.hs
+  build-depends:
+    cuintet,
+
 test-suite doctests
   type: exitcode-stdio-1.0
   default-language: GHC2024
