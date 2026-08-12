@@ -2,31 +2,50 @@ module Cuintet.Unit.MulDiv.Mul (MulOperands (..), MulState, mulInit, mulStep, mu
 
 import Clash.Prelude
 import Cuintet.Eei (XLen)
-import Data.Function (applyWhen)
 
-data MulOperands = MulOperands {multiplicand, multiplier :: Unsigned XLen}
+data MulOperands = MulOperands {multiplicand, multiplier :: Signed (XLen + 1)}
+
+-- | Radix-4 Booth groups needed to recode a multiplier of @XLen + 2@ bits.
+type Groups = XLen `Div` 2 + 1
 
 data MulState
-  = Running {remaining :: Index XLen, acc :: Unsigned (XLen * 2)}
-  | Done (Unsigned (XLen * 2))
+  = Running
+      { remaining :: Index Groups
+      , mplier :: BitVector (XLen + 2)
+      , acc :: Signed (XLen * 2 + 2)
+      }
+  | Done (BitVector (XLen * 2))
   deriving (Generic, NFDataX)
 
 mulInit :: MulOperands -> MulState
-mulInit MulOperands {..} = Running {remaining = maxBound, acc = extend multiplier}
+mulInit MulOperands {multiplier} =
+  Running
+    { remaining = maxBound
+    , mplier = pack (signExtend multiplier :: Signed (XLen + 2))
+    , acc = 0
+    }
 
 mulStep :: MulOperands -> MulState -> MulState
-mulStep MulOperands {..} = \case
-  Running {remaining = 0, acc} -> Done (advance acc)
-  Running {remaining, acc} -> Running {remaining = remaining - 1, acc = advance acc}
+mulStep MulOperands {multiplicand} = \case
+  Running {remaining = 0, mplier, acc} -> Done (truncateB (pack (advance mplier acc)))
+  Running {..} -> Running {remaining = remaining - 1, mplier = mplier `shiftL` 2, acc = advance mplier acc}
   Done {} -> deepErrorX "mul: stepped after completion"
   where
-    addend :: Unsigned (XLen * 2 + 1)
-    addend = extend multiplicand `shiftL` natToNum @XLen
+    advance mplier acc = (acc `shiftL` 2) + multiple (truncateB (mplier `shiftR` natToNum @(XLen - 1)))
 
-    advance :: Unsigned (XLen * 2) -> Unsigned (XLen * 2)
-    advance acc = truncateB $ applyWhen (acc `testBit` 0) (+ addend) (extend acc) `shiftR` 1
+    multiple :: BitVector 3 -> Signed (XLen * 2 + 2)
+    multiple = \case
+      0b001 -> m
+      0b010 -> m
+      0b011 -> m `shiftL` 1
+      0b100 -> negate (m `shiftL` 1)
+      0b101 -> negate m
+      0b110 -> negate m
+      _ -> 0
+      where
+        m = extend multiplicand
 
-mulProduct :: MulState -> Maybe (Unsigned (XLen * 2))
+mulProduct :: MulState -> Maybe (BitVector (XLen * 2))
 mulProduct = \case
   Done prod -> Just prod
   Running {} -> Nothing
