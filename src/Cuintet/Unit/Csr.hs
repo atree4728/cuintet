@@ -93,16 +93,19 @@ csrWrite ReadSet oldValue newValueM = maybe oldValue (oldValue .|.) newValueM
 csrWrite ReadClear oldValue newValueM = maybe oldValue ((oldValue .&.) . complement) newValueM
 csrWrite CSRIllegal _ _ = deepErrorX "csrWrite: illegal System instruction"
 
-tick :: CsrFile -> CsrFile
-tick file = file {mcycle = file.mcycle + 1}
+-- | One clock of the CSR file. @mcycle@ counts clocks, so it ticks whether or not there is a request; the request, if any, then sees the ticked file.
+csrStep :: CsrFile -> Maybe CsrReq -> (CsrFile, Maybe CsrResp)
+csrStep file = maybe (ticked, Nothing) (fmap Just . serve ticked)
+  where
+    ticked = file {mcycle = file.mcycle + 1}
 
-csrStep :: CsrFile -> CsrReq -> (CsrFile, CsrResp)
-csrStep file (Trap CsrTrap {..}) =
+serve :: CsrFile -> CsrReq -> (CsrFile, CsrResp)
+serve file (Trap CsrTrap {..}) =
   ( file {mepcAligned = slice d63 d2 (pack pc), mcause}
   , Redirect $ bitCoerce $ file.mtvecBase ++# (0 :: BitVector 2)
   )
-csrStep file Mret = (tick file, Redirect $ bitCoerce $ file.mepcAligned ++# (0 :: BitVector 2))
-csrStep file' (Access CsrAccess {..})
+serve file Mret = (file, Redirect $ bitCoerce $ file.mepcAligned ++# (0 :: BitVector 2))
+serve file (Access CsrAccess {..})
   | CSRIllegal <- csrType = deepErrorX "csrStep: illegal System instruction"
   | MTVEC <- csrAddr =
       let old = file.mtvecBase ++# (0 :: BitVector 2)
@@ -117,7 +120,6 @@ csrStep file' (Access CsrAccess {..})
   | MCYCLE <- csrAddr = (file, Accessed file.mcycle)
   | otherwise = deepErrorX "csrStep: unimplemented CSR instruction"
   where
-    file = tick file'
     (wvalue, csrType) = case csrOp of
       CsrReg t -> (rs1Data, t)
       CsrImm t -> (zeroExtend rs1Addr, t)

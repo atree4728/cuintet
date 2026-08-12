@@ -70,7 +70,7 @@ memAccess MemAccessState {..} MemAccessIn {..} =
     valid = isJust entry
     ExMa {..} = fromMaybe (deepErrorX "memAccess: EX-MA FIFO is empty") entry
 
-    (csrFile', csrResp) = maybe (csrFile, Nothing) (fmap Just . csrStep csrFile) csrReq
+    (csrFile', csrResp) = csrStep csrFile csrReq
     csrReq
       | not valid = Nothing
       | Just (SysCsr csrOp) <- ctrl.systemOp =
