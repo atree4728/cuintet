@@ -19,11 +19,12 @@ import Data.Maybe (fromMaybe)
 newtype CsrAddr = CsrAddr (BitVector 12)
   deriving newtype (BitPack, Generic, NFDataX)
 
-pattern MTVEC, MEPC, MCAUSE, LED :: CsrAddr
+pattern MTVEC, MEPC, MCAUSE, LED, MCYCLE :: CsrAddr
 pattern MTVEC = CsrAddr 0x305
 pattern MEPC = CsrAddr 0x341
 pattern MCAUSE = CsrAddr 0x342
 pattern LED = CsrAddr 0x800
+pattern MCYCLE = CsrAddr 0xB00
 
 {- | The reason a trap was taken. No exception code in use here goes above 15,
 so the code is kept narrow and widened only where @mcause@ is read.
@@ -51,6 +52,7 @@ data CsrFile = CsrFile
   , mepcAligned :: BitVector 62 -- (XLen - 2)
   , mcause :: MCause
   , led :: BitVector XLen
+  , mcycle :: BitVector XLen
   }
   deriving (Generic, NFDataX)
 
@@ -91,13 +93,16 @@ csrWrite ReadSet oldValue newValueM = maybe oldValue (oldValue .|.) newValueM
 csrWrite ReadClear oldValue newValueM = maybe oldValue ((oldValue .&.) . complement) newValueM
 csrWrite CSRIllegal _ _ = deepErrorX "csrWrite: illegal System instruction"
 
+tick :: CsrFile -> CsrFile
+tick file = file {mcycle = file.mcycle + 1}
+
 csrStep :: CsrFile -> CsrReq -> (CsrFile, CsrResp)
 csrStep file (Trap CsrTrap {..}) =
   ( file {mepcAligned = slice d63 d2 (pack pc), mcause}
   , Redirect $ bitCoerce $ file.mtvecBase ++# (0 :: BitVector 2)
   )
-csrStep file Mret = (file, Redirect $ bitCoerce $ file.mepcAligned ++# (0 :: BitVector 2))
-csrStep file (Access CsrAccess {..})
+csrStep file Mret = (tick file, Redirect $ bitCoerce $ file.mepcAligned ++# (0 :: BitVector 2))
+csrStep file' (Access CsrAccess {..})
   | CSRIllegal <- csrType = deepErrorX "csrStep: illegal System instruction"
   | MTVEC <- csrAddr =
       let old = file.mtvecBase ++# (0 :: BitVector 2)
@@ -109,8 +114,10 @@ csrStep file (Access CsrAccess {..})
   | LED <- csrAddr =
       let old = file.led
        in (file {led = csrWrite csrType old wdata}, Accessed old)
+  | MCYCLE <- csrAddr = (file, Accessed file.mcycle)
   | otherwise = deepErrorX "csrStep: unimplemented CSR instruction"
   where
+    file = tick file'
     (wvalue, csrType) = case csrOp of
       CsrReg t -> (rs1Data, t)
       CsrImm t -> (zeroExtend rs1Addr, t)
@@ -120,4 +127,4 @@ csrStep file (Access CsrAccess {..})
       _ -> orNothing (rs1Addr /= 0) wvalue
 
 initCsrFile :: CsrFile
-initCsrFile = CsrFile {mtvecBase = 0, mepcAligned = 0, mcause = MCause False 0, led = 0}
+initCsrFile = CsrFile {mtvecBase = 0, mepcAligned = 0, mcause = MCause False 0, led = 0, mcycle = 0}
