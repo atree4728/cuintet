@@ -1,4 +1,4 @@
-module Cuintet.Unit.MulDiv.Mul (MulOperands (..), MulState, mulInit, mulStep, mulProduct) where
+module Cuintet.Unit.MulDiv.Mul (MulOperands (..), MulState, mulInit, mulStep, mulResult) where
 
 import Clash.Prelude
 import Cuintet.Eei (XLen)
@@ -31,7 +31,7 @@ mulStep MulOperands {multiplicand} = \case
   Running {..} -> Running {remaining = remaining - 1, mplier = mplier `shiftL` 2, acc = advance mplier acc}
   Done {} -> deepErrorX "mul: stepped after completion"
   where
-    advance mplier acc = (acc `shiftL` 2) + multiple (truncateB (mplier `shiftR` natToNum @(XLen - 1)))
+    advance mplier acc = (acc `shiftL` 2) + multiple (truncateB $ mplier `shiftR` natToNum @(XLen - 1))
 
     multiple :: BitVector 3 -> Signed (XLen * 2 + 2)
     multiple = \case
@@ -45,7 +45,7 @@ mulStep MulOperands {multiplicand} = \case
       where
         m = extend multiplicand
 
-mulProduct :: MulState -> Maybe (BitVector (XLen * 2))
-mulProduct = \case
+mulResult :: MulState -> Maybe (BitVector (XLen * 2))
+mulResult = \case
   Done prod -> Just prod
   Running {} -> Nothing

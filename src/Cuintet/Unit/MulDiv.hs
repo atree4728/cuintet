@@ -5,7 +5,7 @@ import Cuintet.CoreCtrl (InstCtrl (..))
 import Cuintet.Eei (DivOp (..), MulDivType (..), MulOp (..), Sign (..), XLen)
 import Cuintet.Pipeline (IdEx (..))
 import Cuintet.Unit.MulDiv.Div (DivOperands (..), DivResult (..), DivState, divInit, divResult, divStep)
-import Cuintet.Unit.MulDiv.Mul (MulOperands (..), MulState, mulInit, mulProduct, mulStep)
+import Cuintet.Unit.MulDiv.Mul (MulOperands (..), MulState, mulInit, mulResult, mulStep)
 import Data.Function (applyWhen)
 import Data.Maybe (isJust, isNothing)
 
@@ -37,38 +37,45 @@ mulDivStep :: MulDivState -> MulDivReq -> (MulDivState, MulDivResp)
 mulDivStep _ MulDivReq {inst = Nothing} = (Idle, MulDivResp {stall = False, result = Nothing})
 mulDivStep state MulDivReq {inst = Just inst, wready} = (state', MulDivResp {stall = isNothing result, result})
   where
-    mags@(mag1, mag2) = magnitudes inst
-    mulOps = mulOperands inst
-    divOps = DivOperands {dividend = mag1.value, divisor = mag2.value}
-
-    result = case (state, inst.mulDivType) of
-      (Multiplying st, Multiply op) -> reduceMul inst.isOp32 op <$> mulProduct st
-      (Dividing st, Division op) -> reduceDiv inst.isOp32 op mags <$> divResult st
-      _ -> Nothing
+    (result, stepped) = case inst.mulDivType of
+      Multiply op -> (finish <$> (mulResult =<< running), Multiplying next)
+        where
+          running = case state of
+            Multiplying st -> Just st
+            _ -> Nothing
+          (signs, pick) = case op of
+            MulLow -> ((Unsigned, Unsigned), snd)
+            MulHighHom sign -> ((sign, sign), fst)
+            MulHighHetero -> ((Signed, Unsigned), fst)
+          ops = mulOperands signs inst
+          next = maybe (mulInit ops) (mulStep ops) running
+          finish prod = sextWord inst.isOp32 $ pick (bitCoerce prod)
+      Division op -> (finish <$> (divResult =<< running), Dividing next)
+        where
+          running = case state of
+            Dividing st -> Just st
+            _ -> Nothing
+          (sign, pick) = case op of
+            Div s -> (s, fst)
+            Rem s -> (s, snd)
+          (dividend, divisor) = magnitudes sign inst
+          ops = DivOperands {dividend = dividend.value, divisor = divisor.value}
+          next = maybe (divInit ops) (divStep ops) running
+          finish DivResult {quotient = q, remainder = r} = sextWord inst.isOp32 . pack $ pick (quotient, remainder)
+            where
+              quotient
+                | divisor.value == 0 = maxBound
+                | otherwise = applyWhen (dividend.negative /= divisor.negative) negate q
+              remainder = applyWhen dividend.negative negate r
 
     state'
       | isJust result = if wready then Idle else state
-      | otherwise = case inst.mulDivType of
-          Multiply _ -> Multiplying $ case state of
-            Multiplying st -> mulStep mulOps st
-            _ -> mulInit mulOps
-          Division _ -> Dividing $ case state of
-            Dividing st -> divStep divOps st
-            _ -> divInit divOps
+      | otherwise = stepped
 
-signs :: MulDivType -> (Sign, Sign)
-signs = \case
-  Multiply MulLow -> (Unsigned, Unsigned)
-  Multiply (MulHighHom sign) -> (sign, sign)
-  Multiply MulHighHetero -> (Signed, Unsigned)
-  Division (Div sign) -> (sign, sign)
-  Division (Rem sign) -> (sign, sign)
-
-mulOperands :: MulDivInst -> MulOperands
-mulOperands MulDivInst {mulDivType, op1, op2} =
+mulOperands :: (Sign, Sign) -> MulDivInst -> MulOperands
+mulOperands (sign1, sign2) MulDivInst {op1, op2} =
   MulOperands {multiplicand = widen sign1 op1, multiplier = widen sign2 op2}
   where
-    (sign1, sign2) = signs mulDivType
     widen sign =
       unpack . case sign of
         Signed -> signExtend
@@ -76,31 +83,16 @@ mulOperands MulDivInst {mulDivType, op1, op2} =
 
 data Magnitude = Magnitude {negative :: Bool, value :: Unsigned XLen}
 
-magnitudes :: MulDivInst -> (Magnitude, Magnitude)
-magnitudes MulDivInst {..} = (magnitude sign1 op1, magnitude sign2 op2)
+magnitudes :: Sign -> MulDivInst -> (Magnitude, Magnitude)
+magnitudes sign MulDivInst {isOp32, op1, op2} = (magnitude op1, magnitude op2)
   where
-    (sign1, sign2) = signs mulDivType
-
-    magnitude sign x = Magnitude {negative, value = applyWhen negative negate (bitCoerce narrowed)}
+    magnitude x = Magnitude {negative, value = applyWhen negative negate (bitCoerce narrowed)}
       where
         narrowed = applyWhen isOp32 word x
         word y = case sign of
           Signed -> signExtend (truncateB y :: BitVector 32)
           Unsigned -> zeroExtend (truncateB y :: BitVector 32)
         negative = sign == Signed && msb narrowed == high
-
-reduceMul :: Bool -> MulOp -> BitVector (XLen * 2) -> BitVector XLen
-reduceMul isOp32 op prod = sextWord isOp32 $ case op of
-  MulLow -> lower
-  _ -> upper
-  where
-    (upper, lower) = split prod
-
-reduceDiv :: Bool -> DivOp -> (Magnitude, Magnitude) -> DivResult -> BitVector XLen
-reduceDiv isOp32 op (a, b) DivResult {..} = sextWord isOp32 $ case op of
-  Div _ | b.value == 0 -> maxBound
-  Div _ -> pack $ applyWhen (a.negative /= b.negative) negate quotient
-  Rem _ -> pack $ applyWhen a.negative negate remainder
 
 sextWord :: Bool -> BitVector XLen -> BitVector XLen
 sextWord isOp32 = applyWhen isOp32 (\x -> signExtend (truncateB x :: BitVector 32))
