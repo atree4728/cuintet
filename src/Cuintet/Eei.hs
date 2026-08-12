@@ -23,6 +23,7 @@ module Cuintet.Eei (
   Opcode (LUI, AUIPC, JAL, JALR, BRANCH, LOAD, STORE, OP_IMM, OP_REG, OP_IMM_32, OP_REG_32, MISC_MEM, SYSTEM),
   IOp (..),
   ShiftRight (..),
+  MulOp (..),
   MulDivType (..),
   CsrType (..),
   CsrOp (..),
@@ -66,7 +67,7 @@ type RegAddr = BitVector 5
 
 -- | Whether a narrower-than-register load fills the high bits with its sign or zero.
 data Sign = Signed | Unsigned
-  deriving (Generic, NFDataX, Show)
+  deriving (Generic, NFDataX, Eq, Show)
 
 deriveDefaultAnnotation [t|Sign|]
 deriveBitPack [t|Sign|]
@@ -239,13 +240,13 @@ deriveDefaultAnnotation [t|ShiftRight|]
 deriveBitPack [t|ShiftRight|]
 
 data MulOp = MulLow | MulHighHom Sign | MulHighHetero
-  deriving (Generic, NFDataX)
+  deriving (Eq, Generic, NFDataX)
 
 data DivOp = Div Sign | Rem Sign
-  deriving (Generic, NFDataX)
+  deriving (Eq, Generic, NFDataX)
 
 data MulDivType = Multiply MulOp | Division DivOp
-  deriving (Generic, NFDataX)
+  deriving (Eq, Generic, NFDataX)
 
 {-# ANN
   module

@@ -3,8 +3,9 @@ module Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState (..), m
 import Clash.Prelude
 import Control.Arrow (left)
 import Cuintet.CoreCtrl (InstCtrl (..))
-import Cuintet.Eei (MulDivType, XLen)
+import Cuintet.Eei (MulDivType (..), MulOp (..), Sign (..), XLen)
 import Cuintet.Pipeline (IdEx (..))
+import Data.Function (applyWhen)
 import Data.Maybe (isJust, isNothing)
 
 data MulDivInst = MulDivInst
@@ -28,7 +29,12 @@ data MulDivResp = MulDivResp
   , result :: Maybe (BitVector XLen)
   }
 
-data Work = Multiplying () | Dividing ()
+data Work
+  = Multiplying
+      { counter :: Index (XLen + 1)
+      , result, op1zext, op2zext :: BitVector (XLen * 2)
+      }
+  | Dividing {}
   deriving (Generic, NFDataX)
 
 data MulDivState = Idle | Busy Work | Done (BitVector XLen)
@@ -50,7 +56,31 @@ mulDivStep state MulDivReq {..} = (state', MulDivResp {..})
       | Left s <- progress = s
 
 start :: MulDivInst -> Either Work (BitVector XLen)
-start = undefined
+start MulDivInst {..}
+  | Multiply _ <- mulDivType =
+      Left $
+        Multiplying
+          { counter = 0
+          , result = 0
+          , op1zext = zeroExtend op1
+          , op2zext = zeroExtend op2
+          }
+  | otherwise = Right 0
 
 step :: MulDivInst -> Work -> Either Work (BitVector XLen)
-step = undefined
+step MulDivInst {mulDivType} Multiplying {..}
+  | counter == natToNum @XLen = Right $ half mulDivType
+  | otherwise =
+      Left $
+        Multiplying
+          { counter = counter + 1
+          , result = applyWhen (op2zext `testBit` fromIntegral counter) (+ op1zext) result
+          , op1zext = op1zext `shiftL` 1
+          , op2zext
+          }
+  where
+    (upper, lower) = split result
+    half (Multiply MulLow) = lower
+    half (Multiply (MulHighHom Unsigned)) = upper
+    half _ = deepErrorX "mulDiv: only MUL and MULHU are implemented"
+step _ Dividing = Right 0

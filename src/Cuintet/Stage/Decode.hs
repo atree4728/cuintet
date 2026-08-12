@@ -78,15 +78,22 @@ instDecode instBits = (ctrl op, imm op)
     funct7 = slice d31 d25 instBits
 
     systemOp :: Maybe SystemOp
-    systemOp
-      | SYSTEM <- op = Nothing
-      | funct3 /= 0 = Just $ SysCsr (unpack funct3)
-      | ECALL <- System12 immIG = Just SysEcall
-      | MRET <- System12 immIG = Just SysMret
-      | otherwise = Just SysIllegal
+    systemOp = case op of
+      SYSTEM
+        | funct3 /= 0 -> Just $ SysCsr (unpack funct3)
+        | ECALL <- System12 immIG -> Just SysEcall
+        | MRET <- System12 immIG -> Just SysMret
+        | otherwise -> Just SysIllegal
+      _ -> Nothing
 
+    -- @funct7 = 1@ on @OP@ or @OP-32@ is the M extension; every other @funct7@ there is RV64I.
     mulDiv :: Maybe MulDivType
-    mulDiv = orNothing (funct7 /= 1) (unpack funct3)
+    mulDiv = case op of
+      OP_REG -> extM
+      OP_REG_32 -> extM
+      _ -> Nothing
+      where
+        extM = orNothing (funct7 == 1) (unpack funct3)
 
     instCtrl itype rwbEn isLui isAluOp isOp32 isJump isLoad = InstCtrl {..}
 
