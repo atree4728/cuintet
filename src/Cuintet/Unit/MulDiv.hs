@@ -80,16 +80,29 @@ mkWork MulDivInst {..} = Working {..}
 step :: Working -> BitVector (XLen * 2) -> BitVector (XLen * 2)
 step Working {..} acc = case mulDivType of
   Multiply _ -> truncateB (added `shiftR` 1)
-  Division _ -> acc
+  Division _ -> truncateB subtracted .|. boolToBV fits
   where
-    added :: BitVector (XLen * 2 + 1)
-    added = applyWhen (lsb acc == high) (+ (zeroExtend held `shiftL` natToNum @XLen)) (zeroExtend acc)
+    wide, upperHeld :: BitVector (XLen * 2 + 1)
+    wide = zeroExtend acc
+    upperHeld = zeroExtend held `shiftL` natToNum @XLen
+
+    -- multiply: add the multiplicand in when the multiplier bit leaving is set
+    added = applyWhen (lsb acc == high) (+ upperHeld) wide
+
+    -- divide: take one more dividend bit into the remainder, subtract the divisor when it fits
+    shifted = wide `shiftL` 1
+    remainder = truncateB (shifted `shiftR` natToNum @XLen) :: BitVector (XLen + 1)
+    fits = remainder >= zeroExtend held
+    subtracted = applyWhen fits (subtract upperHeld) shifted
 
 finish :: Working -> BitVector (XLen * 2) -> BitVector XLen
 finish Working {..} acc = applyWhen isOp32 word $ case mulDivType of
   Multiply MulLow -> lower
   Multiply _ -> upper
-  Division _ -> 0
+  Division (Div _) | held == 0 -> maxBound -- division by zero
+  Division (Div _) -> applyWhen (neg1 /= neg2) negate quotient
+  Division (Rem _) -> applyWhen neg1 negate remainder
   where
     (upper, lower) = split $ applyWhen (neg1 /= neg2) negate acc
+    (remainder, quotient) = split acc
     word x = signExtend (truncateB x :: BitVector 32)
