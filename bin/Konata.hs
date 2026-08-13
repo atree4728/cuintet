@@ -28,7 +28,7 @@ main = do
 run :: FilePath -> FilePath -> IO ()
 run input output = do
   img <- hexImage input <$> P.readFile input
-  let traces = sampleWithResetN @System d1 200000 $ (.trace) <$> system (initRamLanes @MemDataBytes @_ @RamAddrWidth img)
+  let traces = sampleWithResetN @System d1 400000 $ (.trace) <$> system (initRamLanes @MemDataBytes @_ @RamAddrWidth img)
   P.writeFile output $ P.unlines $ konataLog $ upToEcall traces
   hPutStrLn stderr (output <> ": written")
 

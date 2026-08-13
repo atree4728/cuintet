@@ -20,8 +20,8 @@ data DecodeIn = DecodeIn
   , regResp :: RegResp
   -- ^ The operands, read out of 'Cuintet.RegFile.regFile' for that same entry.
   , forwards :: Vec 2 (Maybe (RegAddr, BitVector XLen))
-  , pending :: Maybe RegAddr
-  -- ^ What the instructions already downstream will write back.
+  , pending :: Vec 2 (Maybe RegAddr)
+  -- ^ What each stage downstream will write back but cannot forward yet.
   , wready :: Bool
   -- ^ Whether the ID-EX FIFO can accept a write.
   , flush :: Bool
@@ -50,7 +50,7 @@ decode DecodeIn {..} = DecodeOut {issue = orNothing issued idEx}
         match (rd, d) = orNothing (rd == rs) d
 
     idEx = IdEx {..}
-    issued = isJust entry && not (hazard idEx pending) && wready && not flush
+    issued = isJust entry && not (any (hazard idEx) pending) && wready && not flush
 
 -- | The control flags and the immediate, both a function of the opcode alone.
 instDecode :: Inst -> (InstCtrl, BitVector XLen)
@@ -124,8 +124,8 @@ instDecode instBits = (ctrl op, imm op)
     ctrl _         = deepErrorX "ctrl: unknown opcode"
 {- FOURMOLU_ENABLE -}
 
-{- | Whether a source register of this instruction is still to be written by one
-of the instructions downstream, given as 'Cuintet.Pipeline.destReg' each.
+{- | Whether a source register of this instruction is still to be written by an
+instruction downstream, given as 'Cuintet.Pipeline.unresolved' of that stage.
 -}
 hazard :: IdEx -> Maybe RegAddr -> Bool
 hazard IdEx {ctrl, rs1Addr, rs2Addr} = maybe False $

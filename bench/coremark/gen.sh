@@ -28,7 +28,7 @@ iterations=${ITERATIONS:-1}
 # -mcmodel=medany because the image is linked at 0x80000000, out of reach of
 # medlow's lui/addi pair.  -I "$here" comes first so the port in this directory
 # shadows the barebones one.
-flags="-march=rv64im_zicsr -mabi=lp64 -mcmodel=medany -O2"
+flags="-march=rv64im_zicsr -mabi=lp64 -mcmodel=medany -O3"
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT

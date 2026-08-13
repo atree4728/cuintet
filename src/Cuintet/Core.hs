@@ -146,7 +146,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, ifIdResp, idExResp, exMaResp, maWbR
     (memAccessState', maOut) = memAccess memAccessState MemAccessIn {entry = exMaResp.rdata, dResp}
     wbOut = writeback WriteBackIn {entry = maWbResp.rdata}
 
-    pending = (unresolved =<< idExResp.rdata) <|> (unresolved =<< exMaResp.rdata)
+    pending = (unresolved =<< idExResp.rdata) :> (unresolved =<< exMaResp.rdata) :> Nil
     flush = isJust maOut.redirect
     forwards = (forwardable =<< exOut.issue) :> (forwardable =<< exMaResp.rdata) :> Nil
 
