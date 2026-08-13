@@ -71,6 +71,7 @@ import Cuintet.Stage.Execute (ExecuteIn (..), ExecuteOut (..), execute)
 import Cuintet.Stage.Fetch (FetchIn (..), FetchOut (..), FetchState (..), fetch, initFetchState)
 import Cuintet.Stage.MemAccess (MemAccessIn (..), MemAccessOut (..), MemAccessState (..), initMemAccessState, memAccess)
 import Cuintet.Stage.Writeback (WritebackIn (..), WritebackOut (..), writeback)
+import Cuintet.Unit.Btb (BtbReq (..), BtbResp, btb)
 import Cuintet.Unit.Csr (CsrFile (led))
 import Cuintet.Unit.Fifo (FifoReq (..), FifoResp (..), fifo)
 import Cuintet.Unit.MulDiv (MulDivState (..))
@@ -125,7 +126,9 @@ core ::
   Signal dom CoreOut
 core coreIn = coreOut
   where
-    (coreOut, regReq, ifIdReq, idExReq, exMaReq, maWbReq) = mealyB coreT initState (coreIn, regResp, ifIdResp, idExResp, exMaResp, maWbResp)
+    (coreOut, regReq, btbReq, ifIdReq, idExReq, exMaReq, maWbReq) =
+      mealyB coreT initState (coreIn, regResp, btbResp, ifIdResp, idExResp, exMaResp, maWbResp)
+    btbResp = btb btbReq
     regResp = regFile regReq
     ifIdResp = fifo d3 ifIdReq
     idExResp = fifo d1 idExReq
@@ -135,12 +138,12 @@ core coreIn = coreOut
 -- | One clock of every stage.
 coreT ::
   CoreState ->
-  (CoreIn, RegResp, FifoResp IfId, FifoResp IdEx, FifoResp ExMa, FifoResp MaWb) ->
-  (CoreState, (CoreOut, RegReq, FifoReq IfId, FifoReq IdEx, FifoReq ExMa, FifoReq MaWb))
-coreT CoreState {..} (~CoreIn {..}, regResp, ifIdResp, idExResp, exMaResp, maWbResp) =
-  (state', (coreOut, regReq, ifIdReq, idExReq, exMaReq, maWbReq))
+  (CoreIn, RegResp, BtbResp, FifoResp IfId, FifoResp IdEx, FifoResp ExMa, FifoResp MaWb) ->
+  (CoreState, (CoreOut, RegReq, BtbReq, FifoReq IfId, FifoReq IdEx, FifoReq ExMa, FifoReq MaWb))
+coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, ifIdResp, idExResp, exMaResp, maWbResp) =
+  (state', (coreOut, regReq, btbReq, ifIdReq, idExReq, exMaReq, maWbReq))
   where
-    (fetchState', ifOut) = fetch fetchState FetchIn {iResp, fifo = ifIdResp, redirect = maOut.redirect}
+    (fetchState', ifOut) = fetch fetchState FetchIn {iResp, fifo = ifIdResp, redirect = maOut.redirect, btb = btbResp}
     idOut = decode DecodeIn {entry = ifIdResp.rdata, regResp, forwards, pending, wready = idExResp.wready, flush}
     (mulDivState', exOut) = execute mulDivState ExecuteIn {entry = idExResp.rdata, wready = exMaResp.wready}
     (memAccessState', maOut) = memAccess memAccessState MemAccessIn {entry = exMaResp.rdata, dResp}
@@ -152,6 +155,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, ifIdResp, idExResp, exMaResp, maWbR
 
     -- read for whatever ID is about to decode, write for whatever WB has just retired
     regReq = mkRegReq ifIdResp.rdata wbOut.write
+    btbReq = BtbReq {lookupAddr = ifOut.btbLookup, prefetchAddr = ifOut.btbPrefetch, write = maOut.btbWrite}
 
     -- a stage consumes its input exactly on the clock it produces an output
     ifIdReq = FifoReq {wdata = ifOut.issue, rready = isJust idOut.issue, flush}

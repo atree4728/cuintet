@@ -17,10 +17,10 @@ module Cuintet.Stage.Fetch (FetchState (..), initFetchState, FetchIn (..), Fetch
 import Clash.Prelude
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, instAt)
 import Cuintet.Pipeline (IfId (..))
-import Cuintet.Unit.BranchPredict (predict)
+import Cuintet.Unit.Btb (BtbResp (..))
 import Cuintet.Unit.Fifo (FifoResp (..))
 import Cuintet.Util (orNothing)
-import Data.Maybe (isJust)
+import Data.Maybe (fromMaybe, isJust)
 
 -- | The registers IF owns, one per arrow of the fetch path.
 data FetchState = FetchState
@@ -49,6 +49,7 @@ data FetchIn = FetchIn
   -- ^ The IF-ID FIFO, for the room it has.
   , redirect :: Maybe Addr
   -- ^ Where to restart, once MA has resolved control flow.
+  , btb :: BtbResp
   }
 
 data FetchOut = FetchOut
@@ -56,7 +57,8 @@ data FetchOut = FetchOut
   -- ^ What to write into the IF-ID FIFO.
   , iReq :: Maybe MemReq
   -- ^ Instruction fetch request.
-  , predRedirect :: Maybe Addr
+  , btbLookup :: Addr
+  , btbPrefetch :: Addr
   }
 
 {- | One clock of IF. A redirect wins over everything: it drops both the fetch
@@ -65,30 +67,22 @@ in flight and the staged instruction, which the flush of the FIFO matches.
 fetch :: FetchState -> FetchIn -> (FetchState, FetchOut)
 fetch FetchState {..} FetchIn {..} =
   ( FetchState {next = next', fetching = fetching', staged = staged'}
-  , FetchOut {issue = staged, iReq, predRedirect}
+  , FetchOut {issue = staged, iReq, btbLookup = next, btbPrefetch = next'}
   )
   where
     iReq = orNothing fifo.wreadyTwo BusReq {addr = next, wdata = Nothing}
     accepted = fifo.wreadyTwo && iResp.ready
-    -- the answer to the request issued when @fetching@ was set
-    predicted = mkIfId <$> fetching <*> iResp.rdata
-    mkIfId pc busWord = IfId {pc = pc, instBits, predictedNext}
-      where
-        instBits = instAt pc busWord
-        predictedNext = predict pc instBits
-
-    predRedirect = do
-      entry <- predicted
-      orNothing (entry.predictedNext /= entry.pc + 4) entry.predictedNext
 
     (next', fetching')
       | Just target <- redirect = (target, Nothing)
-      | Just target <- predRedirect = (target, Nothing)
-      | accepted = (next + 4, Just next)
+      | accepted = (fromMaybe (next + 4) btb.predicted, Just next)
       | otherwise = (next, fetching)
+
+    fetched = mkIfId <$> fetching <*> iResp.rdata
+    mkIfId pc busWord = IfId {pc, instBits = instAt pc busWord, predictedNext = next}
 
     staged'
       | isJust redirect = Nothing
-      | Just entry <- predicted = Just entry
+      | Just entry <- fetched = Just entry
       | fifo.wready = Nothing -- the staged write was accepted
-      | otherwise = staged -- pending
+      | otherwise = staged

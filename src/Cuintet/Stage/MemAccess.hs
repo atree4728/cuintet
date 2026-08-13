@@ -56,6 +56,7 @@ data MemAccessOut = MemAccessOut
   -}
   , dReq :: Maybe MemReq
   -- ^ Load\/store request, driven from 'LoadStoreState' and never from @dResp@.
+  , btbWrite :: Maybe (Addr, Maybe Addr)
   }
 
 {- | One clock of MA. The instruction may sit here for several of them; it leaves
@@ -64,7 +65,7 @@ on the one where the access is done with it.
 memAccess :: MemAccessState -> MemAccessIn -> (MemAccessState, MemAccessOut)
 memAccess MemAccessState {..} MemAccessIn {..} =
   ( MemAccessState {csrFile = csrFile', loadStoreState = loadStoreState'}
-  , MemAccessOut {issue = orNothing commit maWb, redirect, dReq = loadStoreResp.memReq}
+  , MemAccessOut {issue = orNothing commit maWb, redirect, dReq = loadStoreResp.memReq, btbWrite}
   )
   where
     valid = isJust entry
@@ -113,3 +114,7 @@ memAccess MemAccessState {..} MemAccessIn {..} =
       | otherwise = pc + 4
 
     redirect = orNothing (commit && actualNextPc /= predictedNext) actualNextPc
+
+    btbWrite = do
+      target <- redirect
+      pure (pc, orNothing (target /= pc + 4) target)
