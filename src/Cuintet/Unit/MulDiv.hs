@@ -44,7 +44,7 @@ mulDivStep state MulDivReq {inst = Just inst, wready} = (state', MulDivResp {sta
             Multiplying st -> Just st
             _ -> Nothing
           (signs, pick) = case op of
-            MulLow -> ((Unsigned, Unsigned), snd)
+            MulLow -> ((Signed, Signed), snd)
             MulHighHom sign -> ((sign, sign), fst)
             MulHighHetero -> ((Signed, Unsigned), fst)
           ops = mulOperands signs inst

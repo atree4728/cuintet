@@ -1,6 +1,7 @@
 module Cuintet.Unit.MulDiv.Mul (MulOperands (..), MulState, MulResult (..), mulInit, mulStep, mulResult) where
 
 import Clash.Prelude
+import Clash.Sized.Internal.BitVector (countLeadingZerosBV)
 import Cuintet.Eei (XLen)
 
 data MulOperands = MulOperands {multiplicand, multiplier :: Signed (XLen + 1)}
@@ -25,19 +26,27 @@ mulInit :: MulOperands -> MulState
 mulInit MulOperands {multiplier} =
   Running
     Progress
-      { remaining = maxBound
-      , mplier = pack (signExtend multiplier :: Signed (XLen + 2))
+      { remaining = maxBound - skipped
+      , mplier = pack (signExtend multiplier :: Signed (XLen + 2)) `shiftL` (2 * numConvert skipped)
       , acc = 0
       }
+  where
+    skipped = skip $ bitCoerce multiplier
+
+    half :: forall n. (KnownNat n) => Index (n * 2) -> Index n
+    half = resize . (`shiftR` 1)
+
+    skip x = half $ countLeadingZerosBV (y `shiftL` 1 .|. 1)
+      where
+        m = pack (multiplier `shiftR` natToNum @XLen)
+        y = x `xor` m
 
 mulStep :: MulOperands -> MulState -> MulState
 mulStep MulOperands {multiplicand} = \case
-  Running Progress {remaining, mplier = 0, acc} -> Done $ MulResult $ truncateB (pack (terminate remaining acc))
   Running Progress {remaining = 0, mplier, acc} -> Done $ MulResult $ truncateB (pack (advance mplier acc))
   Running Progress {..} -> Running Progress {remaining = remaining - 1, mplier = mplier `shiftL` 2, acc = advance mplier acc}
   Done {} -> deepErrorX "mul: stepped after completion"
   where
-    terminate remaining acc = acc `shiftL` ((1 + fromIntegral remaining) * 2)
     advance mplier acc = (acc `shiftL` 2) + multiple (truncateB $ mplier `shiftR` natToNum @(XLen - 1))
 
     multiple :: BitVector 3 -> Signed (XLen * 2 + 2)
