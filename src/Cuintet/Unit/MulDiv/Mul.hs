@@ -32,7 +32,8 @@ mulInit MulOperands {multiplier} =
 
 mulStep :: MulOperands -> MulState -> MulState
 mulStep MulOperands {multiplicand} = \case
-  Running Progress {remaining = 0, mplier, acc} -> Done $ MulResult (truncateB (pack (advance mplier acc)))
+  Running Progress {remaining, mplier = 0, acc} -> Done $ MulResult $ truncateB (pack (acc `shiftL` ((1 + fromIntegral remaining) * 2)))
+  Running Progress {remaining = 0, mplier, acc} -> Done $ MulResult $ truncateB (pack (advance mplier acc))
   Running Progress {..} -> Running Progress {remaining = remaining - 1, mplier = mplier `shiftL` 2, acc = advance mplier acc}
   Done {} -> deepErrorX "mul: stepped after completion"
   where
