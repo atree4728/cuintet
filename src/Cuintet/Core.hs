@@ -65,7 +65,7 @@ module Cuintet.Core (CoreIn (..), CoreOut (..), CoreTrace (..), core) where
 
 import Clash.Prelude
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, XLen)
-import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), MaWb (..), destReg)
+import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), MaWb (..), destReg, forwardable)
 import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
 import Cuintet.Stage.Execute (ExecuteIn (..), ExecuteOut (..), execute)
 import Cuintet.Stage.Fetch (FetchIn (..), FetchOut (..), FetchState (..), fetch, initFetchState)
@@ -142,7 +142,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, ifIdResp, idExResp, exMaResp, maWbR
   where
     (fetchState', ifOut) = fetch fetchState FetchIn {iResp, fifo = ifIdResp, redirect = maOut.redirect}
     idOut = decode DecodeIn {entry = ifIdResp.rdata, regResp, inflights, wready = idExResp.wready, flush}
-    (mulDivState', exOut) = execute mulDivState ExecuteIn {entry = idExResp.rdata, wready = exMaResp.wready}
+    (mulDivState', exOut) = execute mulDivState ExecuteIn {entry = idExResp.rdata, wready = exMaResp.wready, forwards}
     (memAccessState', maOut) = memAccess memAccessState MemAccessIn {entry = exMaResp.rdata, dResp}
     wbOut = writeback WriteBackIn {entry = maWbResp.rdata}
 
@@ -153,6 +153,8 @@ coreT CoreState {..} (~CoreIn {..}, regResp, ifIdResp, idExResp, exMaResp, maWbR
         :> (maWbResp.rdata >>= destReg)
         :> Nil
     flush = isJust maOut.redirect
+
+    forwards = (forwardable =<< exMaResp.rdata) :> (forwardable =<< maWbResp.rdata) :> Nil
 
     -- read for whatever ID is about to decode, write for whatever WB has just retired
     regReq = mkRegReq ifIdResp.rdata wbOut.write
