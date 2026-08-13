@@ -5,6 +5,8 @@ module Cuintet.CoreCtrl (
   isMemOp,
   isStore,
   isBranchOp,
+  usesRs1,
+  usesRs2,
 ) where
 
 import Clash.Prelude
@@ -44,6 +46,7 @@ data InstCtrl = InstCtrl
   -- ^ Whether to be jump instruction.
   , isLoad :: Bool
   -- ^ Whether to be load instruction.
+  , isCsrRead :: Bool
   , mulDiv :: Maybe MulDivType
   , systemOp :: Maybe SystemOp
   -- ^ What the instruction asks of the execution environment; 'Nothing' unless @SYSTEM@.
@@ -62,3 +65,15 @@ isStore InstCtrl {itype} = itype == SType
 
 isBranchOp :: InstCtrl -> Bool
 isBranchOp InstCtrl {itype} = itype == BType
+
+-- | Whether the instruction form actually reads that source register.
+usesRs1, usesRs2 :: InstCtrl -> Bool
+usesRs1 InstCtrl {itype} = case itype of
+  UType -> False
+  JType -> False
+  _ -> True
+usesRs2 InstCtrl {itype} = case itype of
+  RType -> True
+  SType -> True
+  BType -> True
+  _ -> False

@@ -7,7 +7,7 @@ flush needs anything rolled back.
 module Cuintet.Stage.Decode (decode, DecodeIn (..), DecodeOut (..)) where
 
 import Clash.Prelude
-import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
+import Cuintet.CoreCtrl (InstCtrl (..), InstType (..), usesRs1, usesRs2)
 import Cuintet.Eei (Inst, MulDivType, Opcode (..), RegAddr, System12 (..), SystemOp (..), XLen)
 import Cuintet.Pipeline (IdEx (..), IfId (..), srcRegs)
 import Cuintet.Unit.RegFile (RegResp (..))
@@ -86,6 +86,10 @@ instDecode instBits = (ctrl op, imm op)
         | otherwise -> Just SysIllegal
       _ -> Nothing
 
+    isCsrRead
+      | Just (SysCsr _) <- systemOp = True
+      | otherwise = False
+
     mulDiv :: Maybe MulDivType
     mulDiv = case op of
       OP_REG -> extM
@@ -113,18 +117,6 @@ instDecode instBits = (ctrl op, imm op)
     ctrl SYSTEM    = instCtrl IType  True False False False False False
     ctrl _         = deepErrorX "ctrl: unknown opcode"
 {- FOURMOLU_ENABLE -}
-
--- | Whether the instruction form actually reads that source register.
-usesRs1, usesRs2 :: InstCtrl -> Bool
-usesRs1 InstCtrl {itype} = case itype of
-  UType -> False
-  JType -> False
-  _ -> True
-usesRs2 InstCtrl {itype} = case itype of
-  RType -> True
-  SType -> True
-  BType -> True
-  _ -> False
 
 {- | Whether a source register of this instruction is still to be written by one
 of the instructions downstream, given as 'Cuintet.Pipeline.destReg' each.
