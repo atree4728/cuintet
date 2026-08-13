@@ -65,7 +65,7 @@ module Cuintet.Core (CoreIn (..), CoreOut (..), CoreTrace (..), core) where
 
 import Clash.Prelude
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, XLen)
-import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), MaWb (..), destReg, forwardable)
+import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), MaWb (..), forwardable, unresolved)
 import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
 import Cuintet.Stage.Execute (ExecuteIn (..), ExecuteOut (..), execute)
 import Cuintet.Stage.Fetch (FetchIn (..), FetchOut (..), FetchState (..), fetch, initFetchState)
@@ -141,20 +141,14 @@ coreT CoreState {..} (~CoreIn {..}, regResp, ifIdResp, idExResp, exMaResp, maWbR
   (state', (coreOut, regReq, ifIdReq, idExReq, exMaReq, maWbReq))
   where
     (fetchState', ifOut) = fetch fetchState FetchIn {iResp, fifo = ifIdResp, redirect = maOut.redirect}
-    idOut = decode DecodeIn {entry = ifIdResp.rdata, regResp, inflights, wready = idExResp.wready, flush}
-    (mulDivState', exOut) = execute mulDivState ExecuteIn {entry = idExResp.rdata, wready = exMaResp.wready, forwards}
+    idOut = decode DecodeIn {entry = ifIdResp.rdata, regResp, forwards, pending, wready = idExResp.wready, flush}
+    (mulDivState', exOut) = execute mulDivState ExecuteIn {entry = idExResp.rdata, wready = exMaResp.wready}
     (memAccessState', maOut) = memAccess memAccessState MemAccessIn {entry = exMaResp.rdata, dResp}
     wbOut = writeback WriteBackIn {entry = maWbResp.rdata}
 
-    -- what the instructions downstream of ID will write back
-    inflights =
-      (idExResp.rdata >>= destReg)
-        :> (exMaResp.rdata >>= destReg)
-        :> (maWbResp.rdata >>= destReg)
-        :> Nil
+    pending = (unresolved =<< idExResp.rdata) <|> (unresolved =<< exMaResp.rdata)
     flush = isJust maOut.redirect
-
-    forwards = (forwardable =<< exMaResp.rdata) :> (forwardable =<< maWbResp.rdata) :> Nil
+    forwards = (forwardable =<< exOut.issue) :> (forwardable =<< exMaResp.rdata) :> Nil
 
     -- read for whatever ID is about to decode, write for whatever WB has just retired
     regReq = mkRegReq ifIdResp.rdata wbOut.write

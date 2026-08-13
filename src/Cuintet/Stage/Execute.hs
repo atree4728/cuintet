@@ -18,7 +18,7 @@ module Cuintet.Stage.Execute (execute, ExecuteIn (..), ExecuteOut (..)) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
-import Cuintet.Eei (Addr, IOp (..), RegAddr, ShiftRight (..), XLen)
+import Cuintet.Eei (Addr, IOp (..), ShiftRight (..), XLen)
 import Cuintet.Pipeline (ExMa (..), IdEx (..))
 import Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState, mkMulDivInst, mulDivStep)
 import Cuintet.Util (orNothing)
@@ -29,7 +29,6 @@ data ExecuteIn = ExecuteIn
   -- ^ The instruction at the head of the ID-EX FIFO.
   , wready :: Bool
   -- ^ Whether the EX-MA FIFO can accept a write.
-  , forwards :: Vec 2 (Maybe (RegAddr, BitVector XLen))
   }
 
 newtype ExecuteOut = ExecuteOut
@@ -45,7 +44,7 @@ execute mulDivState ExecuteIn {..} = (mulDivState', exOut)
 
     -- the instruction leaves once the multiply/divide unit has let go of it
     issued = isJust entry && wready && not mulDivResp.stall
-    exMa = mkExMa mulDivResp.result forwards $ fromMaybe (deepErrorX "execute: ID-EX FIFO is empty") entry
+    exMa = mkExMa mulDivResp.result $ fromMaybe (deepErrorX "execute: ID-EX FIFO is empty") entry
     exOut = ExecuteOut {issue = orNothing issued exMa}
 
 {- | Run the instruction through the ALU and the branch unit.
@@ -53,15 +52,10 @@ execute mulDivState ExecuteIn {..} = (mulDivState', exOut)
 @wbData@ is the value to write back as far as EX can tell; MA replaces it for a
 load or a CSR read.
 -}
-mkExMa :: Maybe (BitVector XLen) -> Vec 2 (Maybe (RegAddr, BitVector XLen)) -> IdEx -> ExMa
-mkExMa mulDivResult forwards IdEx {..} = ExMa {rs1Data = rs1Data', rs2Data = rs2Data', op1, op2, aluResult, branchTaken, ..}
+mkExMa :: Maybe (BitVector XLen) -> IdEx -> ExMa
+mkExMa mulDivResult IdEx {..} = ExMa {op1, op2, aluResult, branchTaken, ..}
   where
-    rs1Data' = fromMaybe rs1Data $ foldr ((<|>) . (>>= rsMatch rs1Addr)) Nothing forwards
-    rs2Data' = fromMaybe rs2Data $ foldr ((<|>) . (>>= rsMatch rs2Addr)) Nothing forwards
-    rsMatch rs (rd, d)
-      | rs == rd = Just d
-      | otherwise = Nothing
-    (op1, op2) = operands ctrl imm rs1Data' rs2Data' pc
+    (op1, op2) = operands ctrl imm rs1Data rs2Data pc
     aluResult = alu ctrl op1 op2
 
     branchTaken = branchUnit ctrl.funct3 op1 op2

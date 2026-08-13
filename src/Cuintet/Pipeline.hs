@@ -7,10 +7,10 @@ instruction. That is what makes it usable as the core's execution log, which
 'Cuintet.Debug.showInstLog' prints. Nothing is dropped and only @wbData@ is ever
 rewritten, by MA for a load or a CSR read.
 -}
-module Cuintet.Pipeline (IfId (..), IdEx (..), ExMa (..), MaWb (..), srcRegs, destReg, forwardable) where
+module Cuintet.Pipeline (IfId (..), IdEx (..), ExMa (..), MaWb (..), srcRegs, destReg, forwardable, unresolved) where
 
 import Clash.Prelude
-import Cuintet.CoreCtrl (InstCtrl (..))
+import Cuintet.CoreCtrl (InstCtrl (..), isCsrRead)
 import Cuintet.Eei (Addr, Inst, RegAddr, XLen)
 import Cuintet.Util (orNothing)
 import GHC.Records (HasField)
@@ -102,3 +102,8 @@ forwardable ::
   (HasField "ctrl" stage InstCtrl, HasField "rdAddr" stage RegAddr, HasField "wbData" stage t) =>
   stage -> Maybe (RegAddr, t)
 forwardable stage = (,stage.wbData) <$> destReg stage
+
+unresolved ::
+  (HasField "ctrl" stage InstCtrl, HasField "rdAddr" stage RegAddr) =>
+  stage -> Maybe RegAddr
+unresolved stage = orNothing (stage.ctrl.isLoad || isCsrRead stage.ctrl) =<< destReg stage

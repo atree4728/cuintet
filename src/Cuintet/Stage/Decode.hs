@@ -19,7 +19,8 @@ data DecodeIn = DecodeIn
   -- ^ The instruction at the head of the IF-ID FIFO.
   , regResp :: RegResp
   -- ^ The operands, read out of 'Cuintet.RegFile.regFile' for that same entry.
-  , inflights :: Vec 3 (Maybe RegAddr)
+  , forwards :: Vec 2 (Maybe (RegAddr, BitVector XLen))
+  , pending :: Maybe RegAddr
   -- ^ What the instructions already downstream will write back.
   , wready :: Bool
   -- ^ Whether the ID-EX FIFO can accept a write.
@@ -38,9 +39,18 @@ decode DecodeIn {..} = DecodeOut {issue = orNothing issued idEx}
     (ctrl, imm) = instDecode instBits
     (rs1Addr, rs2Addr) = srcRegs instBits
     rdAddr = slice d11 d7 instBits
-    RegResp {rs1Data, rs2Data} = regResp
+    RegResp {rs1Data = rs1Read, rs2Data = rs2Read} = regResp
+    rs1Data = resolve (usesRs1 ctrl) rs1Addr rs1Read
+    rs2Data = resolve (usesRs2 ctrl) rs2Addr rs2Read
+
+    resolve uses rs old
+      | not uses = old
+      | otherwise = fromMaybe old $ foldr ((<|>) . (>>= match)) Nothing forwards
+      where
+        match (rd, d) = orNothing (rd == rs) d
+
     idEx = IdEx {..}
-    issued = isJust entry && not (hazard idEx inflights) && wready && not flush
+    issued = isJust entry && not (hazard idEx pending) && wready && not flush
 
 -- | The control flags and the immediate, both a function of the opcode alone.
 instDecode :: Inst -> (InstCtrl, BitVector XLen)
@@ -86,10 +96,6 @@ instDecode instBits = (ctrl op, imm op)
         | otherwise -> Just SysIllegal
       _ -> Nothing
 
-    isCsrRead
-      | Just (SysCsr _) <- systemOp = True
-      | otherwise = False
-
     mulDiv :: Maybe MulDivType
     mulDiv = case op of
       OP_REG -> extM
@@ -121,10 +127,6 @@ instDecode instBits = (ctrl op, imm op)
 {- | Whether a source register of this instruction is still to be written by one
 of the instructions downstream, given as 'Cuintet.Pipeline.destReg' each.
 -}
-hazard :: (KnownNat n) => IdEx -> Vec n (Maybe RegAddr) -> Bool
-hazard IdEx {ctrl, rs1Addr, rs2Addr} = any conflicts
-  where
-    conflicts = maybe False $
-      \rd ->
-        usesRs1 ctrl && rd == rs1Addr
-          || usesRs2 ctrl && rd == rs2Addr
+hazard :: IdEx -> Maybe RegAddr -> Bool
+hazard IdEx {ctrl, rs1Addr, rs2Addr} = maybe False $
+  \rd -> usesRs1 ctrl && rd == rs1Addr || usesRs2 ctrl && rd == rs2Addr
