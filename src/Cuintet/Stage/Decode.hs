@@ -4,7 +4,7 @@ The stage holds no state. An instruction it does not issue is simply left at the
 head of the IF-ID FIFO and decoded again next clock, so neither a stall nor a
 flush needs anything rolled back.
 -}
-module Cuintet.Stage.Decode (decode, DecodeIn (..), DecodeOut (..), immB) where
+module Cuintet.Stage.Decode (decode, DecodeIn (..), DecodeOut (..), immB, immJ) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..), usesRs1, usesRs2)
@@ -57,6 +57,11 @@ immB instBits = signExtend (immBG ++# (0 :: BitVector 1))
   where
     immBG = slice d31 d31 instBits ++# slice d7 d7 instBits ++# slice d30 d25 instBits ++# slice d11 d8 instBits
 
+immJ :: Inst -> BitVector XLen
+immJ instBits = signExtend (immJG ++# (0 :: BitVector 1))
+  where
+    immJG = slice d31 d31 instBits ++# slice d19 d12 instBits ++# slice d20 d20 instBits ++# slice d30 d21 instBits
+
 -- | The control flags and the immediate, both a function of the opcode alone.
 instDecode :: Inst -> (InstCtrl, BitVector XLen)
 instDecode instBits = (ctrl op, imm op)
@@ -66,19 +71,17 @@ instDecode instBits = (ctrl op, imm op)
     immIG = slice d31 d20 instBits
     immSG = slice d31 d25 instBits ++# slice d11 d7 instBits
     immUG = slice d31 d12 instBits
-    immJG = slice d31 d31 instBits ++# slice d19 d12 instBits ++# slice d20 d20 instBits ++# slice d30 d21 instBits
 
     immI = signExtend immIG
     immS = signExtend immSG
     immU = signExtend (immUG ++# (0 :: BitVector 12))
-    immJ = signExtend (immJG ++# (0 :: BitVector 1))
 
     imm :: Opcode -> BitVector XLen
     imm LUI = immU
     imm AUIPC = immU
     imm OP_IMM = immI
     imm OP_IMM_32 = immI
-    imm JAL = immJ
+    imm JAL = immJ instBits
     imm JALR = immI
     imm BRANCH = immB instBits
     imm LOAD = immI
