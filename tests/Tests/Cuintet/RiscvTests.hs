@@ -10,8 +10,8 @@ module Tests.Cuintet.RiscvTests (tests) where
 import Clash.Prelude
 import Cuintet (system)
 import Cuintet.Core (CoreOut (..))
+import Cuintet.Debug.Image (hexImage)
 import Cuintet.Eei (Inst, MemDataBytes)
-import Cuintet.Image (hexImage)
 import Cuintet.Pipeline (MaWb (..), destReg)
 import Cuintet.Unit.Ram (initRamLanes)
 import Data.ByteString.Char8 qualified as BC

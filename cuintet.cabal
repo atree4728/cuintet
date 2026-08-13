@@ -66,10 +66,10 @@ library
     Cuintet
     Cuintet.Core
     Cuintet.CoreCtrl
+    Cuintet.Debug.Image
     Cuintet.Debug.Konata
     Cuintet.Debug.Show
     Cuintet.Eei
-    Cuintet.Image
     Cuintet.Pipeline
     Cuintet.Stage.Decode
     Cuintet.Stage.Execute

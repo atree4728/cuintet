@@ -3,8 +3,8 @@ module Tests.Cuintet.Core (tests) where
 import Clash.Prelude
 import Cuintet (system)
 import Cuintet.Core (CoreOut (..), CoreTrace (..))
+import Cuintet.Debug.Image (memImage)
 import Cuintet.Eei (Inst, RegFile)
-import Cuintet.Image (memImage)
 import Cuintet.Pipeline (MaWb (..), destReg)
 import Cuintet.Unit.Ram (initRamLanes)
 import Data.Maybe (mapMaybe)

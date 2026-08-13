@@ -1,4 +1,4 @@
-module Cuintet.Image (packInsts, memImage, hexImage) where
+module Cuintet.Debug.Image (packInsts, memImage, hexImage) where
 
 import Clash.Prelude
 import Clash.Sized.Vector (unsafeFromList)
