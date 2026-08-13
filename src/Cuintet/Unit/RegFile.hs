@@ -34,11 +34,19 @@ data RegResp = RegResp
 regFile :: (HiddenClockResetEnable dom) => Signal dom RegReq -> Signal dom RegResp
 regFile req = RegResp <$> port ((.rs1Addr) <$> req) <*> port ((.rs2Addr) <$> req)
   where
-    zeroX0 0 _ = 0
-    zeroX0 _ d = d
-    wdata = fmap (first unpack) . (.write) <$> req
-    port addr = zeroX0 <$> addr <*> asyncRamPow2 (unpack <$> addr) wdata
-    _ = port $ (.rs1Addr) <$> req
+    zeroX0 0 _ = (0, 0)
+    zeroX0 r d = (r, d)
+    bypass write (rs, d)
+      | Just (rd, wd) <- write, rs == rd = wd
+      | otherwise = d
+    wdata = (.write) <$> req
+    port addr =
+      bypass
+        <$> wdata
+        <*> ( zeroX0
+                <$> addr
+                <*> asyncRamPow2 (unpack <$> addr) (fmap (first unpack) <$> wdata)
+            )
 
 {- | The request for a given IF-ID FIFO head and WB write.
 
