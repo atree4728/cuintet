@@ -17,6 +17,7 @@ module Cuintet.Stage.Fetch (FetchState (..), initFetchState, FetchIn (..), Fetch
 import Clash.Prelude
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, instAt)
 import Cuintet.Pipeline (IfId (..))
+import Cuintet.Unit.BranchPredict (predict)
 import Cuintet.Unit.Fifo (FifoResp (..))
 import Cuintet.Util (orNothing)
 import Data.Maybe (isJust)
@@ -55,6 +56,7 @@ data FetchOut = FetchOut
   -- ^ What to write into the IF-ID FIFO.
   , iReq :: Maybe MemReq
   -- ^ Instruction fetch request.
+  , predRedirect :: Maybe Addr
   }
 
 {- | One clock of IF. A redirect wins over everything: it drops both the fetch
@@ -63,21 +65,30 @@ in flight and the staged instruction, which the flush of the FIFO matches.
 fetch :: FetchState -> FetchIn -> (FetchState, FetchOut)
 fetch FetchState {..} FetchIn {..} =
   ( FetchState {next = next', fetching = fetching', staged = staged'}
-  , FetchOut {issue = staged, iReq}
+  , FetchOut {issue = staged, iReq, predRedirect}
   )
   where
     iReq = orNothing fifo.wreadyTwo BusReq {addr = next, wdata = Nothing}
     accepted = fifo.wreadyTwo && iResp.ready
     -- the answer to the request issued when @fetching@ was set
-    fetched = (,) <$> fetching <*> iResp.rdata
+    predicted = mkIfId <$> fetching <*> iResp.rdata
+    mkIfId pc busWord = IfId {pc = pc, instBits, predictedNext}
+      where
+        instBits = instAt pc busWord
+        predictedNext = predict pc instBits
+
+    predRedirect = do
+      entry <- predicted
+      orNothing (entry.predictedNext /= entry.pc + 4) entry.predictedNext
 
     (next', fetching')
       | Just target <- redirect = (target, Nothing)
+      | Just target <- predRedirect = (target, Nothing)
       | accepted = (next + 4, Just next)
       | otherwise = (next, fetching)
 
     staged'
       | isJust redirect = Nothing
-      | Just (addr, busWord) <- fetched = Just IfId {pc = addr, instBits = instAt addr busWord}
+      | Just entry <- predicted = Just entry
       | fifo.wready = Nothing -- the staged write was accepted
       | otherwise = staged -- pending

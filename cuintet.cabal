@@ -76,6 +76,7 @@ library
     Cuintet.Stage.Fetch
     Cuintet.Stage.MemAccess
     Cuintet.Stage.Writeback
+    Cuintet.Unit.BranchPredict
     Cuintet.Unit.BusArbiter
     Cuintet.Unit.Csr
     Cuintet.Unit.Fifo

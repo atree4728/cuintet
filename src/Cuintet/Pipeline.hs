@@ -19,6 +19,7 @@ import GHC.Records (HasField)
 data IfId = IfId
   { pc :: Addr
   , instBits :: Inst
+  , predictedNext :: Addr
   }
   deriving (Generic, NFDataX)
 
@@ -26,6 +27,7 @@ data IfId = IfId
 data IdEx = IdEx
   { pc :: Addr
   , instBits :: Inst
+  , predictedNext :: Addr
   , ctrl :: InstCtrl
   , imm :: BitVector XLen
   , rs1Addr :: RegAddr
@@ -40,6 +42,7 @@ data IdEx = IdEx
 data ExMa = ExMa
   { pc :: Addr
   , instBits :: Inst
+  , predictedNext :: Addr
   , ctrl :: InstCtrl
   , imm :: BitVector XLen
   , rs1Addr :: RegAddr
@@ -62,6 +65,7 @@ data ExMa = ExMa
 data MaWb = MaWb
   { pc :: Addr
   , instBits :: Inst
+  , predictedNext :: Addr
   , ctrl :: InstCtrl
   , imm :: BitVector XLen
   , rs1Addr :: RegAddr

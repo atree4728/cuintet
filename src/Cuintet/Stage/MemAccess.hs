@@ -106,9 +106,10 @@ memAccess MemAccessState {..} MemAccessIn {..} =
         , ..
         }
 
-    redirect
-      | not commit = Nothing
-      | isJust csrRedirect = csrRedirect
-      | ctrl.isJump = Just (bitCoerce (aluResult .&. complement 1)) -- aluResult is the destination
-      | isBranchOp ctrl && branchTaken = Just (pc + numConvert imm)
-      | otherwise = Nothing
+    actualNextPc
+      | Just target <- csrRedirect = target
+      | ctrl.isJump = bitCoerce (aluResult .&. complement 1)
+      | isBranchOp ctrl && branchTaken = pc + numConvert imm
+      | otherwise = pc + 4
+
+    redirect = orNothing (commit && actualNextPc /= predictedNext) actualNextPc

@@ -35,15 +35,15 @@ newtype DecodeOut = DecodeOut {issue :: Maybe IdEx}
 decode :: DecodeIn -> DecodeOut
 decode DecodeIn {..} = DecodeOut {issue = orNothing issued idEx}
   where
-    IfId {pc, instBits} = fromMaybe (deepErrorX "decode: IF-ID FIFO is empty") entry
+    IfId {..} = fromMaybe (deepErrorX "decode: IF-ID FIFO is empty") entry
     (ctrl, imm) = instDecode instBits
     (rs1Addr, rs2Addr) = srcRegs instBits
     rdAddr = slice d11 d7 instBits
     RegResp {rs1Data = rs1Read, rs2Data = rs2Read} = regResp
-    rs1Data = resolve (usesRs1 ctrl) rs1Addr rs1Read
-    rs2Data = resolve (usesRs2 ctrl) rs2Addr rs2Read
+    rs1Data = resolveForwarding (usesRs1 ctrl) rs1Addr rs1Read
+    rs2Data = resolveForwarding (usesRs2 ctrl) rs2Addr rs2Read
 
-    resolve uses rs old
+    resolveForwarding uses rs old
       | not uses = old
       | otherwise = fromMaybe old $ foldr ((<|>) . (>>= match)) Nothing forwards
       where
