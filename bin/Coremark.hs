@@ -10,7 +10,7 @@ import Clash.Prelude
 import Cuintet (system)
 import Cuintet.Core (CoreOut (..))
 import Cuintet.Eei (Inst, MemDataBytes, RegAddr, XLen)
-import Cuintet.Image (hexImage)
+import Cuintet.Debug.Image (hexImage)
 import Cuintet.Pipeline (MaWb (..), destReg)
 import Cuintet.Unit.Ram (initRamLanes)
 import System.Environment (getArgs)

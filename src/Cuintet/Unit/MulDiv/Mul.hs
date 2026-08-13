@@ -32,11 +32,12 @@ mulInit MulOperands {multiplier} =
 
 mulStep :: MulOperands -> MulState -> MulState
 mulStep MulOperands {multiplicand} = \case
-  Running Progress {remaining, mplier = 0, acc} -> Done $ MulResult $ truncateB (pack (acc `shiftL` ((1 + fromIntegral remaining) * 2)))
+  Running Progress {remaining, mplier = 0, acc} -> Done $ MulResult $ truncateB (pack (terminate remaining acc))
   Running Progress {remaining = 0, mplier, acc} -> Done $ MulResult $ truncateB (pack (advance mplier acc))
   Running Progress {..} -> Running Progress {remaining = remaining - 1, mplier = mplier `shiftL` 2, acc = advance mplier acc}
   Done {} -> deepErrorX "mul: stepped after completion"
   where
+    terminate remaining acc = acc `shiftL` ((1 + fromIntegral remaining) * 2)
     advance mplier acc = (acc `shiftL` 2) + multiple (truncateB $ mplier `shiftR` natToNum @(XLen - 1))
 
     multiple :: BitVector 3 -> Signed (XLen * 2 + 2)
