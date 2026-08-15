@@ -71,6 +71,7 @@ mulDivStep state MulDivReq {inst = Just inst, wready} = (state', MulDivResp {sta
     state'
       | isJust result = if wready then Idle else state
       | otherwise = stepped
+{-# OPAQUE mulDivStep #-}
 
 mulOperands :: (Sign, Sign) -> MulDivInst -> MulOperands
 mulOperands (sign1, sign2) MulDivInst {op1, op2} =

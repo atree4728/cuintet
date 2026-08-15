@@ -34,3 +34,4 @@ writeback WriteBackIn {entry} = WriteBackOut {retired = entry, write}
       maWb <- entry
       rdAddr <- destReg maWb
       Just (rdAddr, maWb.wbData)
+{-# OPAQUE writeback #-}

@@ -7,6 +7,10 @@ hdl_dir := "build/systemverilog"
 src := hdl_dir / top_module + "." + top_fn
 out := "build" / name
 
+# every module Clash emitted: the top entity, its types, and one per OPAQUE
+# binding, so it is not a fixed list
+sv := src / "*.sv"
+
 # Clash -> SystemVerilog
 hdl:
     cabal run clash -- {{ top_module }} --systemverilog -fclash-hdldir {{ hdl_dir }}

@@ -51,6 +51,7 @@ decode DecodeIn {..} = DecodeOut {issue = orNothing issued idEx}
 
     idEx = IdEx {..}
     issued = isJust entry && not (any (hazard idEx) pending) && wready && not flush
+{-# OPAQUE decode #-}
 
 immB :: Inst -> BitVector XLen
 immB instBits = signExtend (immBG ++# (0 :: BitVector 1))

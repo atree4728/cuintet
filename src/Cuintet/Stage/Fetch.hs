@@ -86,3 +86,4 @@ fetch FetchState {..} FetchIn {..} =
       | Just entry <- fetched = Just entry
       | fifo.wready = Nothing -- the staged write was accepted
       | otherwise = staged
+{-# OPAQUE fetch #-}

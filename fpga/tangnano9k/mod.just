@@ -16,7 +16,7 @@ freq := "27"
 # SystemVerilog -> JSON netlist
 synth: hdl
     mkdir -p {{ out }}
-    yosys -m slang -p 'read_slang --top {{ entity }} {{ src }}/{{ entity }}_types.sv {{ src }}/{{ entity }}.sv; synth_gowin -json {{ out }}/{{ entity }}.json'
+    yosys -m slang -p 'read_slang --top {{ entity }} {{ sv }}; synth_gowin -json {{ out }}/{{ entity }}.json'
 
 # place & route
 pnr: synth

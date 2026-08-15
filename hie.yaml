@@ -12,3 +12,5 @@ cradle:
       component: "cuintet:exe:clashi"
     - path: "./bin/Konata.hs"
       component: "cuintet:exe:konata"
+    - path: "./bin/Timing.hs"
+      component: "cuintet:exe:timing"

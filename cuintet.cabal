@@ -116,16 +116,37 @@ executable konata
     cuintet,
     filepath,
 
-test-suite doctests
-  type: exitcode-stdio-1.0
+common plain-options
   default-language: GHC2024
-  main-is: doctests.hs
-  hs-source-dirs: tests
   ghc-options:
     -Wall
     -Wcompat
-    -threaded
 
+executable timing
+  import: plain-options
+  main-is: bin/Timing.hs
+  default-extensions:
+    DuplicateRecordFields
+    NoFieldSelectors
+    OverloadedRecordDot
+    OverloadedStrings
+    ViewPatterns
+
+  build-depends:
+    aeson >=2.2 && <2.3,
+    base,
+    containers,
+    directory,
+    filepath,
+    prettyprinter >=1.7 && <1.8,
+    text,
+
+test-suite doctests
+  import: plain-options
+  type: exitcode-stdio-1.0
+  main-is: doctests.hs
+  hs-source-dirs: tests
+  ghc-options: -threaded
   build-depends:
     base,
     cuintet,

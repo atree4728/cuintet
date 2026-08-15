@@ -46,6 +46,7 @@ execute mulDivState ExecuteIn {..} = (mulDivState', exOut)
     issued = isJust entry && wready && not mulDivResp.stall
     exMa = mkExMa mulDivResp.result $ fromMaybe (deepErrorX "execute: ID-EX FIFO is empty") entry
     exOut = ExecuteOut {issue = orNothing issued exMa}
+{-# OPAQUE execute #-}
 
 {- | Run the instruction through the ALU and the branch unit.
 

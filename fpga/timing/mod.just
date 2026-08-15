@@ -17,11 +17,14 @@ seed := "1"
 # area, without place & route (seconds)
 synth: hdl
     mkdir -p {{ out }}
-    yosys -q -m slang -l {{ out }}/yosys.log -p 'read_slang --top {{ entity }} {{ src }}/{{ entity }}_types.sv {{ src }}/{{ entity }}.sv; synth_ecp5 -json {{ out }}/{{ entity }}.json; tee -q -o {{ out }}/area.txt stat'
+    yosys -q -m slang -l {{ out }}/yosys.log -p 'read_slang --top {{ entity }} {{ sv }}; synth_ecp5 -json {{ out }}/{{ entity }}.json; tee -q -o {{ out }}/area.txt stat'
     @cat {{ out }}/area.txt
 
 # max frequency and critical path (minutes)
 fmax: synth
     nextpnr-ecp5 -q {{ device }} --json {{ out }}/{{ entity }}.json --freq {{ freq }} --seed {{ seed }} --timing-allow-fail --report {{ out }}/report.json -l {{ out }}/nextpnr.log
-    @grep "Max frequency for clock" {{ out }}/nextpnr.log | tail -1
-    @echo "critical path: {{ out }}/nextpnr.log"
+    @just timing::report
+
+# the last fmax run, summarised; reads the artefacts, so it does not re-place
+report:
+    @cabal run timing -- {{ out }} {{ src }}

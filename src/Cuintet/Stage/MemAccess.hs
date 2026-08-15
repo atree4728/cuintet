@@ -118,3 +118,4 @@ memAccess MemAccessState {..} MemAccessIn {..} =
     btbWrite = do
       target <- redirect
       pure (pc, orNothing (target /= pc + 4) target)
+{-# OPAQUE memAccess #-}
