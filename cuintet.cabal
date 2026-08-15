@@ -77,6 +77,8 @@ library
     Cuintet.Stage.Fetch
     Cuintet.Stage.MemAccess
     Cuintet.Stage.Writeback
+    Cuintet.Top.TangNano9k
+    Cuintet.Top.Timing
     Cuintet.Unit.Btb
     Cuintet.Unit.BusArbiter
     Cuintet.Unit.Csr

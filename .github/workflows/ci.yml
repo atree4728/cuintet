@@ -53,7 +53,9 @@ jobs:
         run: cabal run bench
 
       - name: Generate SystemVerilog
-        run: cabal run clash -- Cuintet --systemverilog
+        run: |
+          cabal run clash -- Cuintet.Top.TangNano9k --systemverilog
+          cabal run clash -- Cuintet.Top.Timing --systemverilog
 
       - name: Save cache
         uses: actions/cache/save@v4

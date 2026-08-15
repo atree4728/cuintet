@@ -40,10 +40,11 @@ cabal run konata
 
 ## Synthesis
 
-To compile the project to SystemVerilog, run:
+Each top entity lives in its own module under `Cuintet.Top`. To compile one to
+SystemVerilog, run:
 
 ```bash
-cabal run clash -- Cuintet --systemverilog
+cabal run clash -- Cuintet.Top.TangNano9k --systemverilog
 ```
 
 You can find the SystemVerilog files in `systemverilog/`.
