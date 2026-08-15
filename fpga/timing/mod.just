@@ -10,7 +10,9 @@ top_module := "Cuintet.Top.Timing"
 top_fn := "timing"
 entity := "cuintet_timing"
 
-device := "--85k --package CABGA381"
+# The speed grade is pinned rather than left to nextpnr's default, so that the
+# numbers stay comparable across toolchain updates. 6 is that default today.
+device := "--85k --package CABGA381 --speed 6"
 freq := "200"
 seed := "1"
 
@@ -22,7 +24,7 @@ synth: hdl
 
 # max frequency and critical path (minutes)
 fmax: synth
-    nextpnr-ecp5 -q {{ device }} --json {{ out }}/{{ entity }}.json --freq {{ freq }} --seed {{ seed }} --timing-allow-fail --report {{ out }}/report.json -l {{ out }}/nextpnr.log
+    nextpnr-ecp5 -q {{ device }} --json {{ out }}/{{ entity }}.json --freq {{ freq }} --seed {{ seed }} --timing-allow-fail --report {{ out }}/report.json --detailed-timing-report -l {{ out }}/nextpnr.log
     @just timing::report
 
 # the last fmax run, summarised; reads the artefacts, so it does not re-place
