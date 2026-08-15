@@ -1,7 +1,9 @@
-# Startup for a bare cuintet: no bootloader, no traps and no I/O.
+# Startup for a bare cuintet: no bootloader, no traps and no I/O.  Shared by
+# every C benchmark under programs/.
 #
-# The testbench halts at the ECALL below, so reaching it is what says the
-# benchmark ran to completion.
+# The contract with the testbench: the ECALL below halts the simulation, and a0
+# holds main's return value.  Reaching it says the benchmark ran to completion;
+# a0 == 0 says it validated its own result.
 
         .section .text.init
         .globl _start

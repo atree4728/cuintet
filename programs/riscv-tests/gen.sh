@@ -4,9 +4,9 @@
 # The images are checked in, so `cabal test` needs no RISC-V toolchain; run
 # this only when the suites or the environment in env/ changes.
 #
-#   ./tests/riscv-tests/gen.sh                  # every suite below
-#   ./tests/riscv-tests/gen.sh rv64um           # every test in one suite
-#   ./tests/riscv-tests/gen.sh rv64ui add addi  # just these
+#   ./programs/riscv-tests/gen.sh                  # every suite below
+#   ./programs/riscv-tests/gen.sh rv64um           # every test in one suite
+#   ./programs/riscv-tests/gen.sh rv64ui add addi  # just these
 #
 # Tests the core cannot run yet are not filtered here: a test needing an
 # extension outside the suite's -march is reported as skipped, and one that
@@ -30,6 +30,8 @@ here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 root=$(CDPATH= cd -- "$here/../.." && pwd)
 isa=$root/vendor/riscv-tests/isa
 prefix=${RISCV_PREFIX:-riscv64-unknown-elf-}
+
+. "$root/programs/common/hex.sh"
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -64,7 +66,6 @@ for suite in $suites; do
 
   for name in $names; do
     elf=$work/$name.elf
-    bin=$work/$name.bin
     hex=$here/hex/$suite/$suite-p-$name.hex
 
     # -I "$here/env" comes first so our riscv_test.h shadows the one in env/p.
@@ -81,18 +82,7 @@ for suite in $suites; do
       continue
     fi
 
-    "${prefix}objcopy" -O binary "$elf" "$bin"
-
-    # Pad to a whole word so the last line of hex is complete.
-    size=$(wc -c <"$bin" | tr -d ' ')
-    pad=$(((4 - size % 4) % 4))
-    if [ "$pad" -gt 0 ]; then
-      dd if=/dev/zero bs=1 count="$pad" >>"$bin" 2>/dev/null
-    fi
-
-    # od reads each 4 bytes as a host-endian word, which matches RISC-V on any
-    # little-endian host.  One word per line, low address first.
-    od -An -tx4 -v "$bin" | tr -s ' ' '\n' | grep -v '^$' >"$hex"
+    elf2hex "$elf" "$hex"
 
     echo "$suite-p-$name: $(wc -l <"$hex" | tr -d ' ') words"
   done

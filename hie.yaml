@@ -10,3 +10,5 @@ cradle:
       component: "cuintet:exe:clash"
     - path: "./bin/Clashi.hs"
       component: "cuintet:exe:clashi"
+    - path: "./bin/Konata.hs"
+      component: "cuintet:exe:konata"

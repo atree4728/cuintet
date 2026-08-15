@@ -1,17 +1,18 @@
-/* Link CoreMark into cuintet's single flat RAM.
+/* Link a bare-metal benchmark into cuintet's single flat RAM.
  *
  * The base stays at 0x80000000: `toRamAddr` truncates an address to the RAM's
  * width, so an image loaded at word zero is addressed correctly by both
  * lui/addi absolute addresses and auipc PC-relative ones.
  *
- * RAM_SIZE must match the driver's RamAddrWidth: 8 bytes per word, so
- * 128K == 2^14 words == RamAddrWidth 14.
+ * RAM_SIZE must match the ramAddrWidth the suite is registered with: 8 bytes
+ * per word, so 128K == 2^14 words == ramAddrWidth 14.  A benchmark that needs
+ * a different size passes -Wl,--defsym=__ram_size=<bytes>.
  */
 
 OUTPUT_ARCH( "riscv" )
 ENTRY(_start)
 
-RAM_SIZE = 128K;
+RAM_SIZE = DEFINED(__ram_size) ? __ram_size : 128K;
 
 SECTIONS
 {

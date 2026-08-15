@@ -49,6 +49,9 @@ jobs:
       - name: Doctests
         run: cabal run doctests
 
+      - name: Benchmarks
+        run: cabal run bench
+
       - name: Generate SystemVerilog
         run: cabal run clash -- Cuintet --systemverilog
 

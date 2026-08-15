@@ -12,11 +12,12 @@ To build the project, use:
 cabal build
 ```
 
-To run the tests defined in `tests/`, use:
+To run the tests defined in `tests/` and `bench/`, use:
 
 ```bash
 cabal run unittests
 cabal run doctests
+cabal run bench
 ```
 
 To open the REPL, use:
@@ -36,54 +37,6 @@ To log the core as Kanata format, use:
 ```
 cabal run konata
 ```
-
-### riscv-tests
-
-`unittests` also runs the `rv64ui-p-*` and `rv64um-p-*` suites from
-[riscv-tests](https://github.com/riscv-software-src/riscv-tests). The images are
-assembled ahead of time and checked in under `tests/riscv-tests/hex/`, so no
-RISC-V toolchain is needed to run them.
-
-Regenerating them is only necessary after changing the test list or the
-environment in `tests/riscv-tests/env/`:
-
-```sh
-git submodule update --init
-./tests/riscv-tests/gen.sh            # every suite
-./tests/riscv-tests/gen.sh rv64um     # one suite
-./tests/riscv-tests/gen.sh rv64ui add # one test
-```
-
-### CoreMark
-
-[CoreMark](https://github.com/eembc/coremark) runs bare-metal on the core, one
-iteration of the default 2000-byte workload:
-
-```sh
-cabal run coremark
-```
-
-The core has no I/O, so the port in `bench/coremark/` stubs out `ee_printf` and
-CoreMark reports nothing: `crt0.S` executes `ecall` once `main` has returned, and
-the driver halts there. Reaching that `ecall` is what says the run completed.
-
-The image is checked in as `bench/coremark/coremark.hex`, so running it needs no
-RISC-V toolchain. Rebuild it after changing the port:
-
-```sh
-git submodule update --init
-./bench/coremark/gen.sh
-```
-
-Two things the port has to do for this core in particular:
-
-- `crt0.S` clears the integer registers, which start out undefined. A register
-  the program never writes -- the vararg `a1`-`a7` that the `ee_printf` stub
-  spills, say -- would otherwise put undefined bytes in memory.
-- `.text` ends in a run of NOPs. IF runs ahead of the instruction that redirects
-  it, so the `ret` ending the last function is followed into whatever comes
-  next, and the decoder rejects an opcode it does not name.
-
 
 ## Synthesis
 

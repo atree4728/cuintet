@@ -69,6 +69,7 @@ library
     Cuintet.Debug.Image
     Cuintet.Debug.Konata
     Cuintet.Debug.Show
+    Cuintet.Debug.Sim
     Cuintet.Eei
     Cuintet.Pipeline
     Cuintet.Stage.Decode
@@ -113,12 +114,6 @@ executable konata
     cuintet,
     filepath,
 
-executable coremark
-  import: common-options
-  main-is: bin/Coremark.hs
-  build-depends:
-    cuintet
-
 test-suite doctests
   type: exitcode-stdio-1.0
   default-language: GHC2024
@@ -134,20 +129,30 @@ test-suite doctests
     cuintet,
     doctest-parallel >=0.2 && <0.5,
 
-test-suite unittests
+common programs
   import: common-options
+  hs-source-dirs: tests
+  other-modules: Programs
+  build-depends:
+    bytestring,
+    cuintet,
+    file-embed >=0.0.15 && <0.1,
+    filepath,
+
+test-suite unittests
+  import: programs
   type: exitcode-stdio-1.0
   main-is: unittests.hs
-  hs-source-dirs: tests
   ghc-options: -threaded
   other-modules:
     Tests.Cuintet.Core
     Tests.Cuintet.RiscvTests
 
   build-depends:
-    bytestring,
-    cuintet,
-    file-embed >=0.0.15 && <0.1,
-    filepath,
     tasty >=1.2 && <1.6,
     tasty-hunit,
+
+test-suite bench
+  import: programs
+  type: exitcode-stdio-1.0
+  main-is: bench.hs
