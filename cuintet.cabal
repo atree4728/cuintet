@@ -114,7 +114,9 @@ executable konata
   main-is: bin/Konata.hs
   build-depends:
     cuintet,
+    directory,
     filepath,
+    process,
 
 common plain-options
   default-language: GHC2024

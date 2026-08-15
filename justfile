@@ -9,5 +9,6 @@ mod timing "fpga/timing"
 default:
     @just --list --list-submodules
 
+# Everything under build/ but the konata logs: those are the record of past runs.
 clean:
-    rm -rf build
+    -@find build -mindepth 1 -maxdepth 1 ! -name konata -exec rm -rf {} + 2>/dev/null
