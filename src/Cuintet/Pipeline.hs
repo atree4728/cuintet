@@ -12,6 +12,7 @@ module Cuintet.Pipeline (IfId (..), IdEx (..), ExMa (..), MaWb (..), srcRegs, de
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), isCsrRead)
 import Cuintet.Eei (Addr, Inst, RegAddr, XLen)
+import Cuintet.Unit.Btb (Prediction)
 import Cuintet.Util (orNothing)
 import GHC.Records (HasField)
 
@@ -19,7 +20,7 @@ import GHC.Records (HasField)
 data IfId = IfId
   { pc :: Addr
   , instBits :: Inst
-  , predictedNext :: Addr
+  , prediction :: Maybe Prediction
   }
   deriving (Generic, NFDataX)
 
@@ -27,7 +28,7 @@ data IfId = IfId
 data IdEx = IdEx
   { pc :: Addr
   , instBits :: Inst
-  , predictedNext :: Addr
+  , prediction :: Maybe Prediction
   , ctrl :: InstCtrl
   , imm :: BitVector XLen
   , rs1Addr :: RegAddr
@@ -42,7 +43,7 @@ data IdEx = IdEx
 data ExMa = ExMa
   { pc :: Addr
   , instBits :: Inst
-  , predictedNext :: Addr
+  , prediction :: Maybe Prediction
   , ctrl :: InstCtrl
   , imm :: BitVector XLen
   , rs1Addr :: RegAddr
@@ -65,7 +66,7 @@ data ExMa = ExMa
 data MaWb = MaWb
   { pc :: Addr
   , instBits :: Inst
-  , predictedNext :: Addr
+  , prediction :: Maybe Prediction
   , ctrl :: InstCtrl
   , imm :: BitVector XLen
   , rs1Addr :: RegAddr

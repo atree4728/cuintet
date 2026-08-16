@@ -17,17 +17,25 @@ module Cuintet.Stage.Fetch (FetchState (..), initFetchState, FetchIn (..), Fetch
 import Clash.Prelude
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, instAt)
 import Cuintet.Pipeline (IfId (..))
-import Cuintet.Unit.Btb (BtbResp (..))
+import Cuintet.Unit.Btb (BtbResp (..), Prediction (..), predicted)
 import Cuintet.Unit.Fifo (FifoResp (..))
 import Cuintet.Util (orNothing)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (isJust)
+
+-- | A fetch in flight: the address, and what the BTB said about it at the time.
+data Fetching = Fetching
+  { pc :: Addr
+  , prediction :: Maybe Prediction
+  -- ^ Kept until the instruction arrives, since MA needs it to train the BTB.
+  }
+  deriving (Generic, NFDataX)
 
 -- | The registers IF owns, one per arrow of the fetch path.
 data FetchState = FetchState
   { next :: Addr
-  -- ^ The address to fetch next.
-  , fetching :: Maybe Addr
-  -- ^ The address whose response has not come back yet.
+  -- ^ The address to fetch next; the predicted successor of @fetching@, if any.
+  , fetching :: Maybe Fetching
+  -- ^ The fetch whose response has not come back yet.
   , staged :: Maybe IfId
   -- ^ A fetched instruction waiting for room in the IF-ID FIFO.
   }
@@ -49,7 +57,7 @@ data FetchIn = FetchIn
   -- ^ The IF-ID FIFO, for the room it has.
   , redirect :: Maybe Addr
   -- ^ Where to restart, once MA has resolved control flow.
-  , btb :: BtbResp
+  , btbResp :: BtbResp
   }
 
 data FetchOut = FetchOut
@@ -75,11 +83,14 @@ fetch FetchState {..} FetchIn {..} =
 
     (next', fetching')
       | Just target <- redirect = (target, Nothing)
-      | accepted = (fromMaybe (next + 4) btb.predicted, Just next)
+      | accepted =
+          ( predicted next btbResp.prediction
+          , Just Fetching {pc = next, prediction = btbResp.prediction}
+          )
       | otherwise = (next, fetching)
 
     fetched = mkIfId <$> fetching <*> iResp.rdata
-    mkIfId pc busWord = IfId {pc, instBits = instAt pc busWord, predictedNext = next}
+    mkIfId Fetching {..} busWord = IfId {pc, instBits = instAt pc busWord, prediction}
 
     staged'
       | isJust redirect = Nothing

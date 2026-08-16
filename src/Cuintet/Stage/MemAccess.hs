@@ -15,9 +15,11 @@ both.
 module Cuintet.Stage.MemAccess (initMemAccessState, memAccess, MemAccessIn (..), MemAccessOut (..), MemAccessState (..)) where
 
 import Clash.Prelude
+import Control.Monad (guard)
 import Cuintet.CoreCtrl (InstCtrl (..), isBranchOp)
 import Cuintet.Eei (Addr, MemReq, MemResp, SystemOp (..))
 import Cuintet.Pipeline (ExMa (..), MaWb (..))
+import Cuintet.Unit.Btb (BtbWrite, predicted, train)
 import Cuintet.Unit.Csr (CsrAccess (..), CsrAddr (..), CsrFile, CsrReq (..), CsrResp (..), CsrTrap (..), csrStep, initCsrFile, pattern ENVIRONMENT_CALL)
 import Cuintet.Unit.LoadStore (InstInfo (..), LoadStoreReq (..), LoadStoreResp (..), LoadStoreState (..), loadStoreStep)
 import Cuintet.Util (orNothing)
@@ -56,7 +58,8 @@ data MemAccessOut = MemAccessOut
   -}
   , dReq :: Maybe MemReq
   -- ^ Load\/store request, driven from 'LoadStoreState' and never from @dResp@.
-  , btbWrite :: Maybe (Addr, Maybe Addr)
+  , btbWrite :: Maybe BtbWrite
+  -- ^ What the resolved instruction teaches the BTB, on the clock it commits.
   }
 
 {- | One clock of MA. The instruction may sit here for several of them; it leaves
@@ -113,9 +116,9 @@ memAccess MemAccessState {..} MemAccessIn {..} =
       | isBranchOp ctrl && branchTaken = pc + numConvert imm
       | otherwise = pc + 4
 
-    redirect = orNothing (commit && actualNextPc /= predictedNext) actualNextPc
+    redirect = orNothing (commit && actualNextPc /= predicted pc prediction) actualNextPc
 
-    btbWrite = do
-      target <- redirect
-      pure (pc, orNothing (target /= pc + 4) target)
+    taken = orNothing (actualNextPc /= pc + 4) actualNextPc
+
+    btbWrite = guard commit >> train pc prediction taken
 {-# OPAQUE memAccess #-}
