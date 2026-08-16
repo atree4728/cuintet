@@ -1,7 +1,6 @@
 module Cuintet.Unit.MulDiv.Mul (MulOperands (..), MulState, MulResult (..), mulInit, mulStep, mulResult) where
 
 import Clash.Prelude
-import Clash.Sized.Internal.BitVector (countLeadingZerosBV)
 import Cuintet.Eei (XLen)
 
 data MulOperands = MulOperands {multiplicand, multiplier :: Signed (XLen + 1)}
@@ -26,20 +25,25 @@ mulInit :: MulOperands -> MulState
 mulInit MulOperands {multiplier} =
   Running
     Progress
-      { remaining = maxBound - skipped
-      , mplier = pack (signExtend multiplier :: Signed (XLen + 2)) `shiftL` (2 * numConvert skipped)
+      { remaining = (32 :> 24 :> 16 :> 8 :> Nil) !! skip
+      , mplier = (v :> v `shiftL` 16 :> v `shiftL` 32 :> v `shiftL` 48 :> Nil) !! skip
       , acc = 0
       }
   where
-    skipped = skip $ bitCoerce multiplier
+    v = pack (signExtend multiplier :: Signed (XLen + 2))
 
-    half :: forall n. (KnownNat n) => Index (n * 2) -> Index n
-    half = resize . (`shiftR` 1)
-
-    skip x = half $ countLeadingZerosBV (y `shiftL` 1 .|. 1)
+    skip :: Index 4
+    skip
+      | l0 /= 0 = 0
+      | l1 /= 0 = 1
+      | l2 /= 0 = 2
+      | otherwise = 3
       where
-        m = pack (multiplier `shiftR` natToNum @XLen)
-        y = x `xor` m
+        signs = pack (multiplier `shiftR` natToNum @XLen)
+
+        diffWithSignB :: Vec 4 (BitVector (XLen `Div` 4))
+        diffWithSignB = bitCoerce (truncateB (pack multiplier `xor` signs))
+        l0 :> l1 :> l2 :> _ = diffWithSignB
 
 mulStep :: MulOperands -> MulState -> MulState
 mulStep MulOperands {multiplicand} = \case
