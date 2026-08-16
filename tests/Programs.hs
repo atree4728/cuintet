@@ -5,7 +5,7 @@ Every image reports itself the same way -- leave a result in a register, execute
 were linked for and the register their verdict lives in.  'Cuintet.Debug.Sim'
 handles the rest.
 -}
-module Programs (Suite (..), Outcome (..), failure, riscvTests, benchmarks) where
+module Programs (Suite (..), Outcome (..), Stats (..), ipc, failure, riscvTests, benchmarks) where
 
 import Clash.Prelude
 import Cuintet.Debug.Sim (Run (..), hexProgram, runImage)
@@ -23,12 +23,20 @@ data Suite = Suite
   -- ^ One per image, by base name, in a stable order.
   }
 
+data Stats = Stats
+  { cycles :: Int
+  , retired :: Int
+  }
+
+ipc :: Stats -> Double
+ipc s = fromIntegral s.retired / fromIntegral s.cycles
+
 -- | What running one image came to.
 data Outcome
-  = -- | Reached its @ecall@ and passed, in this many cycles.
-    Ok Int
-  | -- | Reached its @ecall@ in this many cycles, but the verdict rejected it.
-    Failed Int String
+  = -- | Reached its @ecall@ and passed.
+    Ok Stats
+  | -- | Reached its @ecall@, but the verdict rejected it.
+    Failed Stats String
   | -- | Never reached its @ecall@ within the cycle budget.
     Hung String
 
@@ -59,7 +67,9 @@ suite name ramAddrWidth budget verdict images =
   where
     run path bs = case runImage budget (hexProgram ramAddrWidth path (BC.unpack bs)) of
       Left err -> Hung err
-      Right r -> either (Failed r.cycles) (const (Ok r.cycles)) (verdict r.regs)
+      Right r -> either (Failed (stats r)) (const (Ok (stats r))) (verdict r.regs)
+      where
+        stats r = Stats {cycles = r.cycles, retired = r.retired}
 
 riscvTests :: Suite
 riscvTests =

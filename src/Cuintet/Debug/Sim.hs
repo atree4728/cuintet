@@ -27,6 +27,7 @@ type Image ramAddrWidth = Vec (2 ^ ramAddrWidth) (BitVector (MemDataBytes * 8))
 data Run = Run
   { cycles :: Int
   -- ^ Cycles from the end of reset to the @ecall@.
+  , retired :: Int
   , regs :: RegFile
   -- ^ The register file, rebuilt from the write-backs the core logged.
   }
@@ -53,16 +54,16 @@ from 'Cuintet.Core.instLog', which carries every write-back in the clock it
 retires.
 -}
 runImage :: (KnownNat ramAddrWidth) => Int -> Image ramAddrWidth -> Either String Run
-runImage budget img = go 0 (replicate d32 0) instLogs
+runImage budget img = go 0 0 (replicate d32 0) instLogs
   where
     instLogs = sampleWithResetN @System d1 budget $ (.instLog) <$> system (initRamLanes img)
 
-    go :: Int -> RegFile -> [Maybe MaWb] -> Either String Run
-    go _ _ [] = Left (printf "no ecall within %d cycles" budget)
-    go !n regs (entry : rest) = case entry of
-      Just l | isEcall l -> Right Run {cycles = n, regs}
-      Just l -> go (n + 1) (maybe regs (\a -> replace a l.wbData regs) (destReg l)) rest
-      Nothing -> go (n + 1) regs rest
+    go :: Int -> Int -> RegFile -> [Maybe MaWb] -> Either String Run
+    go _ _ _ [] = Left (printf "no ecall within %d cycles" budget)
+    go !n !r regs (entry : rest) = case entry of
+      Just l | isEcall l -> Right Run {cycles = n, retired = r, regs}
+      Just l -> go (n + 1) (r + 1) (maybe regs (\a -> replace a l.wbData regs) (destReg l)) rest
+      Nothing -> go (n + 1) r regs rest
 
 {- | The per-cycle trace up to and including the @ecall@, for
 'Cuintet.Debug.Konata.konataLog'.  Runs to @budget@ cycles if no @ecall@ comes,
