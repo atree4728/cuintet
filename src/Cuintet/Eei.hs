@@ -33,6 +33,8 @@ module Cuintet.Eei (
   instAt,
   RegFile,
   RegAddr,
+  MCause (..),
+  pattern ENVIRONMENT_CALL,
 ) where
 
 import Clash.Annotations.BitRepresentation
@@ -355,3 +357,18 @@ data SystemOp
   | SysMret
   | SysIllegal
   deriving (Generic, NFDataX)
+
+{- | The reason a trap was taken. No exception code in use here goes above 15,
+so the code is kept narrow and widened only where @mcause@ is read.
+-}
+data MCause
+  = MCause
+  { interrupt :: Bool
+  , code :: BitVector 4
+  }
+  deriving (Generic, NFDataX)
+
+deriveAutoReg ''MCause
+
+pattern ENVIRONMENT_CALL :: MCause
+pattern ENVIRONMENT_CALL = MCause False 11

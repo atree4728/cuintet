@@ -1,7 +1,6 @@
 module Cuintet.Unit.Csr (
   CsrAddr (..),
   MCause (..),
-  pattern ENVIRONMENT_CALL,
   CsrReq (..),
   CsrAccess (..),
   CsrTrap (..),
@@ -12,7 +11,7 @@ module Cuintet.Unit.Csr (
 ) where
 
 import Clash.Prelude
-import Cuintet.Eei (Addr, CsrOp (..), CsrType (..), RegAddr, XLen)
+import Cuintet.Eei (Addr, CsrOp (..), CsrType (..), MCause (..), RegAddr, XLen)
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe)
 
@@ -25,21 +24,6 @@ pattern MEPC = CsrAddr 0x341
 pattern MCAUSE = CsrAddr 0x342
 pattern LED = CsrAddr 0x800
 pattern MCYCLE = CsrAddr 0xB00
-
-{- | The reason a trap was taken. No exception code in use here goes above 15,
-so the code is kept narrow and widened only where @mcause@ is read.
--}
-data MCause
-  = MCause
-  { interrupt :: Bool
-  , code :: BitVector 4
-  }
-  deriving (Generic, NFDataX)
-
-deriveAutoReg ''MCause
-
-pattern ENVIRONMENT_CALL :: MCause
-pattern ENVIRONMENT_CALL = MCause False 11
 
 mcauseValue :: MCause -> BitVector XLen
 mcauseValue MCause {interrupt, code} = pack interrupt ++# zeroExtend code

@@ -13,6 +13,7 @@ import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), isCsrRead)
 import Cuintet.Eei (Addr, Inst, RegAddr, XLen)
 import Cuintet.Unit.Btb (Prediction)
+import Cuintet.Unit.Csr (MCause)
 import Cuintet.Util (orNothing)
 import GHC.Records (HasField)
 
@@ -36,6 +37,7 @@ data IdEx = IdEx
   , rdAddr :: RegAddr
   , rs1Data :: BitVector XLen
   , rs2Data :: BitVector XLen
+  , exception :: Maybe MCause
   }
   deriving (Generic, NFDataX)
 
@@ -51,6 +53,7 @@ data ExMa = ExMa
   , rdAddr :: RegAddr
   , rs1Data :: BitVector XLen
   , rs2Data :: BitVector XLen
+  , exception :: Maybe MCause
   , op1 :: BitVector XLen
   , op2 :: BitVector XLen
   , aluResult :: BitVector XLen
@@ -74,6 +77,7 @@ data MaWb = MaWb
   , rdAddr :: RegAddr
   , rs1Data :: BitVector XLen
   , rs2Data :: BitVector XLen
+  , exception :: Maybe MCause
   , op1 :: BitVector XLen
   , op2 :: BitVector XLen
   , aluResult :: BitVector XLen

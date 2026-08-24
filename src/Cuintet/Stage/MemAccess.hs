@@ -20,7 +20,7 @@ import Cuintet.CoreCtrl (InstCtrl (..), isBranchOp)
 import Cuintet.Eei (Addr, MemReq, MemResp, SystemOp (..))
 import Cuintet.Pipeline (ExMa (..), MaWb (..))
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
-import Cuintet.Unit.Csr (CsrAccess (..), CsrAddr (..), CsrFile, CsrReq (..), CsrResp (..), CsrTrap (..), csrStep, initCsrFile, pattern ENVIRONMENT_CALL)
+import Cuintet.Unit.Csr (CsrAccess (..), CsrAddr (..), CsrFile, CsrReq (..), CsrResp (..), CsrTrap (..), csrStep, initCsrFile)
 import Cuintet.Unit.LoadStore (InstInfo (..), LoadStoreReq (..), LoadStoreResp (..), LoadStoreState (..), loadStoreStep)
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust)
@@ -79,7 +79,7 @@ memAccess MemAccessState {..} MemAccessIn {..} =
       | not valid = Nothing
       | Just (SysCsr csrOp) <- ctrl.systemOp =
           Just $ Access CsrAccess {csrAddr = CsrAddr (slice d11 d0 imm), csrOp, rs1Addr, rs1Data}
-      | Just SysEcall <- ctrl.systemOp = Just $ Trap CsrTrap {pc, mcause = ENVIRONMENT_CALL}
+      | Just mcause <- exception = Just $ Trap CsrTrap {..}
       | Just SysMret <- ctrl.systemOp = Just Mret
       | otherwise = Nothing
     csrRdata = case csrResp of Just (Accessed v) -> Just v; _ -> Nothing

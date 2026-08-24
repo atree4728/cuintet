@@ -8,7 +8,7 @@ module Cuintet.Stage.Decode (decode, DecodeIn (..), DecodeOut (..), immB, immJ) 
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..), usesRs1, usesRs2)
-import Cuintet.Eei (Inst, MulDivType, Opcode (..), RegAddr, System12 (..), SystemOp (..), XLen)
+import Cuintet.Eei (Inst, MulDivType, Opcode (..), RegAddr, System12 (..), SystemOp (..), XLen, pattern ENVIRONMENT_CALL)
 import Cuintet.Pipeline (IdEx (..), IfId (..), srcRegs)
 import Cuintet.Unit.RegFile (RegResp (..))
 import Cuintet.Util (orNothing)
@@ -48,6 +48,10 @@ decode DecodeIn {..} = DecodeOut {issue = orNothing issued idEx}
       | otherwise = fromMaybe old $ foldr ((<|>) . (>>= match)) Nothing forwards
       where
         match (rd, d) = orNothing (rd == rs) d
+
+    exception
+      | Just SysEcall <- ctrl.systemOp = Just ENVIRONMENT_CALL
+      | otherwise = Nothing
 
     idEx = IdEx {..}
     issued = isJust entry && not (any (hazard idEx) pending) && wready && not flush
@@ -135,5 +139,5 @@ instDecode instBits = (ctrl op, imm op)
 instruction downstream, given as 'Cuintet.Pipeline.unresolved' of that stage.
 -}
 hazard :: IdEx -> Maybe RegAddr -> Bool
-hazard IdEx {ctrl, rs1Addr, rs2Addr} = maybe False $
-  \rd -> usesRs1 ctrl && rd == rs1Addr || usesRs2 ctrl && rd == rs2Addr
+hazard IdEx {ctrl, rs1Addr, rs2Addr} = maybe False
+  $ \rd -> usesRs1 ctrl && rd == rs1Addr || usesRs2 ctrl && rd == rs2Addr
