@@ -8,7 +8,7 @@ module Cuintet.Stage.Decode (decode, DecodeIn (..), DecodeOut (..), immB, immJ) 
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..), usesRs1, usesRs2)
-import Cuintet.Eei (Inst, MulDivType, Opcode (..), RegAddr, System12 (..), SystemOp (..), XLen, pattern ENVIRONMENT_CALL)
+import Cuintet.Eei (Inst, MulDivType, Opcode (..), RegAddr, System12 (..), SystemOp (..), XLen, pattern ENVIRONMENT_CALL_FROM_M_MODE)
 import Cuintet.Pipeline (IdEx (..), IfId (..), srcRegs)
 import Cuintet.Unit.RegFile (RegResp (..))
 import Cuintet.Util (orNothing)
@@ -50,7 +50,7 @@ decode DecodeIn {..} = DecodeOut {issue = orNothing issued idEx}
         match (rd, d) = orNothing (rd == rs) d
 
     exception
-      | Just SysEcall <- ctrl.systemOp = Just ENVIRONMENT_CALL
+      | Just SysEcall <- ctrl.systemOp = Just (ENVIRONMENT_CALL_FROM_M_MODE, 0)
       | otherwise = Nothing
 
     idEx = IdEx {..}

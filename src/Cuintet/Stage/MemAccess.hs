@@ -77,9 +77,9 @@ memAccess MemAccessState {..} MemAccessIn {..} =
     (csrFile', csrResp) = csrStep csrFile csrReq
     csrReq
       | not valid = Nothing
-      | Just (SysCsr csrOp) <- ctrl.systemOp =
-          Just $ Access CsrAccess {csrAddr = CsrAddr (slice d11 d0 imm), csrOp, rs1Addr, rs1Data}
-      | Just mcause <- exception = Just $ Trap CsrTrap {..}
+      | Just (SysCsr (src, op)) <- ctrl.systemOp =
+          Just $ Access CsrAccess {csrAddr = CsrAddr (slice d11 d0 imm), op, src, rs1Addr, rs1Data}
+      | Just (cause, value) <- exception = Just $ Trap CsrTrap {epc = pc, ..}
       | Just SysMret <- ctrl.systemOp = Just Mret
       | otherwise = Nothing
     csrRdata = case csrResp of Just (Accessed v) -> Just v; _ -> Nothing

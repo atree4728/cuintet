@@ -26,15 +26,15 @@ module Cuintet.Eei (
   MulOp (..),
   DivOp (..),
   MulDivType (..),
-  CsrType (..),
   CsrOp (..),
+  CsrSrc (..),
   System12 (System12, ECALL, MRET),
   SystemOp (..),
   instAt,
   RegFile,
   RegAddr,
-  MCause (..),
-  pattern ENVIRONMENT_CALL,
+  TrapCause (..),
+  pattern ENVIRONMENT_CALL_FROM_M_MODE,
 ) where
 
 import Clash.Annotations.BitRepresentation
@@ -294,49 +294,46 @@ deriveBitPack [t|MulDivType|]
 {- | What a CSR access does to the register, laid out as @funct3@ bits 1-0. The
 fourth pattern is the @funct3@ that names no CSR instruction.
 -}
-data CsrType
+data CsrOp
   = ReadWrite
   | ReadSet
   | ReadClear
-  | CSRIllegal
-  deriving (Generic, NFDataX)
-
-{-# ANN
-  module
-  ( DataReprAnn
-      $(liftQ [t|CsrType|])
-      2
-      [ ConstrRepr 'ReadWrite (1 `downto` 0) 0b01 []
-      , ConstrRepr 'ReadSet (1 `downto` 0) 0b10 []
-      , ConstrRepr 'ReadClear (1 `downto` 0) 0b11 []
-      , ConstrRepr 'CSRIllegal (1 `downto` 0) 0b00 []
-      ]
-  )
-  #-}
-
-deriveBitPack [t|CsrType|]
-
-{- | A CSR access: what it does, and where its operand comes from. Laid out so
-that it /is/ the @funct3@ field, bit 2 choosing between @rs1@ and the 5-bit
-immediate that takes its place.
--}
-data CsrOp
-  = CsrReg CsrType
-  | CsrImm CsrType
+  | CsrIllegal
   deriving (Generic, NFDataX)
 
 {-# ANN
   module
   ( DataReprAnn
       $(liftQ [t|CsrOp|])
-      3
-      [ ConstrRepr 'CsrReg (2 `downto` 2) 0b0 [0b011]
-      , ConstrRepr 'CsrImm (2 `downto` 2) 0b1 [0b011]
+      2
+      [ ConstrRepr 'ReadWrite (1 `downto` 0) 0b01 []
+      , ConstrRepr 'ReadSet (1 `downto` 0) 0b10 []
+      , ConstrRepr 'ReadClear (1 `downto` 0) 0b11 []
+      , ConstrRepr 'CsrIllegal (1 `downto` 0) 0b00 []
       ]
   )
   #-}
 
 deriveBitPack [t|CsrOp|]
+
+{- | Where the operand of a CSR access comes from, laid out as @funct3@ bit 2:
+either @rs1@ or the 5-bit immediate that takes its place.
+-}
+data CsrSrc = FromRs1 | FromUimm
+  deriving (Generic, NFDataX)
+
+{-# ANN
+  module
+  ( DataReprAnn
+      $(liftQ [t|CsrSrc|])
+      1
+      [ ConstrRepr 'FromRs1 0b1 0b0 []
+      , ConstrRepr 'FromUimm 0b1 0b1 []
+      ]
+  )
+  #-}
+
+deriveBitPack [t|CsrSrc|]
 
 {- | The @funct12@ field of a @SYSTEM@ instruction whose @funct3@ is zero, where
 it names the operation rather than a CSR.
@@ -349,10 +346,11 @@ pattern ECALL = System12 0
 pattern MRET = System12 0b001100000010
 
 {- | What a @SYSTEM@ instruction asks for. @funct3@ tells a CSR access from the
-rest; among the rest, only @ECALL@ is implemented.
+rest; among the rest, @ECALL@ and @MRET@ are implemented. The pair /is/ the
+@funct3@ field, so @unpack funct3@ is pure wiring.
 -}
 data SystemOp
-  = SysCsr CsrOp
+  = SysCsr (CsrSrc, CsrOp)
   | SysEcall
   | SysMret
   | SysIllegal
@@ -361,14 +359,14 @@ data SystemOp
 {- | The reason a trap was taken. No exception code in use here goes above 15,
 so the code is kept narrow and widened only where @mcause@ is read.
 -}
-data MCause
-  = MCause
+data TrapCause
+  = TrapCause
   { interrupt :: Bool
   , code :: BitVector 4
   }
   deriving (Generic, NFDataX)
 
-deriveAutoReg ''MCause
+deriveAutoReg ''TrapCause
 
-pattern ENVIRONMENT_CALL :: MCause
-pattern ENVIRONMENT_CALL = MCause False 11
+pattern ENVIRONMENT_CALL_FROM_M_MODE :: TrapCause
+pattern ENVIRONMENT_CALL_FROM_M_MODE = TrapCause False 11

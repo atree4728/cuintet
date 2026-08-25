@@ -1,6 +1,5 @@
 module Cuintet.Unit.Csr (
   CsrAddr (..),
-  MCause (..),
   CsrReq (..),
   CsrAccess (..),
   CsrTrap (..),
@@ -11,30 +10,34 @@ module Cuintet.Unit.Csr (
 ) where
 
 import Clash.Prelude
-import Cuintet.Eei (Addr, CsrOp (..), CsrType (..), MCause (..), RegAddr, XLen)
+import Cuintet.Eei (Addr, CsrOp (..), CsrSrc (..), TrapCause (..), XLen)
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe)
 
 newtype CsrAddr = CsrAddr (BitVector 12)
   deriving newtype (BitPack, Generic, NFDataX)
 
-pattern MTVEC, MEPC, MCAUSE, LED, MCYCLE :: CsrAddr
+pattern MTVEC, MEPC, MCAUSE, MTVAL, LED, MCYCLE :: CsrAddr
 pattern MTVEC = CsrAddr 0x305
 pattern MEPC = CsrAddr 0x341
 pattern MCAUSE = CsrAddr 0x342
+pattern MTVAL = CsrAddr 0x343
 pattern LED = CsrAddr 0x800
 pattern MCYCLE = CsrAddr 0xB00
 
-mcauseValue :: MCause -> BitVector XLen
-mcauseValue MCause {interrupt, code} = pack interrupt ++# zeroExtend code
+-- | @mcause@ as it reads: the interrupt flag in the top bit, the code in the bottom.
+mcauseValue :: TrapCause -> BitVector XLen
+mcauseValue TrapCause {interrupt, code} = pack interrupt ++# zeroExtend code
 
-{- | Addresses are held without the bits that are always zero: @mtvec@ in Direct
-mode and @mepc@ both have a four-byte aligned base.
--}
+-- | The inverse. The bits between the flag and the code name no cause, and are dropped.
+mcauseCause :: BitVector XLen -> TrapCause
+mcauseCause value = TrapCause {interrupt = bitToBool (msb value), code = truncateB value}
+
 data CsrFile = CsrFile
-  { mtvecBase :: BitVector 62 -- (XLen - 2); see https://github.com/clash-lang/clash-compiler/issues/3100
-  , mepcAligned :: BitVector 62 -- (XLen - 2)
-  , mcause :: MCause
+  { mtvec :: BitVector XLen
+  , mepc :: BitVector XLen
+  , mcause :: TrapCause
+  , mtval :: BitVector XLen
   , led :: BitVector XLen
   , mcycle :: BitVector XLen
   }
@@ -44,16 +47,18 @@ deriveAutoReg ''CsrFile
 
 data CsrAccess = CsrAccess
   { csrAddr :: CsrAddr
-  , csrOp :: CsrOp
-  , rs1Addr :: RegAddr -- uimm in the @CsrImm@ case
+  , op :: CsrOp
+  , src :: CsrSrc
+  , rs1Addr :: BitVector 5
   , rs1Data :: BitVector XLen
   }
   deriving (Generic, NFDataX)
 
--- | Enter a trap taken at @pc@. What raised it is the caller's business.
+-- | Enter a trap taken at @epc@. What raised it is the caller's business.
 data CsrTrap = CsrTrap
-  { pc :: Addr
-  , mcause :: MCause
+  { epc :: Addr
+  , value :: BitVector XLen
+  , cause :: TrapCause
   }
   deriving (Generic, NFDataX)
 
@@ -65,52 +70,59 @@ data CsrReq
   deriving (Generic, NFDataX)
 
 data CsrResp
-  = -- | for CsrAccess
-    Accessed (BitVector XLen)
-  | -- | for trap or mret
-    Redirect Addr
+  = Accessed (BitVector XLen)
+  | Redirect Addr
   deriving (Generic, NFDataX)
 
-csrWrite :: CsrType -> BitVector XLen -> Maybe (BitVector XLen) -> BitVector XLen
+csrWrite :: CsrOp -> BitVector XLen -> Maybe (BitVector XLen) -> BitVector XLen
 csrWrite ReadWrite oldValue newValueM = fromMaybe oldValue newValueM
 csrWrite ReadSet oldValue newValueM = maybe oldValue (oldValue .|.) newValueM
 csrWrite ReadClear oldValue newValueM = maybe oldValue ((oldValue .&.) . complement) newValueM
-csrWrite CSRIllegal _ _ = deepErrorX "csrWrite: illegal System instruction"
+csrWrite CsrIllegal _ _ = deepErrorX "csrWrite: illegal System instruction"
 
--- | One clock of the CSR file.
+{- | One clock of the CSR file. @mcycle@ counts every clock, so a write to it on
+the same clock lands on the already incremented value and wins.
+-}
 csrStep :: CsrFile -> Maybe CsrReq -> (CsrFile, Maybe CsrResp)
 csrStep file = maybe (ticked, Nothing) (fmap Just . serve ticked)
   where
     ticked = file {mcycle = file.mcycle + 1}
 
+aligned :: BitVector XLen -> BitVector XLen
+aligned bits = slice d63 d2 bits ++# zeroBits
+
 serve :: CsrFile -> CsrReq -> (CsrFile, CsrResp)
 serve file (Trap CsrTrap {..}) =
-  ( file {mepcAligned = slice d63 d2 (pack pc), mcause}
-  , Redirect $ bitCoerce $ file.mtvecBase ++# (0 :: BitVector 2)
+  ( file {mepc = aligned (pack epc), mcause = cause, mtval = value}
+  , Redirect $ unpack file.mtvec
   )
-serve file Mret = (file, Redirect $ bitCoerce $ file.mepcAligned ++# (0 :: BitVector 2))
+serve file Mret = (file, Redirect $ unpack file.mepc)
 serve file (Access CsrAccess {..})
-  | CSRIllegal <- csrType = deepErrorX "csrStep: illegal System instruction"
+  | CsrIllegal <- op = deepErrorX "csrStep: illegal System instruction"
   | MTVEC <- csrAddr =
-      let old = file.mtvecBase ++# (0 :: BitVector 2)
-       in (file {mtvecBase = slice d63 d2 (csrWrite csrType old wdata)}, Accessed old)
+      let old = unpack file.mtvec
+       in (file {mtvec = aligned (written old)}, Accessed old)
   | MEPC <- csrAddr =
-      let old = file.mepcAligned ++# (0 :: BitVector 2)
-       in (file {mepcAligned = slice d63 d2 (csrWrite csrType old wdata)}, Accessed old)
-  | MCAUSE <- csrAddr = (file, Accessed (mcauseValue file.mcause))
-  | LED <- csrAddr =
-      let old = file.led
-       in (file {led = csrWrite csrType old wdata}, Accessed old)
-  | MCYCLE <- csrAddr = (file, Accessed file.mcycle)
+      let old = unpack file.mepc
+       in (file {mepc = aligned (written old)}, Accessed old)
+  | MCAUSE <- csrAddr =
+      let old = mcauseValue file.mcause
+       in (file {mcause = mcauseCause (written old)}, Accessed old)
+  | MTVAL <- csrAddr =
+      let old = unpack file.mtval
+       in (file {mtval = written old}, Accessed old)
+  | LED <- csrAddr = (file {led = written file.led}, Accessed file.led)
+  | MCYCLE <- csrAddr = (file {mcycle = written file.mcycle}, Accessed file.mcycle)
   | otherwise = deepErrorX "csrStep: unimplemented CSR instruction"
   where
-    (wvalue, csrType) = case csrOp of
-      CsrReg t -> (rs1Data, t)
-      CsrImm t -> (zeroExtend rs1Addr, t)
-    wdata = case csrType of
+    written old = csrWrite op old wdata
+    wvalue = case src of
+      FromRs1 -> rs1Data
+      FromUimm -> zeroExtend rs1Addr
+    wdata = case op of
       ReadWrite -> Just wvalue
       -- For both CSRRS and CSRRC, if rs1=x0, then the instruction will not write to the CSR at all
       _ -> orNothing (rs1Addr /= 0) wvalue
 
 initCsrFile :: CsrFile
-initCsrFile = CsrFile {mtvecBase = 0, mepcAligned = 0, mcause = MCause False 0, led = 0, mcycle = 0}
+initCsrFile = CsrFile {mtvec = 0, mepc = 0, mcause = TrapCause False 0, mtval = 0, led = 0, mcycle = 0}
