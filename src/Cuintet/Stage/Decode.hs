@@ -8,7 +8,7 @@ module Cuintet.Stage.Decode (decode, DecodeIn (..), DecodeOut (..), immB, immJ) 
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..), usesRs1, usesRs2)
-import Cuintet.Eei (Inst, MulDivType, Opcode (..), RegAddr, System12 (..), SystemOp (..), XLen, pattern ENVIRONMENT_CALL_FROM_M_MODE)
+import Cuintet.Eei (Inst, MulDivType, Opcode (..), RegAddr, System12 (..), SystemOp (..), XLen, pattern BREAKPOINT, pattern ENVIRONMENT_CALL_FROM_M_MODE)
 import Cuintet.Pipeline (IdEx (..), IfId (..), srcRegs)
 import Cuintet.Unit.RegFile (RegResp (..))
 import Cuintet.Util (orNothing)
@@ -51,6 +51,7 @@ decode DecodeIn {..} = DecodeOut {issue = orNothing issued idEx}
 
     exception
       | Just SysEcall <- ctrl.systemOp = Just (ENVIRONMENT_CALL_FROM_M_MODE, 0)
+      | Just SysEbreak <- ctrl.systemOp = Just (BREAKPOINT, pack pc)
       | otherwise = Nothing
 
     idEx = IdEx {..}
@@ -103,6 +104,7 @@ instDecode instBits = (ctrl op, imm op)
       SYSTEM
         | funct3 /= 0 -> Just $ SysCsr (unpack funct3)
         | ECALL <- System12 immIG -> Just SysEcall
+        | EBREAK <- System12 immIG -> Just SysEbreak
         | MRET <- System12 immIG -> Just SysMret
         | otherwise -> Just SysIllegal
       _ -> Nothing

@@ -28,12 +28,13 @@ module Cuintet.Eei (
   MulDivType (..),
   CsrOp (..),
   CsrSrc (..),
-  System12 (System12, ECALL, MRET),
+  System12 (System12, ECALL, EBREAK, MRET),
   SystemOp (..),
   instAt,
   RegFile,
   RegAddr,
   TrapCause (..),
+  pattern BREAKPOINT,
   pattern ENVIRONMENT_CALL_FROM_M_MODE,
 ) where
 
@@ -341,17 +342,21 @@ it names the operation rather than a CSR.
 newtype System12 = System12 (BitVector 12)
   deriving newtype (Eq)
 
-pattern ECALL, MRET :: System12
-pattern ECALL = System12 0
-pattern MRET = System12 0b001100000010
+pattern ECALL, EBREAK, MRET :: System12
+{- FOURMOLU_DISABLE -}
+pattern ECALL  = System12 0b000000000000
+pattern EBREAK = System12 0b000000000001
+pattern MRET   = System12 0b001100000010
+{- FOURMOLU_ENABLE -}
 
 {- | What a @SYSTEM@ instruction asks for. @funct3@ tells a CSR access from the
-rest; among the rest, @ECALL@ and @MRET@ are implemented. The pair /is/ the
+rest; among the rest, @ECALL@, @EBREAK@ and @MRET@ are implemented. The pair /is/ the
 @funct3@ field, so @unpack funct3@ is pure wiring.
 -}
 data SystemOp
   = SysCsr (CsrSrc, CsrOp)
   | SysEcall
+  | SysEbreak
   | SysMret
   | SysIllegal
   deriving (Generic, NFDataX)
@@ -368,5 +373,6 @@ data TrapCause
 
 deriveAutoReg ''TrapCause
 
-pattern ENVIRONMENT_CALL_FROM_M_MODE :: TrapCause
+pattern BREAKPOINT, ENVIRONMENT_CALL_FROM_M_MODE :: TrapCause
+pattern BREAKPOINT = TrapCause False 3
 pattern ENVIRONMENT_CALL_FROM_M_MODE = TrapCause False 11
