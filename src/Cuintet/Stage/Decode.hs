@@ -8,7 +8,7 @@ module Cuintet.Stage.Decode (decode, DecodeIn (..), DecodeOut (..), immB, immJ) 
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..), usesRs1, usesRs2)
-import Cuintet.Eei (Inst, MulDivType, Opcode (..), RegAddr, System12 (..), SystemOp (..), XLen, pattern BREAKPOINT, pattern ENVIRONMENT_CALL_FROM_M_MODE)
+import Cuintet.Eei (Inst, MulDivType, Opcode (..), RegAddr, System12 (..), SystemOp (..), XLen, pattern BREAKPOINT, pattern ENVIRONMENT_CALL_FROM_M_MODE, pattern ILLEGAL_INSTRUCTION)
 import Cuintet.Pipeline (IdEx (..), IfId (..), srcRegs)
 import Cuintet.Unit.RegFile (RegResp (..))
 import Cuintet.Util (orNothing)
@@ -36,7 +36,7 @@ decode :: DecodeIn -> DecodeOut
 decode DecodeIn {..} = DecodeOut {issue = orNothing issued idEx}
   where
     IfId {..} = fromMaybe (deepErrorX "decode: IF-ID FIFO is empty") entry
-    (ctrl, imm) = instDecode instBits
+    (ctrl, imm, legal) = instDecode instBits
     (rs1Addr, rs2Addr) = srcRegs instBits
     rdAddr = slice d11 d7 instBits
     RegResp {rs1Data = rs1Read, rs2Data = rs2Read} = regResp
@@ -50,6 +50,7 @@ decode DecodeIn {..} = DecodeOut {issue = orNothing issued idEx}
         match (rd, d) = orNothing (rd == rs) d
 
     exception
+      | not legal = Just (ILLEGAL_INSTRUCTION, zeroExtend instBits)
       | Just SysEcall <- ctrl.systemOp = Just (ENVIRONMENT_CALL_FROM_M_MODE, 0)
       | Just SysEbreak <- ctrl.systemOp = Just (BREAKPOINT, pack pc)
       | otherwise = Nothing
@@ -69,8 +70,8 @@ immJ instBits = signExtend (immJG ++# (0 :: BitVector 1))
     immJG = slice d31 d31 instBits ++# slice d19 d12 instBits ++# slice d20 d20 instBits ++# slice d30 d21 instBits
 
 -- | The control flags and the immediate, both a function of the opcode alone.
-instDecode :: Inst -> (InstCtrl, BitVector XLen)
-instDecode instBits = (ctrl op, imm op)
+instDecode :: Inst -> (InstCtrl, BitVector XLen, Bool)
+instDecode instBits = (ctrl op, imm op, False)
   where
     op = unpack $ slice d6 d0 instBits
 

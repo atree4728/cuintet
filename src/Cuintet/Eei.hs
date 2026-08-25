@@ -35,6 +35,7 @@ module Cuintet.Eei (
   RegFile,
   RegAddr,
   TrapCause (..),
+  pattern ILLEGAL_INSTRUCTION,
   pattern BREAKPOINT,
   pattern ENVIRONMENT_CALL_FROM_M_MODE,
 ) where
@@ -402,6 +403,7 @@ data TrapCause
 
 deriveAutoReg ''TrapCause
 
-pattern BREAKPOINT, ENVIRONMENT_CALL_FROM_M_MODE :: TrapCause
+pattern ILLEGAL_INSTRUCTION, BREAKPOINT, ENVIRONMENT_CALL_FROM_M_MODE :: TrapCause
+pattern ILLEGAL_INSTRUCTION = TrapCause False 2
 pattern BREAKPOINT = TrapCause False 3
 pattern ENVIRONMENT_CALL_FROM_M_MODE = TrapCause False 11
