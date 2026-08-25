@@ -18,7 +18,7 @@ module Cuintet.Stage.Execute (execute, ExecuteIn (..), ExecuteOut (..)) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
-import Cuintet.Eei (Addr, IOp (..), ShiftRight (..), XLen)
+import Cuintet.Eei (Addr, BranchCond (..), IOp (..), ShiftRight (..), XLen)
 import Cuintet.Pipeline (ExMa (..), IdEx (..))
 import Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState, mkMulDivInst, mulDivStep)
 import Cuintet.Util (orNothing)
@@ -59,7 +59,7 @@ mkExMa mulDivResult IdEx {..} = ExMa {op1, op2, aluResult, branchTaken, ..}
     (op1, op2) = operands ctrl imm rs1Data rs2Data pc
     aluResult = alu ctrl op1 op2
 
-    branchTaken = branchUnit ctrl.funct3 op1 op2
+    branchTaken = branchUnit (unpack ctrl.funct3) op1 op2
 
     wbData
       | isJust ctrl.mulDiv = fromMaybe (deepErrorX "execute: muldiv committed without a result") mulDivResult
@@ -112,15 +112,15 @@ alu InstCtrl {itype, isAluOp, isOp32, funct3, funct7} op1 op2
         signed x = bitCoerce x :: Signed n
 
 -- | The branch condition, selected by @funct3@. Meaningful only for a B-type instruction; the caller decides whether to look at it.
-branchUnit :: BitVector 3 -> BitVector XLen -> BitVector XLen -> Bool
-branchUnit funct3 op1 op2 = case funct3 of
-  0b000 -> beq
-  0b001 -> not beq
-  0b100 -> blt
-  0b101 -> not blt
-  0b110 -> bltu
-  0b111 -> not bltu
-  _ -> False
+branchUnit :: BranchCond -> BitVector XLen -> BitVector XLen -> Bool
+branchUnit cond op1 op2 = case cond of
+  BEQ -> beq
+  BNE -> not beq
+  BLT -> blt
+  BGE -> not blt
+  BLTU -> bltu
+  BGEU -> not bltu
+  BranchIllegal -> False
   where
     beq = op1 == op2
     blt = (bitCoerce op1 :: Signed XLen) < (bitCoerce op2 :: Signed XLen)

@@ -23,6 +23,7 @@ module Cuintet.Eei (
   Opcode (LUI, AUIPC, JAL, JALR, BRANCH, LOAD, STORE, OP_IMM, OP_REG, OP_IMM_32, OP_REG_32, MISC_MEM, SYSTEM),
   IOp (..),
   ShiftRight (..),
+  BranchCond (..),
   MulOp (..),
   DivOp (..),
   MulDivType (..),
@@ -242,6 +243,34 @@ data ShiftRight = Logical | Arithmetic
 
 deriveDefaultAnnotation [t|ShiftRight|]
 deriveBitPack [t|ShiftRight|]
+
+data BranchCond
+  = BEQ
+  | BNE
+  | BranchIllegal
+  | BLT
+  | BGE
+  | BLTU
+  | BGEU
+  deriving (Generic, NFDataX, Show)
+
+{-# ANN
+  module
+  ( DataReprAnn
+      $(liftQ [t|BranchCond|])
+      3
+      [ ConstrRepr 'BEQ (2 `downto` 0) 0b000 []
+      , ConstrRepr 'BNE (2 `downto` 0) 0b001 []
+      , ConstrRepr 'BranchIllegal (2 `downto` 1) 0b010 []
+      , ConstrRepr 'BLT (2 `downto` 0) 0b100 []
+      , ConstrRepr 'BGE (2 `downto` 0) 0b101 []
+      , ConstrRepr 'BLTU (2 `downto` 0) 0b110 []
+      , ConstrRepr 'BGEU (2 `downto` 0) 0b111 []
+      ]
+  )
+  #-}
+
+deriveBitPack [t|BranchCond|]
 
 data MulOp = MulLow | MulHighHom Sign | MulHighHetero
   deriving (Eq, Generic, NFDataX)
