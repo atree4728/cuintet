@@ -1,66 +1,4 @@
-{- |
-The core in terms of the classical IF, ID, EX, MA and WB stages, each in its own
-@Cuintet.Stage.*@ module. This module is the wiring: it holds the registers,
-calls the five stages, and drives the four FIFOs between them.
-
-In the diagram below, @[x]@ is a register, i.e. a clock boundary, and @(x)@ is
-combinational logic.
-
-@
-    IF    [next] --> iReq --> memory --> iResp --> [staged]
-      ^                                              |
-      |                                        [IF-ID FIFO]
-      |                                              |
-    ID|   (decode), regFile read, (interlock) <------+
-      |     |
-      |   [ID-EX FIFO]
-      |     |
-    EX|   (operands), (alu), (branchUnit)
-      |     |
-      |   [EX-MA FIFO]
-      |     |
-    MA|   (csrStep) --> [csrFile]
-      |   (loadStoreStep) --> [loadStoreState] --> dReq
-      +-- (redirect), which also flushes the IF-ID and ID-EX FIFOs
-            |
-          [MA-WB FIFO]
-            |
-    WB    regFile write --> instLog
-@
-
-Every stage consumes its input exactly on the clock it produces an output, so a
-FIFO's @rready@ is the @isJust@ of the next stage's @issue@ and no stage needs to
-be told about a stall further down. Only the IF-ID and ID-EX FIFOs are flushed on
-a redirect: the EX-MA and MA-WB FIFOs hold instructions at least as old as the
-one that redirected, including that instruction itself, and all of them must
-still retire.
-
-Neither @iReq@ nor @dReq@ may depend combinationally on @iResp@ or @dResp@, or a
-combinational loop closes through 'Cuintet.BusArbiter.busArbiter'. Both are
-driven out of registers, @iReq@ from IF's and @dReq@ from MA's.
-
-[IF]: 'Cuintet.Stage.Fetch.fetch'. Runs ahead on its own; the IF-ID FIFO absorbs
-  the difference between its rate and the rate ID drains it at.
-
-[ID]: 'Cuintet.Stage.Decode.decode'. Holds no state. It stalls itself by not
-  issuing when the instruction reads a register that an instruction already
-  downstream will write, so a flush needs no rollback.
-
-[EX]: 'Cuintet.Stage.Execute.execute'. A pure function.
-
-[MA]: 'Cuintet.Stage.MemAccess.memAccess'. The one stage that can take more than
-  a clock. It owns @csrFile@ and the load\/store unit's state, and it is where
-  control flow is resolved.
-
-[WB]: 'Cuintet.Stage.Writeback.writeback'. Never stalls, which is what lets MA
-  start an access without checking the MA-WB FIFO for room.
-
-[regFile]: 'Cuintet.RegFile.regFile'. The one piece of state that is not in
-  'CoreState', because it is a RAM rather than a register. It is read
-  asynchronously, addressed straight off the IF-ID FIFO head so the read
-  overlaps decoding, and WB's write takes effect at the next clock edge. The
-  interlock in ID is what keeps a reader from getting ahead of that write.
--}
+-- | The core in terms of the classical IF, ID, EX, MA and WB stages, each in its own @Cuintet.Stage.*@ module.
 module Cuintet.Core (CoreIn (..), CoreOut (..), CoreTrace (..), core) where
 
 import Clash.Prelude
@@ -96,7 +34,7 @@ data CoreOut = CoreOut
   , trace :: CoreTrace
   }
 
--- | The core's registers, one per stage that has any. The register file is not here; see 'Cuintet.RegFile.regFile'.
+-- | The core's state.
 data CoreState = CoreState
   { fetchState :: FetchState
   , mulDivState :: MulDivState
@@ -119,7 +57,7 @@ data CoreTrace = CoreTrace
   }
   deriving (Generic, NFDataX)
 
--- | Closes 'coreT' around the register file and the four stage FIFOs. IF-ID is the deep one, since it is what lets IF run ahead; the rest only need to hold a single instruction.
+-- | Closes 'coreT' around the register file and the four stage FIFOs.
 core ::
   (HiddenClockResetEnable dom) =>
   Signal dom CoreIn ->
@@ -153,11 +91,9 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, ifIdResp, idExResp, exMaRe
     flush = isJust maOut.redirect
     forwards = (forwardable =<< exOut.issue) :> (forwardable =<< exMaResp.rdata) :> Nil
 
-    -- read for whatever ID is about to decode, write for whatever WB has just retired
     regReq = mkRegReq ifIdResp.rdata wbOut.write
     btbReq = BtbReq {lookupAddr = ifOut.btbLookup, prefetchAddr = ifOut.btbPrefetch, write = maOut.btbWrite}
 
-    -- a stage consumes its input exactly on the clock it produces an output
     ifIdReq = FifoReq {wdata = ifOut.issue, rready = isJust idOut.issue, flush}
     idExReq = FifoReq {wdata = idOut.issue, rready = isJust exOut.issue, flush}
     exMaReq = FifoReq {wdata = exOut.issue, rready = isJust maOut.issue, flush = False}

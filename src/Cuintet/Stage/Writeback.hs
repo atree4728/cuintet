@@ -1,14 +1,4 @@
-{- | WB: turns an instruction that has committed into a register write, and hands the entry out as the core's execution log.
-
-Whether and where to write is decided here, from @rwbEn@ and the @x0@ rule;
-@wbData@ is what MA chose to write. 'Cuintet.Pipeline.destReg' is the single
-definition of "the register this instruction writes", shared with the interlock
-in ID. The write itself lands in 'Cuintet.RegFile.regFile' at the next clock
-edge.
-
-WB never stalls. That is what lets MA start a memory access without first
-checking the MA-WB FIFO for room.
--}
+-- | WB: turns an instruction that has committed into a register write, and hands the entry out as the core's execution log.
 module Cuintet.Stage.Writeback (WritebackIn (..), WritebackOut (..), writeback) where
 
 import Clash.Prelude

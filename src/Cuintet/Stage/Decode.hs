@@ -1,9 +1,4 @@
-{- | ID: decodes the instruction, takes in the registers it reads, and decides whether to issue it.
-
-The stage holds no state. An instruction it does not issue is simply left at the
-head of the IF-ID FIFO and decoded again next clock, so neither a stall nor a
-flush needs anything rolled back.
--}
+-- | ID: decodes the instruction, takes in the registers it reads, and decides whether to issue it.
 module Cuintet.Stage.Decode (decode, DecodeIn (..), DecodeOut (..), immI, immS, immB, immU, immJ) where
 
 import Clash.Prelude
@@ -67,12 +62,7 @@ immB instBits = signExtend $ slice d31 d31 instBits ++# slice d7 d7 instBits ++#
 immU instBits = signExtend $ slice d31 d12 instBits ++# (0 :: BitVector 12)
 immJ instBits = signExtend $ slice d31 d31 instBits ++# slice d19 d12 instBits ++# slice d20 d20 instBits ++# slice d30 d21 instBits ++# (0 :: BitVector 1)
 
-{- | The control flags and the immediate. 'Nothing' when the bits name no
-instruction the implementation has; that is what raises @ILLEGAL_INSTRUCTION@.
-
-Every field an opcode does not use keeps the value 'blank' gave it, so an arm
-states only what its instruction actually does.
--}
+-- | The control flags and the immediate. 'Nothing' when the bits name no instruction the implementation has; that is what raises @ILLEGAL_INSTRUCTION@.
 instDecode :: Inst -> Maybe (InstCtrl, BitVector XLen)
 instDecode instBits = case opcode instBits of
   LUI -> Just (uType {rwbEn = True, isLui = True}, immU instBits)
@@ -124,24 +114,8 @@ instDecode instBits = case opcode instBits of
 
 -- | An 'InstCtrl' of the given form that does nothing at all; what every arm of 'instDecode' starts from.
 blank :: InstType -> InstCtrl
-blank itype =
-  InstCtrl
-    { itype
-    , rwbEn = False
-    , isLui = False
-    , aluOp = Nothing
-    , isOp32 = False
-    , isJump = False
-    , access = Nothing
-    , branch = Nothing
-    , mulDiv = Nothing
-    , systemOp = Nothing
-    }
+blank itype = InstCtrl {itype, rwbEn = False, isLui = False, aluOp = Nothing, isOp32 = False, isJump = False, access = Nothing, branch = Nothing, mulDiv = Nothing, systemOp = Nothing}
 
-{- | What an instruction that raises an exception carries down the pipe instead
-of a decode. It does nothing: no write back, no memory access, no redirect of
-its own, so only the trap MA takes from 'Cuintet.Pipeline.IdEx' is left.
--}
 trapCtrl :: InstCtrl
 trapCtrl = blank IType
 
@@ -162,15 +136,7 @@ noRegs instBits = slice d19 d15 instBits == 0 && slice d11 d7 instBits == 0
 aluOpOf :: BitVector 3 -> BitVector 1 -> AluOp
 aluOpOf f3 alt = unpack (f3 ++# alt)
 
-{- | The ALU operation an @OP-IMM@ instruction names.
-
-@inst[30]@ belongs to the immediate in every form but the two shifts, so it is
-forced low there; left as it comes, an @ADDI@ with bit 10 of its immediate set
-would decode as a subtract.
-
-The RV64 shamt is 6 bits wide, so the shifts have only @inst[31:26]@ left to be
-told apart by.
--}
+-- | The ALU operation an @OP-IMM@ instruction names.
 parseOpImm :: Inst -> Maybe AluOp
 parseOpImm instBits = case funct3 instBits of
   0b001 -> orNothing (f7Hi == 0b000000) shiftOp -- SLLI
@@ -180,11 +146,7 @@ parseOpImm instBits = case funct3 instBits of
     f7Hi = slice d31 d26 instBits
     shiftOp = aluOpOf (funct3 instBits) (slice d30 d30 instBits)
 
-{- | The ALU operation an @OP-IMM-32@ instruction names.
-
-The 32-bit shifts take a 5-bit shamt, so the whole of @funct7@ is left to check,
-unlike in 'parseOpImm'.
--}
+-- | The ALU operation an @OP-IMM-32@ instruction names.
 parseOpImm32 :: Inst -> Maybe AluOp
 parseOpImm32 instBits = case funct3 instBits of
   0b000 -> Just (aluOpOf 0b000 0) -- ADDIW
@@ -194,11 +156,7 @@ parseOpImm32 instBits = case funct3 instBits of
   where
     f7 = funct7 instBits
 
-{- | What a @SYSTEM@ instruction asks of the execution environment.
-
-A non-zero @funct3@ names a CSR access; a zero one leaves the whole of @funct12@
-to name the operation, and the fields it does not use must be zero.
--}
+-- | What a @SYSTEM@ instruction asks of the execution environment.
 parseSystem :: Inst -> Maybe SystemOp
 parseSystem instBits
   | funct3 instBits /= 0 = SysCsr <$> parseCsr (funct3 instBits)

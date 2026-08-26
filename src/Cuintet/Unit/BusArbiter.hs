@@ -30,17 +30,7 @@ data BusArbiterResp = BusArbiterResp
   }
   deriving (Generic, NFDataX)
 
-{- | Arbitrates instruction fetch ('iReq') and load\/store ('dReq') requests
-onto a single-port memory, giving 'dReq' priority so that instruction fetch
-does not starve memory instructions.
-
-The memory returns 'rdata' one cycle after accepting a request, but the
-response itself carries no destination tag. So the arbiter remembers, in a
-'Grant' register, which side was granted last, and routes the next 'rdata' to
-that side. 'iResp'\'s @ready@ is masked while 'dReq' is present, so a
-fetch request is only accepted once no load\/store is contending; 'dResp'
-always sees the memory's @ready@ directly, since 'dReq' is never masked.
--}
+-- | Arbitrates instruction fetch ('iReq') and load\/store ('dReq') requests onto a single-port memory, giving 'dReq' priority so that instruction fetch does not starve memory instructions.
 busArbiter :: (HiddenClockResetEnable dom) => Signal dom BusArbiterReq -> Signal dom BusArbiterResp
 busArbiter = mealy step Nothing
   where

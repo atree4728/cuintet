@@ -1,17 +1,4 @@
-{- |
-IF: runs ahead of the rest on its own, filling the IF-ID FIFO.
-
-Each of the three arrows out of a register (@next@ to the bus, the bus to
-@staged@, @staged@ to the FIFO) takes a clock, so an instruction reaches the head
-of the FIFO three clocks after its request goes out, while the throughput stays
-at one instruction per clock. The FIFO absorbs the difference between that and
-the rate ID drains it at.
-
-@iReq@ must not depend combinationally on @iResp@, or a combinational loop closes
-through 'Cuintet.BusArbiter.busArbiter'. It is driven from @next@ and the FIFO's
-@wreadyTwo@, both register outputs. A fetch goes out only when the FIFO has room
-for the staged write and this one both.
--}
+-- | IF: runs ahead of the rest on its own, filling the IF-ID FIFO.
 module Cuintet.Stage.Fetch (FetchState (..), initFetchState, FetchIn (..), FetchOut (..), fetch) where
 
 import Clash.Prelude
@@ -69,9 +56,7 @@ data FetchOut = FetchOut
   , btbPrefetch :: Addr
   }
 
-{- | One clock of IF. A redirect wins over everything: it drops both the fetch
-in flight and the staged instruction, which the flush of the FIFO matches.
--}
+-- | One clock of IF.
 fetch :: FetchState -> FetchIn -> (FetchState, FetchOut)
 fetch FetchState {..} FetchIn {..} =
   ( FetchState {next = next', fetching = fetching', staged = staged'}

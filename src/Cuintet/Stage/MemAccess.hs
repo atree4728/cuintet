@@ -1,17 +1,4 @@
-{- | MA: the memory access, the CSR access, and the redirect that resolves control flow.
-
-Unlike ID and EX this stage is not a pure function, because the responses of
-'loadStoreStep' and 'csrStep' feed back into its own decisions within the same
-clock: @stall@ decides whether the instruction commits, and the CSR response
-supplies both the value to write back and the redirect. Splitting the unit calls
-out of the stage would split the stage itself in two.
-
-@csrFile@ is architectural state and MA is its only writer, which is why a system
-instruction can raise its request on the clock it commits without @csrFile@ ever
-being updated twice. 'LoadStoreState' is not architectural; it is where a
-multi-cycle bus access has got to. They share one record only because MA owns
-both.
--}
+-- | MA: the memory access, the CSR access, and the redirect that resolves control flow.
 module Cuintet.Stage.MemAccess (initMemAccessState, memAccess, MemAccessIn (..), MemAccessOut (..), MemAccessState (..)) where
 
 import Clash.Prelude
@@ -53,18 +40,14 @@ data MemAccessOut = MemAccessOut
   { issue :: Maybe MaWb
   -- ^ The instruction handed to WB, present only on the clock it commits.
   , redirect :: Maybe Addr
-  {- ^ Where IF must restart. Raised only on the clock the instruction commits,
-  so a stalled access does not rewrite the PC every clock.
-  -}
+  -- ^ Where IF must restart.
   , dReq :: Maybe MemReq
   -- ^ Load\/store request, driven from 'LoadStoreState' and never from @dResp@.
   , btbWrite :: Maybe BtbWrite
   -- ^ What the resolved instruction teaches the BTB, on the clock it commits.
   }
 
-{- | One clock of MA. The instruction may sit here for several of them; it leaves
-on the one where the access is done with it.
--}
+-- | One clock of MA.
 memAccess :: MemAccessState -> MemAccessIn -> (MemAccessState, MemAccessOut)
 memAccess MemAccessState {..} MemAccessIn {..} =
   ( MemAccessState {csrFile = csrFile', loadStoreState = loadStoreState'}

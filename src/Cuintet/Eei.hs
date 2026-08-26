@@ -55,24 +55,19 @@ type XLen = 64
 -- | The maximum width of instructions which the implementation supports.
 type ILen = 32
 
--- | Widths of the buses are counted in bytes; @* 8@ appears only where a byte lane vector is turned back into a word.
+-- | Widths of the buses are counted in bytes.
 type XLenBytes = XLen `Div` 8
 
-{- | A physical memory address, counted in bytes as the ISA has it, and as wide as a register.
-
-It says nothing about how the memory behind it is built: the bus word width and
-the byte lanes are the memory's business, and an address keeps naming the same
-byte whatever they are.
--}
+-- | A physical memory address.
 type Addr = Unsigned XLen
 
 -- | An instruction word. RV64I has the 32-bit form only.
 type Inst = BitVector ILen
 
--- | The integer registers. @x0@ is kept zero by never being written, so reading it needs no special case.
+-- | The integer registers.
 type RegFile = Vec 32 (BitVector XLen)
 
--- | A register index; the @rs1@, @rs2@ or @rd@ field verbatim.
+-- | A register index.
 type RegAddr = BitVector 5
 
 -- | Whether a narrower-than-register load fills the high bits with its sign or zero.
@@ -82,49 +77,29 @@ data Sign = Signed | Unsigned
 deriveDefaultAnnotation [t|Sign|]
 deriveBitPack [t|Sign|]
 
-{- | The width of a memory access, laid out so that it /is/ @funct3@ bits 1-0:
-@unpack@ of them is pure wiring. All four patterns name a width, so a match on
-this type is total.
-
-The sign of a load is @funct3@ bit 2, orthogonal to the width, and is kept apart
-as a 'Sign'.
--}
-data Width = B | H | W | D
+-- | The width of a memory access.
+data Width = Byte | Half | Word | Double
   deriving (Generic, NFDataX, Show)
 
 deriveDefaultAnnotation [t|Width|]
 deriveBitPack [t|Width|]
 
--- | What a memory instruction asks of memory. A store carries no 'Sign': @funct3@ bit 2 is reserved in one.
+-- | What a memory instruction asks of memory.
 data Access = Load Width Sign | Store Width
   deriving (Generic, NFDataX)
 
-{- | The width and sign a load's @funct3@ names, or 'Nothing' for @0b111@, the
-one pattern that names no load.
-
->>> (parseLoad 0b001, parseLoad 0b101)  -- lh, lhu
-(Just (H,Signed),Just (H,Unsigned))
->>> parseLoad 0b111
-Nothing
--}
+-- | The width and sign a load's @funct3@. 'Nothing' for @0b111@.
 parseLoad :: BitVector 3 -> Maybe (Width, Sign)
 parseLoad f3 = orNothing (f3 /= 0b111) (unpack (slice d1 d0 f3), unpack (slice d2 d2 f3))
 
-{- | The width a store's @funct3@ names, or 'Nothing' when bit 2 is set: it is
-reserved in a store, so none of @0b1xx@ names one.
-
->>> (parseStore 0b010, parseStore 0b110)  -- sw, and the reserved pattern beside it
-(Just W,Nothing)
--}
+-- | The width a store of @funct3 = @0b1xx@.
 parseStore :: BitVector 3 -> Maybe Width
 parseStore f3 = orNothing (slice d2 d2 f3 == 0) (unpack (slice d1 d0 f3))
 
 -- | The byte offset of an access within its word, the lane 0 being the least significant.
 type LaneOffset = Index XLenBytes
 
-{- | The offset of the address within its word, i.e. the low bits of it that the
-memory itself ignores.
--}
+-- | The offset of the address within its word.
 laneOffset :: Addr -> LaneOffset
 laneOffset a = numConvert (truncateB (pack a) :: BitVector (CLog 2 XLenBytes))
 
@@ -135,12 +110,12 @@ bitOffset off = 8 * numConvert off
 -- | The size of the access, in bytes.
 sizeBytes :: Width -> Index (XLenBytes + 1)
 sizeBytes = \case
-  B -> 1
-  H -> 2
-  W -> 4
-  D -> 8
+  Byte -> 1
+  Half -> 2
+  Word -> 4
+  Double -> 8
 
--- | Whether the access is naturally aligned, i.e. contained in a single word. @sizeBytes - 1@ is exactly the mask of offset bits that must be zero.
+-- | Whether the access is naturally aligned.
 aligned :: Width -> LaneOffset -> Bool
 aligned width off = pack off .&. mask == 0
   where
@@ -179,10 +154,7 @@ data BusReq nBytes = BusReq
   }
   deriving (Generic, NFDataX)
 
-{- | The memory's half of the bus: whether it takes a request this cycle, and
-the word read for one it took earlier. The two are independent, so a request may
-go out while the answer to the previous one is still coming back.
--}
+-- | The memory's half of the bus: whether it takes a request this cycle, and the word read for one it took earlier.
 data BusResp nBytes = BusResp
   { ready :: Bool
   -- ^ Whether to accept a memory access request.
@@ -191,9 +163,7 @@ data BusResp nBytes = BusResp
   }
   deriving (Generic, NFDataX)
 
-{- | The width of the memory bus, in bytes. One register wide, so a naturally
-aligned access is always contained in a single bus word.
--}
+-- | The width of the memory bus, in bytes.
 type MemDataBytes = XLenBytes
 
 -- | 'BusReq' at the width the memory bus is.
@@ -202,11 +172,7 @@ type MemReq = BusReq MemDataBytes
 -- | 'BusResp' at the width the memory bus is.
 type MemResp = BusResp MemDataBytes
 
-{- | The @opcode@ field. RV64I names only a handful of the 128 patterns, so this
-is the field itself with names attached rather than a sum type: @unpack@ is pure
-wiring, and one declaration serves as both the encoder and the decoder. Matching
-on it needs a catch-all for the patterns left unnamed.
--}
+-- | The @opcode@ field.
 newtype Opcode = Opcode (BitVector 7)
   deriving newtype (BitPack)
 
@@ -227,15 +193,7 @@ pattern MISC_MEM  = Opcode 0b0001111
 pattern SYSTEM    = Opcode 0b1110011
 {- FOURMOLU_ENABLE -}
 
-{- | The ALU operation of an @OP@ or @OP-IMM@ instruction, laid out so that it
-/is/ @funct3@ with @inst[30]@ under it: @unpack (funct3 ++# inst[30])@ is pure
-wiring. That one bit is what tells 'SUB' from 'ADD' and 'SRA' from 'SRL', in
-@OP@ and @OP-IMM@ alike, and in their 32-bit forms too.
-
-The six four-bit patterns that name no operation have no constructor here, so a
-match on this type is total. ID is what rejects them, and it is also what forces
-the bit low in the forms where it belongs to the immediate.
--}
+-- | The ALU operation of an @OP@ or @OP-IMM@ instruction, derived from @unpack (funct3 ++# inst[30])@.
 data AluOp
   = ADD
   | SUB
@@ -270,13 +228,7 @@ data AluOp
 
 deriveBitPack [t|AluOp|]
 
-{- | The branch condition, laid out so that it /is/ the @funct3@ field of a
-branch: @unpack funct3@ is pure wiring.
-
-The two @funct3@ patterns that name no branch have no constructor here, so a
-match on this type is total. 'parseBranch' is the only way in, and it is what
-rejects them.
--}
+-- | The branch condition, derived from @unpack funct3@.
 data BranchCond
   = BEQ
   | BNE
@@ -356,11 +308,7 @@ deriveBitPack [t|DivOp|]
 
 deriveBitPack [t|MulDivType|]
 
-{- | What a CSR access does to the register, laid out as @funct3@ bits 1-0.
-
-@0b00@ names no CSR instruction and has no constructor here, so a match on this
-type is total. 'parseCsr' is the only way in, and it is what rejects it.
--}
+-- | What a CSR access does to the register, derived from @funct3[1:0]@.
 data CsrOp
   = ReadWrite
   | ReadSet
@@ -381,9 +329,7 @@ data CsrOp
 
 deriveBitPack [t|CsrOp|]
 
-{- | Where the operand of a CSR access comes from, laid out as @funct3@ bit 2:
-either @rs1@ or the 5-bit immediate that takes its place.
--}
+-- | Where the operand of a CSR access comes from, derived from @funct3[2]@
 data CsrSrc = FromRs1 | FromUimm
   deriving (Generic, NFDataX, Show)
 
@@ -400,21 +346,10 @@ data CsrSrc = FromRs1 | FromUimm
 
 deriveBitPack [t|CsrSrc|]
 
-{- | The CSR access a @SYSTEM@ instruction's @funct3@ names: where the operand
-comes from and what to do with it. 'Nothing' when bits 1-0 are zero, which is
-the @funct3@ of the non-CSR system instructions rather than of a CSR access.
-
->>> parseCsr 0b101  -- csrrwi
-Just (FromUimm,ReadWrite)
->>> parseCsr 0b000
-Nothing
--}
 parseCsr :: BitVector 3 -> Maybe (CsrSrc, CsrOp)
 parseCsr f3 = orNothing (slice d1 d0 f3 /= 0) (unpack (slice d2 d2 f3), unpack (slice d1 d0 f3))
 
-{- | The @funct12@ field of a @SYSTEM@ instruction whose @funct3@ is zero, where
-it names the operation rather than a CSR.
--}
+-- | The @funct12@ field of a @SYSTEM@ instruction whose @funct3@ is zero.
 newtype System12 = System12 (BitVector 12)
   deriving newtype (Eq)
 
@@ -425,10 +360,7 @@ pattern EBREAK = System12 0b000000000001
 pattern MRET   = System12 0b001100000010
 {- FOURMOLU_ENABLE -}
 
-{- | What a @SYSTEM@ instruction asks for. @funct3@ tells a CSR access from the
-rest; among the rest, @ECALL@, @EBREAK@ and @MRET@ are implemented, and nothing
-else has a constructor here.
--}
+-- | What a @SYSTEM@ instruction asks for.
 data SystemOp
   = SysCsr (CsrSrc, CsrOp)
   | SysEcall
@@ -436,9 +368,7 @@ data SystemOp
   | SysMret
   deriving (Generic, NFDataX)
 
-{- | The reason a trap was taken. No exception code in use here goes above 15,
-so the code is kept narrow and widened only where @mcause@ is read.
--}
+-- | The reason a trap was taken.
 data TrapCause
   = TrapCause
   { interrupt :: Bool

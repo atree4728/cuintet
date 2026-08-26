@@ -1,18 +1,4 @@
-{- |
-Load\/store unit: executes load\/store instructions by sending the address
-computed by the ALU to the memory bus.
-
-An access takes at least 3 cycles ('Idle' → 'WaitReady' → 'WaitValid'), during
-which it holds MA with @stall@. The stages above keep running until the FIFOs
-between them fill up.
-
-The memory is addressed in bus words of 'MemDataBytes' bytes and ignores the
-offset within one, so it always returns the bus word containing the target.
-Narrower loads (LB\/LH\/LW and their unsigned forms) select the bytes from that
-word by 'formatRdata'; narrower stores (SB\/SH\/SW) mask off the byte lanes
-outside the access by 'storeLanes'. Accesses that are not naturally aligned are
-rejected as 'deepErrorX' by 'busAccess', so one never straddles two bus words.
--}
+-- | Load\/store unit: executes load\/store instructions by sending the address computed by the ALU to the memory bus.
 module Cuintet.Unit.LoadStore (
   InstInfo (..),
   LoadFmt (..),
@@ -99,11 +85,7 @@ loadStoreStep state LoadStoreReq {inst, memResp} = (memUnitState, memUnitResp)
             _ -> Nothing
         }
 
-{- | The decoded access put in the form the bus needs; the offset is the one part of it the address supplies.
-
-A misaligned access traps in RISC-V, but there is no trap mechanism yet, so it
-is rejected as 'deepErrorX'.
--}
+-- | The decoded access put in the form the bus needs; the offset is the one part of it the address supplies.
 busAccess :: Access -> Addr -> BitVector (MemDataBytes * 8) -> BusAccess
 busAccess acc addr wdata = case acc of
   Store width -> checked width $ BusStore (storeLanes width offset wdata)
@@ -114,11 +96,7 @@ busAccess acc addr wdata = case acc of
       | aligned width offset = x
       | otherwise = deepErrorX "busAccess: misaligned access"
 
-{- | Construct the byte lanes to write.
-
-The word is shifted into place by @8 * offset@ bits, and the lanes it occupies
-are given by the same offset in bytes.
--}
+-- | Construct the byte lanes to write.
 storeLanes :: Width -> LaneOffset -> BitVector (MemDataBytes * 8) -> StoreLanes MemDataBytes
 storeLanes width offset word = StoreLanes $ zipWith orNothing (laneMask width offset) bytes
   where
@@ -142,10 +120,10 @@ storeLanes width offset word = StoreLanes $ zipWith orNothing (laneMask width of
 -}
 formatRdata :: LoadFmt -> BitVector (MemDataBytes * 8) -> BitVector XLen
 formatRdata LoadFmt {width, sign, offset} busWord = case width of
-  B -> ext sign (truncateB shifted :: BitVector 8)
-  H -> ext sign (truncateB shifted :: BitVector 16)
-  W -> ext sign (truncateB shifted :: BitVector 32)
-  D -> busWord
+  Byte -> ext sign (truncateB shifted :: BitVector 8)
+  Half -> ext sign (truncateB shifted :: BitVector 16)
+  Word -> ext sign (truncateB shifted :: BitVector 32)
+  Double -> busWord
   where
     shifted = busWord `shiftR` bitOffset offset
     ext Signed = signExtend

@@ -1,13 +1,4 @@
-{- | The 32 integer registers, as a RAM with two read ports and one write port.
-
-It sits beside 'Cuintet.Core.coreT' rather than inside it, so that it comes out
-as a RAM instead of 32 registers' worth of flip-flops.
-
-Reading is asynchronous, which is what lets ID have its operands on the clock it
-decodes; writing takes effect at the next clock edge. Nothing ever writes @x0@,
-since 'Cuintet.Pipeline.destReg' rejects it, but the RAM starts out undefined,
-so reads of it are forced to zero.
--}
+-- | The 32 integer registers, as a RAM with two read ports and one write port.
 module Cuintet.Unit.RegFile (RegReq (..), RegResp (..), regFile, mkRegReq) where
 
 import Clash.Prelude
@@ -48,11 +39,7 @@ regFile req = RegResp <$> port ((.rs1Addr) <$> req) <*> port ((.rs2Addr) <$> req
                 <*> asyncRamPow2 (unpack <$> addr) (fmap (first unpack) <$> wdata)
             )
 
-{- | The request for a given IF-ID FIFO head and WB write.
-
-The source addresses are taken from the raw instruction word, so the read does
-not have to wait on decoding. An empty FIFO reads @x0@, which is harmless.
--}
+-- | The request for a given IF-ID FIFO head and WB write.
 mkRegReq :: Maybe IfId -> Maybe (RegAddr, BitVector XLen) -> RegReq
 mkRegReq entry write = RegReq {rs1Addr, rs2Addr, write}
   where

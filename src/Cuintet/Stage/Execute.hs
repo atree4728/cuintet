@@ -1,19 +1,4 @@
-{- | EX: operand selection, the ALU, the branch condition, and the multiply\/divide unit.
-
-An instruction issues whenever the EX-MA FIFO has room and the multiply\/divide
-unit is not still holding it. Every instruction goes through the ALU, including
-those that only need an address: a load\/store adds @rs1@ and the immediate here,
-and MA takes the result as its access address.
-
-The branch condition is evaluated here but not acted on. Where control flow goes
-is decided in MA, so that an instruction redirects IF only once it is known to commit.
-
-'MulDivState' is the one register EX owns and the only reason the stage is not a
-pure function. An M-extension instruction holds EX for as many clocks as the unit
-needs, during which the ID-EX FIFO keeps it at its head; that is what lets
-'mulDivStep' read the instruction back on the clock it finishes rather than
-latching a copy of it.
--}
+-- | EX: operand selection, the ALU, the branch condition, and the multiply\/divide unit.
 module Cuintet.Stage.Execute (execute, ExecuteIn (..), ExecuteOut (..)) where
 
 import Clash.Prelude
@@ -48,11 +33,7 @@ execute mulDivState ExecuteIn {..} = (mulDivState', exOut)
     exOut = ExecuteOut {issue = orNothing issued exMa}
 {-# OPAQUE execute #-}
 
-{- | Run the instruction through the ALU and the branch unit.
-
-@wbData@ is the value to write back as far as EX can tell; MA replaces it for a
-load or a CSR read.
--}
+-- | Run the instruction through the ALU and the branch unit.
 mkExMa :: Maybe (BitVector XLen) -> IdEx -> ExMa
 mkExMa mulDivResult IdEx {..} = ExMa {op1, op2, aluResult, branchTaken, ..}
   where
