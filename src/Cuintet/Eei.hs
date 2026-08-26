@@ -47,7 +47,7 @@ module Cuintet.Eei (
 import Clash.Annotations.BitRepresentation
 import Clash.Annotations.BitRepresentation.Deriving
 import Clash.Prelude
-import Cuintet.Util (downto, orNothing)
+import Cuintet.Util (orNothing)
 
 -- | The length of integer registers.
 type XLen = 64
@@ -254,16 +254,16 @@ data AluOp
   ( DataReprAnn
       $(liftQ [t|AluOp|])
       4
-      [ ConstrRepr 'ADD (3 `downto` 0) 0b0000 []
-      , ConstrRepr 'SUB (3 `downto` 0) 0b0001 []
-      , ConstrRepr 'SLL (3 `downto` 0) 0b0010 []
-      , ConstrRepr 'SLT (3 `downto` 0) 0b0100 []
-      , ConstrRepr 'SLTU (3 `downto` 0) 0b0110 []
-      , ConstrRepr 'XOR (3 `downto` 0) 0b1000 []
-      , ConstrRepr 'SRL (3 `downto` 0) 0b1010 []
-      , ConstrRepr 'SRA (3 `downto` 0) 0b1011 []
-      , ConstrRepr 'OR (3 `downto` 0) 0b1100 []
-      , ConstrRepr 'AND (3 `downto` 0) 0b1110 []
+      [ ConstrRepr 'ADD 0b1111 0b0000 []
+      , ConstrRepr 'SUB 0b1111 0b0001 []
+      , ConstrRepr 'SLL 0b1111 0b0010 []
+      , ConstrRepr 'SLT 0b1111 0b0100 []
+      , ConstrRepr 'SLTU 0b1111 0b0110 []
+      , ConstrRepr 'XOR 0b1111 0b1000 []
+      , ConstrRepr 'SRL 0b1111 0b1010 []
+      , ConstrRepr 'SRA 0b1111 0b1011 []
+      , ConstrRepr 'OR 0b1111 0b1100 []
+      , ConstrRepr 'AND 0b1111 0b1110 []
       ]
   )
   #-}
@@ -291,12 +291,12 @@ data BranchCond
   ( DataReprAnn
       $(liftQ [t|BranchCond|])
       3
-      [ ConstrRepr 'BEQ (2 `downto` 0) 0b000 []
-      , ConstrRepr 'BNE (2 `downto` 0) 0b001 []
-      , ConstrRepr 'BLT (2 `downto` 0) 0b100 []
-      , ConstrRepr 'BGE (2 `downto` 0) 0b101 []
-      , ConstrRepr 'BLTU (2 `downto` 0) 0b110 []
-      , ConstrRepr 'BGEU (2 `downto` 0) 0b111 []
+      [ ConstrRepr 'BEQ 0b111 0b000 []
+      , ConstrRepr 'BNE 0b111 0b001 []
+      , ConstrRepr 'BLT 0b111 0b100 []
+      , ConstrRepr 'BGE 0b111 0b101 []
+      , ConstrRepr 'BLTU 0b111 0b110 []
+      , ConstrRepr 'BGEU 0b111 0b111 []
       ]
   )
   #-}
@@ -372,9 +372,9 @@ data CsrOp
   ( DataReprAnn
       $(liftQ [t|CsrOp|])
       2
-      [ ConstrRepr 'ReadWrite (1 `downto` 0) 0b01 []
-      , ConstrRepr 'ReadSet (1 `downto` 0) 0b10 []
-      , ConstrRepr 'ReadClear (1 `downto` 0) 0b11 []
+      [ ConstrRepr 'ReadWrite 0b11 0b01 []
+      , ConstrRepr 'ReadSet 0b11 0b10 []
+      , ConstrRepr 'ReadClear 0b11 0b11 []
       ]
   )
   #-}
