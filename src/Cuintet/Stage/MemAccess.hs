@@ -16,7 +16,7 @@ module Cuintet.Stage.MemAccess (initMemAccessState, memAccess, MemAccessIn (..),
 
 import Clash.Prelude
 import Control.Monad (guard)
-import Cuintet.CoreCtrl (InstCtrl (..), isBranchOp)
+import Cuintet.CoreCtrl (InstCtrl (..), isBranchOp, isLoad)
 import Cuintet.Eei (Addr, MemReq, MemResp, SystemOp (..))
 import Cuintet.Pipeline (ExMa (..), MaWb (..))
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
@@ -98,7 +98,7 @@ memAccess MemAccessState {..} MemAccessIn {..} =
 
     -- what to write back; whether and where is WB's decision
     wbData'
-      | ctrl.isLoad = fromMaybe (deepErrorX "memAccess: load committed without data") loadStoreResp.rdata
+      | isLoad ctrl = fromMaybe (deepErrorX "memAccess: load committed without data") loadStoreResp.rdata
       | Just rdata <- csrRdata = rdata
       | otherwise = wbData
 

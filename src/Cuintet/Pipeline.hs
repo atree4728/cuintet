@@ -10,7 +10,7 @@ rewritten, by MA for a load or a CSR read.
 module Cuintet.Pipeline (IfId (..), IdEx (..), ExMa (..), MaWb (..), srcRegs, destReg, forwardable, unresolved) where
 
 import Clash.Prelude
-import Cuintet.CoreCtrl (InstCtrl (..), isCsrRead)
+import Cuintet.CoreCtrl (InstCtrl (..), isCsrRead, isLoad)
 import Cuintet.Eei (Addr, Inst, RegAddr, TrapCause, XLen)
 import Cuintet.Unit.Btb (Prediction)
 import Cuintet.Util (orNothing)
@@ -127,4 +127,4 @@ unresolved ::
   , HasField "rdAddr" stage RegAddr
   ) =>
   stage -> Maybe RegAddr
-unresolved stage = orNothing (stage.ctrl.isLoad || isCsrRead stage.ctrl) =<< destReg stage
+unresolved stage = orNothing (isLoad stage.ctrl || isCsrRead stage.ctrl) =<< destReg stage

@@ -78,7 +78,6 @@ csrWrite :: CsrOp -> BitVector XLen -> Maybe (BitVector XLen) -> BitVector XLen
 csrWrite ReadWrite oldValue newValueM = fromMaybe oldValue newValueM
 csrWrite ReadSet oldValue newValueM = maybe oldValue (oldValue .|.) newValueM
 csrWrite ReadClear oldValue newValueM = maybe oldValue ((oldValue .&.) . complement) newValueM
-csrWrite CsrIllegal _ _ = deepErrorX "csrWrite: illegal System instruction"
 
 {- | One clock of the CSR file. @mcycle@ counts every clock, so a write to it on
 the same clock lands on the already incremented value and wins.
@@ -98,7 +97,6 @@ serve file (Trap CsrTrap {..}) =
   )
 serve file Mret = (file, Redirect $ unpack file.mepc)
 serve file (Access CsrAccess {..})
-  | CsrIllegal <- op = deepErrorX "csrStep: illegal System instruction"
   | MTVEC <- csrAddr =
       let old = unpack file.mtvec
        in (file {mtvec = aligned (written old)}, Accessed old)

@@ -3,6 +3,7 @@ module Cuintet.CoreCtrl (
   InstCtrl (..),
   instCode,
   isMemOp,
+  isLoad,
   isStore,
   isBranchOp,
   isCsrRead,
@@ -11,7 +12,8 @@ module Cuintet.CoreCtrl (
 ) where
 
 import Clash.Prelude
-import Cuintet.Eei (MulDivType, SystemOp (..))
+import Cuintet.Eei (Access (..), AluOp, BranchCond, MulDivType, SystemOp (..))
+import Data.Maybe (isJust)
 
 -- | RISC-V instruction type
 data InstType
@@ -39,32 +41,35 @@ data InstCtrl = InstCtrl
   -- ^ Whether to enable to write back.
   , isLui :: Bool
   -- ^ Whether to be LUI instruction.
-  , isAluOp :: Bool
-  -- ^ Whether to use the ALU.
+  , aluOp :: Maybe AluOp
+  -- ^ The operation the ALU performs; 'Nothing' for the instructions that only need it to add.
   , isOp32 :: Bool
   -- ^ Whether to be either OP_REG_32 or OP_IMM_32.
   , isJump :: Bool
   -- ^ Whether to be jump instruction.
-  , isLoad :: Bool
-  -- ^ Whether to be load instruction.
+  , access :: Maybe Access
+  -- ^ What the instruction asks of memory; 'Nothing' unless @LOAD@ or @STORE@.
+  , branch :: Maybe BranchCond
+  -- ^ The condition to test; 'Nothing' unless @BRANCH@.
   , mulDiv :: Maybe MulDivType
   , systemOp :: Maybe SystemOp
   -- ^ What the instruction asks of the execution environment; 'Nothing' unless @SYSTEM@.
-  , funct3 :: BitVector 3
-  -- ^ @funct3@ field.
-  , funct7 :: BitVector 7
-  -- ^ @funct7@ field.
   }
   deriving (Generic, NFDataX)
 
 isMemOp :: InstCtrl -> Bool
-isMemOp InstCtrl {itype, isLoad} = itype == SType || isLoad
+isMemOp InstCtrl {access} = isJust access
+
+isLoad :: InstCtrl -> Bool
+isLoad InstCtrl {access = Just (Load _ _)} = True
+isLoad _ = False
 
 isStore :: InstCtrl -> Bool
-isStore InstCtrl {itype} = itype == SType
+isStore InstCtrl {access = Just (Store _)} = True
+isStore _ = False
 
 isBranchOp :: InstCtrl -> Bool
-isBranchOp InstCtrl {itype} = itype == BType
+isBranchOp InstCtrl {branch} = isJust branch
 
 isCsrRead :: InstCtrl -> Bool
 isCsrRead InstCtrl {systemOp = Just (SysCsr _)} = True

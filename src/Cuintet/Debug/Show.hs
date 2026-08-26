@@ -11,7 +11,8 @@ import Text.Printf (printf)
 >>> import Prelude
 >>> import Cuintet.Pipeline (MaWb (..))
 >>> import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
->>> ctrl = InstCtrl{itype = IType, rwbEn = True, isLui = False, isAluOp = True, isOp32 = False, isJump = False, isLoad = False, mulDiv = Nothing, systemOp = Nothing, funct3 = 0, funct7 = 0}
+>>> import Cuintet.Eei (AluOp (..))
+>>> ctrl = InstCtrl{itype = IType, rwbEn = True, isLui = False, aluOp = Just ADD, isOp32 = False, isJump = False, access = Nothing, branch = Nothing, mulDiv = Nothing, systemOp = Nothing}
 >>> l = MaWb{pc = 12, instBits = 0x00110193, ctrl, imm = 1, rs1Addr = 2, rs2Addr = 1, rdAddr = 3, exception = Nothing, rs1Data = 42, rs2Data = 0, op1 = 42, op2 = 1, aluResult = 43, wbData = 43, branchTaken = Nothing, csrRdata = Nothing, prediction = Nothing}
 >>> putStrLn (showInstLog l)
 0000000c : 00110193

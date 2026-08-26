@@ -6,7 +6,10 @@ module Cuintet.Eei (
   Addr,
   Inst,
   Sign (..),
-  AccessWidth (..),
+  Width (..),
+  Access (..),
+  parseLoad,
+  parseStore,
   LaneOffset,
   laneOffset,
   bitOffset,
@@ -21,14 +24,15 @@ module Cuintet.Eei (
   MemReq,
   MemResp,
   Opcode (LUI, AUIPC, JAL, JALR, BRANCH, LOAD, STORE, OP_IMM, OP_REG, OP_IMM_32, OP_REG_32, MISC_MEM, SYSTEM),
-  IOp (..),
-  ShiftRight (..),
+  AluOp (..),
   BranchCond (..),
+  parseBranch,
   MulOp (..),
   DivOp (..),
   MulDivType (..),
   CsrOp (..),
   CsrSrc (..),
+  parseCsr,
   System12 (System12, ECALL, EBREAK, MRET),
   SystemOp (..),
   instAt,
@@ -43,7 +47,7 @@ module Cuintet.Eei (
 import Clash.Annotations.BitRepresentation
 import Clash.Annotations.BitRepresentation.Deriving
 import Clash.Prelude
-import Cuintet.Util (downto)
+import Cuintet.Util (downto, orNothing)
 
 -- | The length of integer registers.
 type XLen = 64
@@ -78,35 +82,42 @@ data Sign = Signed | Unsigned
 deriveDefaultAnnotation [t|Sign|]
 deriveBitPack [t|Sign|]
 
-{- | The width of a memory access, laid out so that it /is/ the @funct3@ field
-of a load: @unpack funct3@ is pure wiring, and the sign comes along with it.
+{- | The width of a memory access, laid out so that it /is/ @funct3@ bits 1-0:
+@unpack@ of them is pure wiring. All four patterns name a width, so a match on
+this type is total.
 
-Stores use the same encoding but ignore the 'Sign'; @funct3@ bit 2 is reserved
-in a store, so 'Unsigned' never reaches the bus.
+The sign of a load is @funct3@ bit 2, orthogonal to the width, and is kept apart
+as a 'Sign'.
 -}
-data AccessWidth
-  = Byte Sign
-  | Half Sign
-  | Word Sign
-  | DoubleWord
-  | WidthIllegal
+data Width = B | H | W | D
   deriving (Generic, NFDataX, Show)
 
-{-# ANN
-  module
-  ( DataReprAnn
-      $(liftQ [t|AccessWidth|])
-      3
-      [ ConstrRepr 'Byte (1 `downto` 0) 0b00 [0b100]
-      , ConstrRepr 'Half (1 `downto` 0) 0b01 [0b100]
-      , ConstrRepr 'Word (1 `downto` 0) 0b10 [0b100]
-      , ConstrRepr 'DoubleWord (2 `downto` 0) 0b011 []
-      , ConstrRepr 'WidthIllegal (2 `downto` 0) 0b111 []
-      ]
-  )
-  #-}
+deriveDefaultAnnotation [t|Width|]
+deriveBitPack [t|Width|]
 
-deriveBitPack [t|AccessWidth|]
+-- | What a memory instruction asks of memory. A store carries no 'Sign': @funct3@ bit 2 is reserved in one.
+data Access = Load Width Sign | Store Width
+  deriving (Generic, NFDataX)
+
+{- | The width and sign a load's @funct3@ names, or 'Nothing' for @0b111@, the
+one pattern that names no load.
+
+>>> (parseLoad 0b001, parseLoad 0b101)  -- lh, lhu
+(Just (H,Signed),Just (H,Unsigned))
+>>> parseLoad 0b111
+Nothing
+-}
+parseLoad :: BitVector 3 -> Maybe (Width, Sign)
+parseLoad f3 = orNothing (f3 /= 0b111) (unpack (slice d1 d0 f3), unpack (slice d2 d2 f3))
+
+{- | The width a store's @funct3@ names, or 'Nothing' when bit 2 is set: it is
+reserved in a store, so none of @0b1xx@ names one.
+
+>>> (parseStore 0b010, parseStore 0b110)  -- sw, and the reserved pattern beside it
+(Just W,Nothing)
+-}
+parseStore :: BitVector 3 -> Maybe Width
+parseStore f3 = orNothing (slice d2 d2 f3 == 0) (unpack (slice d1 d0 f3))
 
 -- | The byte offset of an access within its word, the lane 0 being the least significant.
 type LaneOffset = Index XLenBytes
@@ -122,23 +133,22 @@ bitOffset :: LaneOffset -> Int
 bitOffset off = 8 * numConvert off
 
 -- | The size of the access, in bytes.
-sizeBytes :: AccessWidth -> Index (XLenBytes + 1)
+sizeBytes :: Width -> Index (XLenBytes + 1)
 sizeBytes = \case
-  Byte _ -> 1
-  Half _ -> 2
-  Word _ -> 4
-  DoubleWord -> 8
-  WidthIllegal -> deepErrorX "sizeBytes: illegal access width"
+  B -> 1
+  H -> 2
+  W -> 4
+  D -> 8
 
 -- | Whether the access is naturally aligned, i.e. contained in a single word. @sizeBytes - 1@ is exactly the mask of offset bits that must be zero.
-aligned :: AccessWidth -> LaneOffset -> Bool
+aligned :: Width -> LaneOffset -> Bool
 aligned width off = pack off .&. mask == 0
   where
     mask :: BitVector (CLog 2 XLenBytes)
     mask = truncateB (pack (sizeBytes width - 1))
 
 -- | The byte lanes the access covers, the lane 0 being the least significant: @sizeBytes@ ones shifted up by the offset.
-laneMask :: forall nBytes. (KnownNat nBytes) => AccessWidth -> LaneOffset -> Vec nBytes Bool
+laneMask :: forall nBytes. (KnownNat nBytes) => Width -> LaneOffset -> Vec nBytes Bool
 laneMask width off = reverse $ bitCoerce mask
   where
     mask, ones :: BitVector nBytes
@@ -155,7 +165,7 @@ newtype StoreLanes nBytes = StoreLanes (Vec nBytes (Maybe (BitVector 8)))
   deriving anyclass (NFDataX)
 
 -- | Load request, which is to be sliced and extended.
-data LoadFmt = LoadFmt {width :: AccessWidth, offset :: LaneOffset}
+data LoadFmt = LoadFmt {width :: Width, sign :: Sign, offset :: LaneOffset}
   deriving (Generic, NFDataX)
 
 {- | Memory access request, carried on the bus as @Maybe (MemBusReq ...)@;
@@ -218,37 +228,58 @@ pattern SYSTEM    = Opcode 0b1110011
 {- FOURMOLU_ENABLE -}
 
 {- | The ALU operation of an @OP@ or @OP-IMM@ instruction, laid out so that it
-/is/ the @funct3@ field: @unpack funct3@ is pure wiring. All 8 patterns are
-named, so a match on it is total.
+/is/ @funct3@ with @inst[30]@ under it: @unpack (funct3 ++# inst[30])@ is pure
+wiring. That one bit is what tells 'SUB' from 'ADD' and 'SRA' from 'SRL', in
+@OP@ and @OP-IMM@ alike, and in their 32-bit forms too.
 
-@SUB@ and @SRA@ are not here; they share their @funct3@ with 'ADD' and 'SR',
-and are told apart by @funct7@ bit 5.
+The six four-bit patterns that name no operation have no constructor here, so a
+match on this type is total. ID is what rejects them, and it is also what forces
+the bit low in the forms where it belongs to the immediate.
 -}
-data IOp
+data AluOp
   = ADD
+  | SUB
   | SLL
   | SLT
   | SLTU
   | XOR
-  | SR
+  | SRL
+  | SRA
   | OR
   | AND
   deriving (Generic, NFDataX, Show)
 
-deriveDefaultAnnotation [t|IOp|]
-deriveBitPack [t|IOp|]
+{-# ANN
+  module
+  ( DataReprAnn
+      $(liftQ [t|AluOp|])
+      4
+      [ ConstrRepr 'ADD (3 `downto` 0) 0b0000 []
+      , ConstrRepr 'SUB (3 `downto` 0) 0b0001 []
+      , ConstrRepr 'SLL (3 `downto` 0) 0b0010 []
+      , ConstrRepr 'SLT (3 `downto` 0) 0b0100 []
+      , ConstrRepr 'SLTU (3 `downto` 0) 0b0110 []
+      , ConstrRepr 'XOR (3 `downto` 0) 0b1000 []
+      , ConstrRepr 'SRL (3 `downto` 0) 0b1010 []
+      , ConstrRepr 'SRA (3 `downto` 0) 0b1011 []
+      , ConstrRepr 'OR (3 `downto` 0) 0b1100 []
+      , ConstrRepr 'AND (3 `downto` 0) 0b1110 []
+      ]
+  )
+  #-}
 
--- | Which right shift 'SR' means; @funct7@ bit 5.
-data ShiftRight = Logical | Arithmetic
-  deriving (Generic, NFDataX, Show)
+deriveBitPack [t|AluOp|]
 
-deriveDefaultAnnotation [t|ShiftRight|]
-deriveBitPack [t|ShiftRight|]
+{- | The branch condition, laid out so that it /is/ the @funct3@ field of a
+branch: @unpack funct3@ is pure wiring.
 
+The two @funct3@ patterns that name no branch have no constructor here, so a
+match on this type is total. 'parseBranch' is the only way in, and it is what
+rejects them.
+-}
 data BranchCond
   = BEQ
   | BNE
-  | BranchIllegal
   | BLT
   | BGE
   | BLTU
@@ -262,7 +293,6 @@ data BranchCond
       3
       [ ConstrRepr 'BEQ (2 `downto` 0) 0b000 []
       , ConstrRepr 'BNE (2 `downto` 0) 0b001 []
-      , ConstrRepr 'BranchIllegal (2 `downto` 1) 0b010 []
       , ConstrRepr 'BLT (2 `downto` 0) 0b100 []
       , ConstrRepr 'BGE (2 `downto` 0) 0b101 []
       , ConstrRepr 'BLTU (2 `downto` 0) 0b110 []
@@ -272,6 +302,10 @@ data BranchCond
   #-}
 
 deriveBitPack [t|BranchCond|]
+
+-- | The branch a @funct3@ names, or 'Nothing' for the two patterns that name none: @0b01x@.
+parseBranch :: BitVector 3 -> Maybe BranchCond
+parseBranch f3 = orNothing (slice d2 d1 f3 /= 0b01) (unpack f3)
 
 data MulOp = MulLow | MulHighHom Sign | MulHighHetero
   deriving (Eq, Generic, NFDataX)
@@ -322,15 +356,16 @@ deriveBitPack [t|DivOp|]
 
 deriveBitPack [t|MulDivType|]
 
-{- | What a CSR access does to the register, laid out as @funct3@ bits 1-0. The
-fourth pattern is the @funct3@ that names no CSR instruction.
+{- | What a CSR access does to the register, laid out as @funct3@ bits 1-0.
+
+@0b00@ names no CSR instruction and has no constructor here, so a match on this
+type is total. 'parseCsr' is the only way in, and it is what rejects it.
 -}
 data CsrOp
   = ReadWrite
   | ReadSet
   | ReadClear
-  | CsrIllegal
-  deriving (Generic, NFDataX)
+  deriving (Generic, NFDataX, Show)
 
 {-# ANN
   module
@@ -340,7 +375,6 @@ data CsrOp
       [ ConstrRepr 'ReadWrite (1 `downto` 0) 0b01 []
       , ConstrRepr 'ReadSet (1 `downto` 0) 0b10 []
       , ConstrRepr 'ReadClear (1 `downto` 0) 0b11 []
-      , ConstrRepr 'CsrIllegal (1 `downto` 0) 0b00 []
       ]
   )
   #-}
@@ -351,7 +385,7 @@ deriveBitPack [t|CsrOp|]
 either @rs1@ or the 5-bit immediate that takes its place.
 -}
 data CsrSrc = FromRs1 | FromUimm
-  deriving (Generic, NFDataX)
+  deriving (Generic, NFDataX, Show)
 
 {-# ANN
   module
@@ -365,6 +399,18 @@ data CsrSrc = FromRs1 | FromUimm
   #-}
 
 deriveBitPack [t|CsrSrc|]
+
+{- | The CSR access a @SYSTEM@ instruction's @funct3@ names: where the operand
+comes from and what to do with it. 'Nothing' when bits 1-0 are zero, which is
+the @funct3@ of the non-CSR system instructions rather than of a CSR access.
+
+>>> parseCsr 0b101  -- csrrwi
+Just (FromUimm,ReadWrite)
+>>> parseCsr 0b000
+Nothing
+-}
+parseCsr :: BitVector 3 -> Maybe (CsrSrc, CsrOp)
+parseCsr f3 = orNothing (slice d1 d0 f3 /= 0) (unpack (slice d2 d2 f3), unpack (slice d1 d0 f3))
 
 {- | The @funct12@ field of a @SYSTEM@ instruction whose @funct3@ is zero, where
 it names the operation rather than a CSR.
@@ -380,15 +426,14 @@ pattern MRET   = System12 0b001100000010
 {- FOURMOLU_ENABLE -}
 
 {- | What a @SYSTEM@ instruction asks for. @funct3@ tells a CSR access from the
-rest; among the rest, @ECALL@, @EBREAK@ and @MRET@ are implemented. The pair /is/ the
-@funct3@ field, so @unpack funct3@ is pure wiring.
+rest; among the rest, @ECALL@, @EBREAK@ and @MRET@ are implemented, and nothing
+else has a constructor here.
 -}
 data SystemOp
   = SysCsr (CsrSrc, CsrOp)
   | SysEcall
   | SysEbreak
   | SysMret
-  | SysIllegal
   deriving (Generic, NFDataX)
 
 {- | The reason a trap was taken. No exception code in use here goes above 15,

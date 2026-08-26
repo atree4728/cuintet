@@ -18,7 +18,7 @@ module Cuintet.Stage.Execute (execute, ExecuteIn (..), ExecuteOut (..)) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
-import Cuintet.Eei (Addr, BranchCond (..), IOp (..), ShiftRight (..), XLen)
+import Cuintet.Eei (Addr, AluOp (..), BranchCond (..), XLen)
 import Cuintet.Pipeline (ExMa (..), IdEx (..))
 import Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState, mkMulDivInst, mulDivStep)
 import Cuintet.Util (orNothing)
@@ -59,7 +59,7 @@ mkExMa mulDivResult IdEx {..} = ExMa {op1, op2, aluResult, branchTaken, ..}
     (op1, op2) = operands ctrl imm rs1Data rs2Data pc
     aluResult = alu ctrl op1 op2
 
-    branchTaken = branchUnit (unpack ctrl.funct3) op1 op2
+    branchTaken = maybe False (\cond -> branchUnit cond op1 op2) ctrl.branch
 
     wbData
       | isJust ctrl.mulDiv = fromMaybe (deepErrorX "execute: muldiv committed without a result") mulDivResult
@@ -83,35 +83,33 @@ operands InstCtrl {itype} imm rs1Data rs2Data pc = case itype of
   UType -> (bitCoerce pc, imm)
   JType -> (bitCoerce pc, imm)
 
--- | The ALU. An instruction that is not an ALU operation gets a plain add, which is what a load\/store address, a jump target and @auipc@ all are.
+-- | The ALU. An instruction that names no operation gets a plain add, which is what a load\/store address, a jump target and @auipc@ all are.
 alu :: InstCtrl -> BitVector XLen -> BitVector XLen -> BitVector XLen
-alu InstCtrl {itype, isAluOp, isOp32, funct3, funct7} op1 op2
-  | not isAluOp = op1 + op2
-  | isOp32 = signExtend $ exec shamt32 (truncateB op1 :: BitVector 32) (truncateB op2)
-  | otherwise = exec shamt64 op1 op2
+alu InstCtrl {aluOp, isOp32} op1 op2 = maybe (op1 + op2) run aluOp
   where
+    run op
+      | isOp32 = signExtend $ exec op shamt32 (truncateB op1 :: BitVector 32) (truncateB op2)
+      | otherwise = exec op shamt64 op1 op2
+
     shamt64 = unpack $ zeroExtend (truncateB op2 :: BitVector 6)
     shamt32 = unpack $ zeroExtend (truncateB op2 :: BitVector 5)
 
-    isSub = itype /= IType && funct7 /= zeroBits
-
-    exec :: forall n' n. (KnownNat n', n ~ n' + 1) => Int -> BitVector n -> BitVector n -> BitVector n
-    exec shamt a b = case unpack funct3 of
-      ADD | isSub -> a - b
+    exec :: forall n' n. (KnownNat n', n ~ n' + 1) => AluOp -> Int -> BitVector n -> BitVector n -> BitVector n
+    exec op shamt a b = case op of
       ADD -> a + b
+      SUB -> a - b
       SLL -> a `shiftL` shamt
       SLT -> boolToBV $ signed a < signed b
       SLTU -> boolToBV $ a < b
       XOR -> a `xor` b
-      SR -> case unpack (slice d5 d5 funct7) of
-        Logical -> a `shiftR` shamt
-        Arithmetic -> pack $ signed a `shiftR` shamt
+      SRL -> a `shiftR` shamt
+      SRA -> pack $ signed a `shiftR` shamt
       OR -> a .|. b
       AND -> a .&. b
       where
         signed x = bitCoerce x :: Signed n
 
--- | The branch condition, selected by @funct3@. Meaningful only for a B-type instruction; the caller decides whether to look at it.
+-- | Whether the branch is taken. Every condition the type can hold names a branch, so the match is total.
 branchUnit :: BranchCond -> BitVector XLen -> BitVector XLen -> Bool
 branchUnit cond op1 op2 = case cond of
   BEQ -> beq
@@ -120,7 +118,6 @@ branchUnit cond op1 op2 = case cond of
   BGE -> not blt
   BLTU -> bltu
   BGEU -> not bltu
-  BranchIllegal -> False
   where
     beq = op1 == op2
     blt = (bitCoerce op1 :: Signed XLen) < (bitCoerce op2 :: Signed XLen)

@@ -8,11 +8,11 @@ module Cuintet.Stage.Decode (decode, DecodeIn (..), DecodeOut (..), immI, immS, 
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstType (..), usesRs1, usesRs2)
-import Cuintet.Eei (AccessWidth (..), BranchCond (..), CsrOp (..), IOp (..), Inst, MulDivType (..), MulOp (..), Opcode (..), RegAddr, Sign (..), System12 (..), SystemOp (..), XLen, pattern BREAKPOINT, pattern ENVIRONMENT_CALL_FROM_M_MODE, pattern ILLEGAL_INSTRUCTION)
+import Cuintet.Eei (Access (..), AluOp, Inst, Opcode (..), RegAddr, System12 (..), SystemOp (..), XLen, parseBranch, parseCsr, parseLoad, parseStore, pattern BREAKPOINT, pattern ENVIRONMENT_CALL_FROM_M_MODE, pattern ILLEGAL_INSTRUCTION)
 import Cuintet.Pipeline (IdEx (..), IfId (..), srcRegs)
 import Cuintet.Unit.RegFile (RegResp (..))
 import Cuintet.Util (orNothing)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 
 data DecodeIn = DecodeIn
   { entry :: Maybe IfId
@@ -36,7 +36,8 @@ decode :: DecodeIn -> DecodeOut
 decode DecodeIn {..} = DecodeOut {issue = orNothing issued idEx}
   where
     IfId {..} = fromMaybe (deepErrorX "decode: IF-ID FIFO is empty") entry
-    (ctrl, imm, legal) = instDecode instBits
+    decoded = instDecode instBits
+    (ctrl, imm) = fromMaybe (trapCtrl, 0) decoded
     (rs1Addr, rs2Addr) = srcRegs instBits
     rdAddr = slice d11 d7 instBits
     RegResp {rs1Data = rs1Read, rs2Data = rs2Read} = regResp
@@ -50,7 +51,7 @@ decode DecodeIn {..} = DecodeOut {issue = orNothing issued idEx}
         match (rd, d) = orNothing (rd == rs) d
 
     exception
-      | not legal = Just (ILLEGAL_INSTRUCTION, zeroExtend instBits)
+      | isNothing decoded = Just (ILLEGAL_INSTRUCTION, zeroExtend instBits)
       | Just SysEcall <- ctrl.systemOp = Just (ENVIRONMENT_CALL_FROM_M_MODE, 0)
       | Just SysEbreak <- ctrl.systemOp = Just (BREAKPOINT, pack pc)
       | otherwise = Nothing
@@ -66,31 +67,83 @@ immB instBits = signExtend $ slice d31 d31 instBits ++# slice d7 d7 instBits ++#
 immU instBits = signExtend $ slice d31 d12 instBits ++# (0 :: BitVector 12)
 immJ instBits = signExtend $ slice d31 d31 instBits ++# slice d19 d12 instBits ++# slice d20 d20 instBits ++# slice d30 d21 instBits ++# (0 :: BitVector 1)
 
-{- FOURMOLU_DISABLE -}
+{- | The control flags and the immediate. 'Nothing' when the bits name no
+instruction the implementation has; that is what raises @ILLEGAL_INSTRUCTION@.
 
--- | The control flags and the immediate, both a function of the opcode alone.
-instDecode :: Inst -> (InstCtrl, BitVector XLen, Bool)
+Every field an opcode does not use keeps the value 'blank' gave it, so an arm
+states only what its instruction actually does.
+-}
+instDecode :: Inst -> Maybe (InstCtrl, BitVector XLen)
 instDecode instBits = case opcode instBits of
-  LUI       -> (instCtrl UType  True  True False False False False, immU instBits, True)
-  AUIPC     -> (instCtrl UType  True False False False False False, immU instBits, True)
-  JAL       -> (instCtrl JType  True False False False  True False, immJ instBits, True)
-  JALR      -> (instCtrl IType  True False False False  True False, immI instBits, True)
-  BRANCH    -> (instCtrl BType False False False False False False, immB instBits, legalBranch  instBits)
-  LOAD      -> (instCtrl IType  True False False False False  True, immI instBits, legalLoad    instBits)
-  STORE     -> (instCtrl SType False False False False False False, immS instBits, legalStore   instBits)
-  OP_IMM    -> (instCtrl IType  True False  True False False False, immI instBits, legalOpImm   instBits)
-  OP_REG    -> (instCtrl RType  True False  True False False False,         noImm, legalOpReg   instBits)
-  OP_IMM_32 -> (instCtrl IType  True False  True  True False False, immI instBits, legalOpImm32 instBits)
-  OP_REG_32 -> (instCtrl RType  True False  True  True False False,         noImm, legalOpReg32 instBits)
-  MISC_MEM  -> (instCtrl IType False False False False False False, immI instBits, True)
-  SYSTEM    -> (instCtrl IType  True False False False False False, immI instBits, legalSystem  instBits)
-  _         -> (instCtrl IType False False False False False False,         noImm, False)
+  LUI -> Just (uType {rwbEn = True, isLui = True}, immU instBits)
+  AUIPC -> Just (uType {rwbEn = True}, immU instBits)
+  JAL -> Just (jType {rwbEn = True, isJump = True}, immJ instBits)
+  JALR -> orNothing (f3 == 0) (iType {rwbEn = True, isJump = True}, immI instBits)
+  BRANCH -> do
+    cond <- parseBranch f3
+    Just (bType {branch = Just cond}, immB instBits)
+  LOAD -> do
+    (width, sign) <- parseLoad f3
+    Just (iType {rwbEn = True, access = Just (Load width sign)}, immI instBits)
+  STORE -> do
+    width <- parseStore f3
+    Just (sType {access = Just (Store width)}, immS instBits)
+  OP_IMM -> do
+    op <- parseOpImm instBits
+    Just (iType {rwbEn = True, aluOp = Just op}, immI instBits)
+  OP_REG -> case funct7 instBits of
+    0b0000000 -> Just (opReg 0)
+    0b0100000 -> orNothing (f3 == 0b000 || f3 == 0b101) (opReg 1) -- SUB, SRA
+    0b0000001 -> Just (rType {rwbEn = True, mulDiv = Just (unpack f3)}, noImm) -- M
+    _ -> Nothing
+  OP_IMM_32 -> do
+    op <- parseOpImm32 instBits
+    Just (iType {rwbEn = True, aluOp = Just op, isOp32 = True}, immI instBits)
+  OP_REG_32 -> case funct7 instBits of
+    0b0000000 -> orNothing (f3 == 0b000 || f3 == 0b001 || f3 == 0b101) (opReg32 0) -- ADDW, SLLW, SRLW
+    0b0100000 -> orNothing (f3 == 0b000 || f3 == 0b101) (opReg32 1) -- SUBW, SRAW
+    0b0000001 -> orNothing (f3 == 0b000 || msb f3 == 1) (rType {rwbEn = True, mulDiv = Just (unpack f3), isOp32 = True}, noImm) -- MULW, DIVW, DIVUW, REMW, REMUW
+    _ -> Nothing
+  -- FENCE orders nothing this core reorders, so it is a nop; FENCE.I is Zifencei, which it does not have
+  MISC_MEM -> orNothing (f3 == 0 && noRegs instBits) (iType, immI instBits)
+  SYSTEM -> do
+    op <- parseSystem instBits
+    Just (iType {rwbEn = True, systemOp = Just op}, immI instBits)
+  _ -> Nothing
   where
-    instCtrl itype rwbEn isLui isAluOp isOp32 isJump isLoad =
-      InstCtrl {funct3 = funct3 instBits, funct7 = funct7 instBits, systemOp = systemOp instBits, mulDiv = mulDiv instBits, ..}
-    noImm = deepErrorX "instDecode: opcode carries no immediate"
+    f3 = funct3 instBits
+    opReg alt = (rType {rwbEn = True, aluOp = Just (aluOpOf f3 alt)}, noImm)
+    opReg32 alt = (rType {rwbEn = True, aluOp = Just (aluOpOf f3 alt), isOp32 = True}, noImm)
+    rType = blank RType
+    iType = blank IType
+    sType = blank SType
+    bType = blank BType
+    uType = blank UType
+    jType = blank JType
+    noImm = 0 -- the opcode carries no immediate; kept zero so nothing downstream sees an X
 
-{- FOURMOLU_ENABLE -}
+-- | An 'InstCtrl' of the given form that does nothing at all; what every arm of 'instDecode' starts from.
+blank :: InstType -> InstCtrl
+blank itype =
+  InstCtrl
+    { itype
+    , rwbEn = False
+    , isLui = False
+    , aluOp = Nothing
+    , isOp32 = False
+    , isJump = False
+    , access = Nothing
+    , branch = Nothing
+    , mulDiv = Nothing
+    , systemOp = Nothing
+    }
+
+{- | What an instruction that raises an exception carries down the pipe instead
+of a decode. It does nothing: no write back, no memory access, no redirect of
+its own, so only the trap MA takes from 'Cuintet.Pipeline.IdEx' is left.
+-}
+trapCtrl :: InstCtrl
+trapCtrl = blank IType
 
 opcode :: Inst -> Opcode
 opcode = unpack . slice d6 d0
@@ -101,79 +154,61 @@ funct3 = slice d14 d12
 funct7 :: Inst -> BitVector 7
 funct7 = slice d31 d25
 
--- | Whether the fields other than the opcode name an instruction that exists.
-legalBranch, legalLoad, legalStore, legalOpImm, legalOpReg, legalOpImm32, legalOpReg32, legalSystem :: Inst -> Bool
-legalBranch instBits = case unpack (funct3 instBits) :: BranchCond of
-  BranchIllegal -> False
-  _ -> True
-legalLoad instBits = case unpack (funct3 instBits) :: AccessWidth of
-  WidthIllegal -> False
-  _ -> True
-legalStore instBits = case unpack (funct3 instBits) :: AccessWidth of
-  Byte Signed -> True
-  Half Signed -> True
-  Word Signed -> True
-  DoubleWord -> True
-  _ -> False
-legalOpImm instBits = case unpack (funct3 instBits) :: IOp of
-  SLL -> f7Hi == 0b000000 -- SLLI
-  SR -> f7Hi == 0b000000 || f7Hi == 0b010000 -- SRLI, SRAI
-  _ -> True
+-- | Whether @rs1@ and @rd@ are both zero, as the forms that name neither require.
+noRegs :: Inst -> Bool
+noRegs instBits = slice d19 d15 instBits == 0 && slice d11 d7 instBits == 0
+
+-- | The four bits an 'AluOp' is: @funct3@ over the bit that picks the subtracting and arithmetic forms.
+aluOpOf :: BitVector 3 -> BitVector 1 -> AluOp
+aluOpOf f3 alt = unpack (f3 ++# alt)
+
+{- | The ALU operation an @OP-IMM@ instruction names.
+
+@inst[30]@ belongs to the immediate in every form but the two shifts, so it is
+forced low there; left as it comes, an @ADDI@ with bit 10 of its immediate set
+would decode as a subtract.
+
+The RV64 shamt is 6 bits wide, so the shifts have only @inst[31:26]@ left to be
+told apart by.
+-}
+parseOpImm :: Inst -> Maybe AluOp
+parseOpImm instBits = case funct3 instBits of
+  0b001 -> orNothing (f7Hi == 0b000000) shiftOp -- SLLI
+  0b101 -> orNothing (f7Hi == 0b000000 || f7Hi == 0b010000) shiftOp -- SRLI, SRAI
+  f3 -> Just (aluOpOf f3 0)
   where
     f7Hi = slice d31 d26 instBits
-legalOpReg instBits = case funct7 instBits of
-  0b0000000 -> True -- I
-  0b0100000 -> case unpack (funct3 instBits) :: IOp of
-    ADD -> True -- SUB
-    SR -> True -- SRA
-    _ -> False
-  0b0000001 -> True -- M
-  _ -> False
-legalOpImm32 instBits = case unpack (funct3 instBits) :: IOp of
-  ADD -> True -- ADDIW
-  SLL -> funct7 instBits == 0b0000000 -- SLLIW
-  SR -> funct7 instBits == 0b0000000 || funct7 instBits == 0b0100000 -- SRLIW, SRAIW
-  _ -> False
-legalOpReg32 instBits = case funct7 instBits of
-  0b0000001 -> case unpack (funct3 instBits) :: MulDivType of
-    Multiply MulLow -> True -- MULW
-    Division _ -> True -- DIVW, DIVUW, REMW, REMUW
-    _ -> False
-  0b0000000 -> case unpack (funct3 instBits) :: IOp of
-    ADD -> True -- ADDW
-    SLL -> True -- SLLW
-    SR -> True -- SRLW
-    _ -> False
-  0b0100000 -> case unpack (funct3 instBits) :: IOp of
-    ADD -> True -- SUBW
-    SR -> True -- SRAW
-    _ -> False
-  _ -> False
-legalSystem instBits = case systemOp instBits of
-  Just SysIllegal -> False
-  Just (SysCsr (_, CsrIllegal)) -> False
-  _ -> True
+    shiftOp = aluOpOf (funct3 instBits) (slice d30 d30 instBits)
 
--- | What the instruction asks of the execution environment; 'Nothing' unless @SYSTEM@.
-systemOp :: Inst -> Maybe SystemOp
-systemOp instBits = case opcode instBits of
-  SYSTEM
-    | funct3 instBits /= 0 -> Just $ SysCsr (unpack $ funct3 instBits)
-    | ECALL <- system12 -> Just SysEcall
-    | EBREAK <- system12 -> Just SysEbreak
-    | MRET <- system12 -> Just SysMret
-    | otherwise -> Just SysIllegal
+{- | The ALU operation an @OP-IMM-32@ instruction names.
+
+The 32-bit shifts take a 5-bit shamt, so the whole of @funct7@ is left to check,
+unlike in 'parseOpImm'.
+-}
+parseOpImm32 :: Inst -> Maybe AluOp
+parseOpImm32 instBits = case funct3 instBits of
+  0b000 -> Just (aluOpOf 0b000 0) -- ADDIW
+  0b001 -> orNothing (f7 == 0b0000000) (aluOpOf 0b001 0) -- SLLIW
+  0b101 -> orNothing (f7 == 0b0000000 || f7 == 0b0100000) (aluOpOf 0b101 (slice d30 d30 instBits)) -- SRLIW, SRAIW
   _ -> Nothing
+  where
+    f7 = funct7 instBits
+
+{- | What a @SYSTEM@ instruction asks of the execution environment.
+
+A non-zero @funct3@ names a CSR access; a zero one leaves the whole of @funct12@
+to name the operation, and the fields it does not use must be zero.
+-}
+parseSystem :: Inst -> Maybe SystemOp
+parseSystem instBits
+  | funct3 instBits /= 0 = SysCsr <$> parseCsr (funct3 instBits)
+  | not (noRegs instBits) = Nothing
+  | ECALL <- system12 = Just SysEcall
+  | EBREAK <- system12 = Just SysEbreak
+  | MRET <- system12 = Just SysMret
+  | otherwise = Nothing
   where
     system12 = System12 $ slice d31 d20 instBits
-
-mulDiv :: Inst -> Maybe MulDivType
-mulDiv instBits = case opcode instBits of
-  OP_REG -> extM
-  OP_REG_32 -> extM
-  _ -> Nothing
-  where
-    extM = orNothing (funct7 instBits == 1) (unpack $ funct3 instBits)
 
 {- | Whether a source register of this instruction is still to be written by an
 instruction downstream, given as 'Cuintet.Pipeline.unresolved' of that stage.
