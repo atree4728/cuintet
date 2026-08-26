@@ -66,109 +66,114 @@ immB instBits = signExtend $ slice d31 d31 instBits ++# slice d7 d7 instBits ++#
 immU instBits = signExtend $ slice d31 d12 instBits ++# (0 :: BitVector 12)
 immJ instBits = signExtend $ slice d31 d31 instBits ++# slice d19 d12 instBits ++# slice d20 d20 instBits ++# slice d30 d21 instBits ++# (0 :: BitVector 1)
 
+{- FOURMOLU_DISABLE -}
+
 -- | The control flags and the immediate, both a function of the opcode alone.
 instDecode :: Inst -> (InstCtrl, BitVector XLen, Bool)
-instDecode instBits = case op of
-  LUI -> (instCtrl UType True True False False False False, immU instBits, True)
-  AUIPC -> (instCtrl UType True False False False False False, immU instBits, True)
-  JAL -> (instCtrl JType True False False False True False, immJ instBits, True)
-  JALR -> (instCtrl IType True False False False True False, immI instBits, True)
-  BRANCH -> (instCtrl BType False False False False False False, immB instBits, legalBranch)
-  LOAD -> (instCtrl IType True False False False False True, immI instBits, legalLoad)
-  STORE -> (instCtrl SType False False False False False False, immS instBits, legalStore)
-  OP_IMM -> (instCtrl IType True False True False False False, immI instBits, legalOpImm)
-  OP_REG -> (instCtrl RType True False True False False False, noImm, legalOpReg)
-  OP_IMM_32 -> (instCtrl IType True False True True False False, immI instBits, legalOpImm32)
-  OP_REG_32 -> (instCtrl RType True False True True False False, noImm, legalOpReg32)
-  MISC_MEM -> (instCtrl IType False False False False False False, immI instBits, True)
-  SYSTEM -> (instCtrl IType True False False False False False, immI instBits, legalSystem)
-  _ -> (instCtrl IType False False False False False False, noImm, False)
+instDecode instBits = case opcode instBits of
+  LUI       -> (instCtrl UType  True  True False False False False, immU instBits, True)
+  AUIPC     -> (instCtrl UType  True False False False False False, immU instBits, True)
+  JAL       -> (instCtrl JType  True False False False  True False, immJ instBits, True)
+  JALR      -> (instCtrl IType  True False False False  True False, immI instBits, True)
+  BRANCH    -> (instCtrl BType False False False False False False, immB instBits, legalBranch  instBits)
+  LOAD      -> (instCtrl IType  True False False False False  True, immI instBits, legalLoad    instBits)
+  STORE     -> (instCtrl SType False False False False False False, immS instBits, legalStore   instBits)
+  OP_IMM    -> (instCtrl IType  True False  True False False False, immI instBits, legalOpImm   instBits)
+  OP_REG    -> (instCtrl RType  True False  True False False False,         noImm, legalOpReg   instBits)
+  OP_IMM_32 -> (instCtrl IType  True False  True  True False False, immI instBits, legalOpImm32 instBits)
+  OP_REG_32 -> (instCtrl RType  True False  True  True False False,         noImm, legalOpReg32 instBits)
+  MISC_MEM  -> (instCtrl IType False False False False False False, immI instBits, True)
+  SYSTEM    -> (instCtrl IType  True False False False False False, immI instBits, legalSystem  instBits)
+  _         -> (instCtrl IType False False False False False False,         noImm, False)
   where
-    op = unpack $ slice d6 d0 instBits
-    funct3 = slice d14 d12 instBits
-    funct7 = slice d31 d25 instBits
-
-    instCtrl itype rwbEn isLui isAluOp isOp32 isJump isLoad = InstCtrl {..}
-
+    instCtrl itype rwbEn isLui isAluOp isOp32 isJump isLoad =
+      InstCtrl {funct3 = funct3 instBits, funct7 = funct7 instBits, systemOp = systemOp instBits, mulDiv = mulDiv instBits, ..}
     noImm = deepErrorX "instDecode: opcode carries no immediate"
 
-    legalBranch = case unpack funct3 :: BranchCond of
-      BranchIllegal -> False
-      _ -> True
+{- FOURMOLU_ENABLE -}
 
-    legalLoad = case unpack funct3 :: AccessWidth of
-      WidthIllegal -> False
-      _ -> True
+opcode :: Inst -> Opcode
+opcode = unpack . slice d6 d0
 
-    legalStore = case unpack funct3 :: AccessWidth of
-      Byte Signed -> True
-      Half Signed -> True
-      Word Signed -> True
-      DoubleWord -> True
-      _ -> False
+funct3 :: Inst -> BitVector 3
+funct3 = slice d14 d12
 
-    legalOpImm = case unpack funct3 :: IOp of
-      SLL -> f7Hi == 0b000000 -- SLLI
-      SR -> f7Hi == 0b000000 || f7Hi == 0b010000 -- SRLI, SRAI
-      _ -> True
-      where
-        f7Hi = slice d6 d1 funct7
+funct7 :: Inst -> BitVector 7
+funct7 = slice d31 d25
 
-    legalOpReg = case funct7 of
-      0b0000000 -> True -- RV32I
-      0b0100000 -> case unpack funct3 :: IOp of
-        ADD -> True -- SUB
-        SR -> True -- SRA
-        _ -> False
-      0b0000001 -> True -- RV32M
-      _ -> False
+-- | Whether the fields other than the opcode name an instruction that exists.
+legalBranch, legalLoad, legalStore, legalOpImm, legalOpReg, legalOpImm32, legalOpReg32, legalSystem :: Inst -> Bool
+legalBranch instBits = case unpack (funct3 instBits) :: BranchCond of
+  BranchIllegal -> False
+  _ -> True
+legalLoad instBits = case unpack (funct3 instBits) :: AccessWidth of
+  WidthIllegal -> False
+  _ -> True
+legalStore instBits = case unpack (funct3 instBits) :: AccessWidth of
+  Byte Signed -> True
+  Half Signed -> True
+  Word Signed -> True
+  DoubleWord -> True
+  _ -> False
+legalOpImm instBits = case unpack (funct3 instBits) :: IOp of
+  SLL -> f7Hi == 0b000000 -- SLLI
+  SR -> f7Hi == 0b000000 || f7Hi == 0b010000 -- SRLI, SRAI
+  _ -> True
+  where
+    f7Hi = slice d31 d26 instBits
+legalOpReg instBits = case funct7 instBits of
+  0b0000000 -> True -- RV32I
+  0b0100000 -> case unpack (funct3 instBits) :: IOp of
+    ADD -> True -- SUB
+    SR -> True -- SRA
+    _ -> False
+  0b0000001 -> True -- RV32M
+  _ -> False
+legalOpImm32 instBits = case unpack (funct3 instBits) :: IOp of
+  ADD -> True -- ADDIW
+  SLL -> funct7 instBits == 0b0000000 -- SLLIW
+  SR -> funct7 instBits == 0b0000000 || funct7 instBits == 0b0100000 -- SRLIW, SRAIW
+  _ -> False
+legalOpReg32 instBits = case funct7 instBits of
+  0b0000001 -> case unpack (funct3 instBits) :: MulDivType of
+    Multiply MulLow -> True -- MULW
+    Division _ -> True -- DIVW, DIVUW, REMW, REMUW
+    _ -> False
+  0b0000000 -> case unpack (funct3 instBits) :: IOp of
+    ADD -> True -- ADDW
+    SLL -> True -- SLLW
+    SR -> True -- SRLW
+    _ -> False
+  0b0100000 -> case unpack (funct3 instBits) :: IOp of
+    ADD -> True -- SUBW
+    SR -> True -- SRAW
+    _ -> False
+  _ -> False
+legalSystem instBits = case systemOp instBits of
+  Just SysIllegal -> False
+  Just (SysCsr (_, CsrIllegal)) -> False
+  _ -> True
 
-    legalOpImm32 = case unpack funct3 :: IOp of
-      ADD -> True -- ADDIW
-      SLL -> funct7 == 0b0000000 -- SLLIW
-      SR -> funct7 == 0b0000000 || funct7 == 0b0100000 -- SRLIW, SRAIW
-      _ -> False
+-- | What the instruction asks of the execution environment; 'Nothing' unless @SYSTEM@.
+systemOp :: Inst -> Maybe SystemOp
+systemOp instBits = case opcode instBits of
+  SYSTEM
+    | funct3 instBits /= 0 -> Just $ SysCsr (unpack $ funct3 instBits)
+    | ECALL <- system12 -> Just SysEcall
+    | EBREAK <- system12 -> Just SysEbreak
+    | MRET <- system12 -> Just SysMret
+    | otherwise -> Just SysIllegal
+  _ -> Nothing
+  where
+    system12 = System12 $ slice d31 d20 instBits
 
-    legalOpReg32 = case funct7 of
-      0b0000001 -> case unpack funct3 :: MulDivType of
-        Multiply MulLow -> True -- MULW
-        Division _ -> True -- DIVW, DIVUW, REMW, REMUW
-        _ -> False
-      0b0000000 -> case unpack funct3 :: IOp of
-        ADD -> True -- ADDW
-        SLL -> True -- SLLW
-        SR -> True -- SRLW
-        _ -> False
-      0b0100000 -> case unpack funct3 :: IOp of
-        ADD -> True -- SUBW
-        SR -> True -- SRAW
-        _ -> False
-      _ -> False
-
-    legalSystem = case systemOp of
-      Just SysIllegal -> False
-      Just (SysCsr (_, CsrIllegal)) -> False
-      _ -> True
-
-    systemOp :: Maybe SystemOp
-    systemOp = case op of
-      SYSTEM
-        | funct3 /= 0 -> Just $ SysCsr (unpack funct3)
-        | ECALL <- system12 -> Just SysEcall
-        | EBREAK <- system12 -> Just SysEbreak
-        | MRET <- system12 -> Just SysMret
-        | otherwise -> Just SysIllegal
-      _ -> Nothing
-      where
-        system12 = System12 $ slice d31 d20 instBits
-
-    mulDiv :: Maybe MulDivType
-    mulDiv = case op of
-      OP_REG -> extM
-      OP_REG_32 -> extM
-      _ -> Nothing
-      where
-        extM = orNothing (funct7 == 1) (unpack funct3)
+mulDiv :: Inst -> Maybe MulDivType
+mulDiv instBits = case opcode instBits of
+  OP_REG -> extM
+  OP_REG_32 -> extM
+  _ -> Nothing
+  where
+    extM = orNothing (funct7 instBits == 1) (unpack $ funct3 instBits)
 
 {- | Whether a source register of this instruction is still to be written by an
 instruction downstream, given as 'Cuintet.Pipeline.unresolved' of that stage.
