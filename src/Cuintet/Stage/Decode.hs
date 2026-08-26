@@ -122,12 +122,12 @@ legalOpImm instBits = case unpack (funct3 instBits) :: IOp of
   where
     f7Hi = slice d31 d26 instBits
 legalOpReg instBits = case funct7 instBits of
-  0b0000000 -> True -- RV32I
+  0b0000000 -> True -- I
   0b0100000 -> case unpack (funct3 instBits) :: IOp of
     ADD -> True -- SUB
     SR -> True -- SRA
     _ -> False
-  0b0000001 -> True -- RV32M
+  0b0000001 -> True -- M
   _ -> False
 legalOpImm32 instBits = case unpack (funct3 instBits) :: IOp of
   ADD -> True -- ADDIW

@@ -23,7 +23,7 @@ import Cuintet.Unit.Btb (BtbWrite, predicted, train)
 import Cuintet.Unit.Csr (CsrAccess (..), CsrAddr (..), CsrFile, CsrReq (..), CsrResp (..), CsrTrap (..), csrStep, initCsrFile)
 import Cuintet.Unit.LoadStore (InstInfo (..), LoadStoreReq (..), LoadStoreResp (..), LoadStoreState (..), loadStoreStep)
 import Cuintet.Util (orNothing)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 
 -- | The registers MA owns.
 data MemAccessState = MemAccessState
@@ -77,9 +77,9 @@ memAccess MemAccessState {..} MemAccessIn {..} =
     (csrFile', csrResp) = csrStep csrFile csrReq
     csrReq
       | not valid = Nothing
+      | Just (cause, value) <- exception = Just $ Trap CsrTrap {epc = pc, ..}
       | Just (SysCsr (src, op)) <- ctrl.systemOp =
           Just $ Access CsrAccess {csrAddr = CsrAddr (slice d11 d0 imm), op, src, rs1Addr, rs1Data}
-      | Just (cause, value) <- exception = Just $ Trap CsrTrap {epc = pc, ..}
       | Just SysMret <- ctrl.systemOp = Just Mret
       | otherwise = Nothing
     csrRdata = case csrResp of Just (Accessed v) -> Just v; _ -> Nothing
@@ -89,7 +89,7 @@ memAccess MemAccessState {..} MemAccessIn {..} =
       loadStoreStep
         loadStoreState
         LoadStoreReq
-          { inst = orNothing valid InstInfo {ctrl, addr = bitCoerce aluResult, wdata = rs2Data}
+          { inst = orNothing (valid && isNothing exception) InstInfo {ctrl, addr = bitCoerce aluResult, wdata = rs2Data}
           , memResp = dResp
           }
 

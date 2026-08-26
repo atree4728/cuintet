@@ -14,6 +14,7 @@ import Cuintet.CoreCtrl (InstCtrl (..), isCsrRead)
 import Cuintet.Eei (Addr, Inst, RegAddr, TrapCause, XLen)
 import Cuintet.Unit.Btb (Prediction)
 import Cuintet.Util (orNothing)
+import Data.Maybe (isNothing)
 import GHC.Records (HasField)
 
 -- | What IF fetched: the instruction word and the address it came from.
@@ -103,15 +104,27 @@ shared by the interlock in ID and the write in WB.
 It is stated over the fields rather than a payload type so that it applies at
 every stage the instruction passes through.
 -}
-destReg :: (HasField "ctrl" stage InstCtrl, HasField "rdAddr" stage RegAddr) => stage -> Maybe RegAddr
-destReg stage = orNothing (stage.ctrl.rwbEn && stage.rdAddr /= 0) stage.rdAddr
+destReg ::
+  ( HasField "exception" stage (Maybe (TrapCause, BitVector XLen))
+  , HasField "ctrl" stage InstCtrl
+  , HasField "rdAddr" stage RegAddr
+  ) =>
+  stage -> Maybe RegAddr
+destReg stage = orNothing (isNothing stage.exception && stage.ctrl.rwbEn && stage.rdAddr /= 0) stage.rdAddr
 
 forwardable ::
-  (HasField "ctrl" stage InstCtrl, HasField "rdAddr" stage RegAddr, HasField "wbData" stage t) =>
+  ( HasField "exception" stage (Maybe (TrapCause, BitVector XLen))
+  , HasField "ctrl" stage InstCtrl
+  , HasField "rdAddr" stage RegAddr
+  , HasField "wbData" stage t
+  ) =>
   stage -> Maybe (RegAddr, t)
 forwardable stage = (,stage.wbData) <$> destReg stage
 
 unresolved ::
-  (HasField "ctrl" stage InstCtrl, HasField "rdAddr" stage RegAddr) =>
+  ( HasField "exception" stage (Maybe (TrapCause, BitVector XLen))
+  , HasField "ctrl" stage InstCtrl
+  , HasField "rdAddr" stage RegAddr
+  ) =>
   stage -> Maybe RegAddr
 unresolved stage = orNothing (stage.ctrl.isLoad || isCsrRead stage.ctrl) =<< destReg stage
