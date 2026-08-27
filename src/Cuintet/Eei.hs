@@ -41,6 +41,7 @@ module Cuintet.Eei (
   RegFile,
   RegAddr,
   TrapCause (..),
+  pattern INSTRUCTION_ADDRESS_MISALIGNED,
   pattern ILLEGAL_INSTRUCTION,
   pattern BREAKPOINT,
   pattern ENVIRONMENT_CALL_FROM_M_MODE,
@@ -398,7 +399,8 @@ data TrapCause
 
 deriveAutoReg ''TrapCause
 
-pattern ILLEGAL_INSTRUCTION, BREAKPOINT, ENVIRONMENT_CALL_FROM_M_MODE :: TrapCause
+pattern INSTRUCTION_ADDRESS_MISALIGNED, ILLEGAL_INSTRUCTION, BREAKPOINT, ENVIRONMENT_CALL_FROM_M_MODE :: TrapCause
+pattern INSTRUCTION_ADDRESS_MISALIGNED = TrapCause False 0
 pattern ILLEGAL_INSTRUCTION = TrapCause False 2
 pattern BREAKPOINT = TrapCause False 3
 pattern ENVIRONMENT_CALL_FROM_M_MODE = TrapCause False 11

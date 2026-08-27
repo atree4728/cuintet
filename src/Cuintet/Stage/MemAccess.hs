@@ -4,7 +4,7 @@ module Cuintet.Stage.MemAccess (initMemAccessState, memAccess, MemAccessIn (..),
 import Clash.Prelude
 import Control.Monad (guard)
 import Cuintet.CoreCtrl (InstCtrl (..), isBranchOp, isLoad)
-import Cuintet.Eei (Addr, MemReq, MemResp, SystemOp (..))
+import Cuintet.Eei (Addr, MemReq, MemResp, SystemOp (..), pattern INSTRUCTION_ADDRESS_MISALIGNED)
 import Cuintet.Pipeline (ExMa (..), MaWb (..))
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
 import Cuintet.Unit.Csr (AccessSpec (..), CsrFile, CsrReq (..), CsrResp (..), TrapSpec (..), csrStep, initCsrFile)
@@ -87,21 +87,28 @@ memAccess MemAccessState {..} MemAccessIn {..} =
 
     maWb =
       MaWb
-        { branchTaken = orNothing (isBranchOp ctrl) branchTaken
+        { exception = exception'
+        , branchTaken = orNothing (isBranchOp ctrl) branchTaken
         , wbData = wbData'
         , csrRdata
         , ..
         }
 
-    actualNextPc
+    resolved
       | Just target <- csrRedirect = target
       | ctrl.isJump = bitCoerce (aluResult .&. complement 1)
       | isBranchOp ctrl && branchTaken = pc + numConvert imm
       | otherwise = pc + 4
 
-    redirect = orNothing (commit && actualNextPc /= predicted pc prediction) actualNextPc
+    exception' =
+      exception
+        <|> orNothing
+          ((truncateB (pack resolved) :: BitVector 2) == 0)
+          (INSTRUCTION_ADDRESS_MISALIGNED, pc)
 
-    taken = orNothing (actualNextPc /= pc + 4) actualNextPc
+    redirect = orNothing (commit && resolved /= predicted pc prediction) resolved
+
+    taken = orNothing (resolved /= pc + 4) resolved
 
     btbWrite = guard commit >> train pc prediction taken
 {-# OPAQUE memAccess #-}
