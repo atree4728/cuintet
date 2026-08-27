@@ -7,8 +7,8 @@ import Cuintet.CoreCtrl (InstCtrl (..), isBranchOp, isLoad)
 import Cuintet.Eei (Addr, MemReq, MemResp, SystemOp (..))
 import Cuintet.Pipeline (ExMa (..), MaWb (..))
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
-import Cuintet.Unit.Csr (CsrAccess (..), CsrAddr (..), CsrFile, CsrReq (..), CsrResp (..), CsrTrap (..), csrStep, initCsrFile)
-import Cuintet.Unit.LoadStore (InstInfo (..), LoadStoreReq (..), LoadStoreResp (..), LoadStoreState (..), loadStoreStep)
+import Cuintet.Unit.Csr (AccessSpec (..), CsrAddr (..), CsrFile, CsrReq (..), CsrResp (..), TrapSpec (..), csrStep, initCsrFile)
+import Cuintet.Unit.LoadStore (LoadStoreJob (..), LoadStoreReq (..), LoadStoreResp (..), LoadStoreState (..), loadStoreStep)
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 
@@ -60,19 +60,19 @@ memAccess MemAccessState {..} MemAccessIn {..} =
     (csrFile', csrResp) = csrStep csrFile csrReq
     csrReq
       | not valid = Nothing
-      | Just (cause, value) <- exception = Just $ Trap CsrTrap {epc = pc, ..}
+      | Just (cause, value) <- exception = Just $ TrapEnter TrapSpec {epc = pc, ..}
       | Just (SysCsr (src, op)) <- ctrl.systemOp =
-          Just $ Access CsrAccess {csrAddr = CsrAddr (slice d11 d0 imm), op, src, rs1Addr, rs1Data}
-      | Just SysMret <- ctrl.systemOp = Just Mret
+          Just $ CsrAccess AccessSpec {csrAddr = CsrAddr (slice d11 d0 imm), op, src, rs1Addr, rs1Data}
+      | Just SysMret <- ctrl.systemOp = Just TrapReturn
       | otherwise = Nothing
-    csrRdata = case csrResp of Just (Accessed v) -> Just v; _ -> Nothing
+    csrRdata = case csrResp of Just (ReadValue v) -> Just v; _ -> Nothing
     csrRedirect = case csrResp of Just (Redirect a) -> Just a; _ -> Nothing
 
     (loadStoreState', loadStoreResp) =
       loadStoreStep
         loadStoreState
         LoadStoreReq
-          { inst = orNothing (valid && isNothing exception) InstInfo {ctrl, addr = bitCoerce aluResult, wdata = rs2Data}
+          { job = orNothing (valid && isNothing exception) LoadStoreJob {ctrl, addr = bitCoerce aluResult, wdata = rs2Data}
           , memResp = dResp
           }
 
@@ -81,7 +81,7 @@ memAccess MemAccessState {..} MemAccessIn {..} =
 
     -- what to write back; whether and where is WB's decision
     wbData'
-      | isLoad ctrl = fromMaybe (deepErrorX "memAccess: load committed without data") loadStoreResp.rdata
+      | isLoad ctrl = fromMaybe (deepErrorX "memAccess: load committed without data") loadStoreResp.result
       | Just rdata <- csrRdata = rdata
       | otherwise = wbData
 

@@ -7,7 +7,7 @@ module Cuintet.Eei (
   Inst,
   Sign (..),
   Width (..),
-  Access (..),
+  MemOp (..),
   parseLoad,
   parseStore,
   LaneOffset,
@@ -17,7 +17,7 @@ module Cuintet.Eei (
   aligned,
   laneMask,
   StoreLanes (..),
-  LoadFmt (..),
+  LoadShape (..),
   BusReq (..),
   BusResp (..),
   MemDataBytes,
@@ -25,11 +25,11 @@ module Cuintet.Eei (
   MemResp,
   Opcode (LUI, AUIPC, JAL, JALR, BRANCH, LOAD, STORE, OP_IMM, OP_REG, OP_IMM_32, OP_REG_32, MISC_MEM, SYSTEM),
   AluOp (..),
-  BranchCond (..),
-  parseBranch,
+  BranchOp (..),
+  parseBranchOp,
   MulOp (..),
   DivOp (..),
-  MulDivType (..),
+  MulDivOp (..),
   CsrOp (..),
   CsrSrc (..),
   parseCsr,
@@ -85,7 +85,7 @@ deriveDefaultAnnotation [t|Width|]
 deriveBitPack [t|Width|]
 
 -- | What a memory instruction asks of memory.
-data Access = Load Width Sign | Store Width
+data MemOp = Load Width Sign | Store Width
   deriving (Generic, NFDataX)
 
 -- | The width and sign a load's @funct3@. 'Nothing' for @0b111@.
@@ -140,7 +140,7 @@ newtype StoreLanes nBytes = StoreLanes (Vec nBytes (Maybe (BitVector 8)))
   deriving anyclass (NFDataX)
 
 -- | Load request, which is to be sliced and extended.
-data LoadFmt = LoadFmt {width :: Width, sign :: Sign, offset :: LaneOffset}
+data LoadShape = LoadShape {width :: Width, sign :: Sign, offset :: LaneOffset}
   deriving (Generic, NFDataX)
 
 {- | Memory access request, carried on the bus as @Maybe (MemBusReq ...)@;
@@ -229,7 +229,7 @@ data AluOp
 deriveBitPack [t|AluOp|]
 
 -- | The branch condition, derived from @unpack funct3@.
-data BranchCond
+data BranchOp
   = BEQ
   | BNE
   | BLT
@@ -241,7 +241,7 @@ data BranchCond
 {-# ANN
   module
   ( DataReprAnn
-      $(liftQ [t|BranchCond|])
+      $(liftQ [t|BranchOp|])
       3
       [ ConstrRepr 'BEQ 0b111 0b000 []
       , ConstrRepr 'BNE 0b111 0b001 []
@@ -253,11 +253,11 @@ data BranchCond
   )
   #-}
 
-deriveBitPack [t|BranchCond|]
+deriveBitPack [t|BranchOp|]
 
 -- | The branch a @funct3@ names, or 'Nothing' for the two patterns that name none: @0b01x@.
-parseBranch :: BitVector 3 -> Maybe BranchCond
-parseBranch f3 = orNothing (slice d2 d1 f3 /= 0b01) (unpack f3)
+parseBranchOp :: BitVector 3 -> Maybe BranchOp
+parseBranchOp f3 = orNothing (slice d2 d1 f3 /= 0b01) (unpack f3)
 
 data MulOp = MulLow | MulHighHom Sign | MulHighHetero
   deriving (Eq, Generic, NFDataX)
@@ -265,7 +265,7 @@ data MulOp = MulLow | MulHighHom Sign | MulHighHetero
 data DivOp = Div Sign | Rem Sign
   deriving (Eq, Generic, NFDataX)
 
-data MulDivType = Multiply MulOp | Division DivOp
+data MulDivOp = Multiply MulOp | Division DivOp
   deriving (Eq, Generic, NFDataX)
 
 {-# ANN
@@ -298,7 +298,7 @@ deriveBitPack [t|DivOp|]
 {-# ANN
   module
   ( DataReprAnn
-      $(liftQ [t|MulDivType|])
+      $(liftQ [t|MulDivOp|])
       3
       [ ConstrRepr 'Multiply 0b100 0b000 [0b011]
       , ConstrRepr 'Division 0b100 0b100 [0b011]
@@ -306,7 +306,7 @@ deriveBitPack [t|DivOp|]
   )
   #-}
 
-deriveBitPack [t|MulDivType|]
+deriveBitPack [t|MulDivOp|]
 
 -- | What a CSR access does to the register, derived from @funct3[1:0]@.
 data CsrOp

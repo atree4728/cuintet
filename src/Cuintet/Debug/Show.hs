@@ -1,7 +1,7 @@
 module Cuintet.Debug.Show (showInstLog, instLogLines, showInstLogs, hex) where
 
 import Clash.Prelude
-import Cuintet.CoreCtrl (InstCtrl (itype), instCode)
+import Cuintet.CoreCtrl (InstCtrl (format), formatCode)
 import Cuintet.Pipeline (MaWb (..), destReg)
 import Data.List (intercalate)
 import Text.Printf (printf)
@@ -10,13 +10,13 @@ import Text.Printf (printf)
 
 >>> import Prelude
 >>> import Cuintet.Pipeline (MaWb (..))
->>> import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
+>>> import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..))
 >>> import Cuintet.Eei (AluOp (..))
->>> ctrl = InstCtrl{itype = IType, rwbEn = True, isLui = False, aluOp = Just ADD, isOp32 = False, isJump = False, access = Nothing, branch = Nothing, mulDiv = Nothing, systemOp = Nothing}
+>>> ctrl = InstCtrl{format = IType, rwbEn = True, isLui = False, aluOp = Just ADD, isOp32 = False, isJump = False, memOp = Nothing, branchOp = Nothing, mulDivOp = Nothing, systemOp = Nothing}
 >>> l = MaWb{pc = 12, instBits = 0x00110193, ctrl, imm = 1, rs1Addr = 2, rs2Addr = 1, rdAddr = 3, exception = Nothing, rs1Data = 42, rs2Data = 0, op1 = 42, op2 = 1, aluResult = 43, wbData = 43, branchTaken = Nothing, csrRdata = Nothing, prediction = Nothing}
 >>> putStrLn (showInstLog l)
 0000000c : 00110193
-  itype   : 000010
+  format  : 000010
   imm     : 00000001
   rs1[ 2] : 0000002a
   rs2[ 1] : 00000000
@@ -38,7 +38,7 @@ showInstLog = intercalate "\n" . instLogLines
 instLogLines :: MaWb -> [String]
 instLogLines l =
   [ printf "%s : %s" (hex l.pc) (hex l.instBits)
-  , printf "  itype   : %06b" (toInteger $ instCode l.ctrl.itype)
+  , printf "  format  : %06b" (toInteger $ formatCode l.ctrl.format)
   , printf "  imm     : %s" (hex l.imm)
   , printf "  rs1[%2d] : %s" (toInteger l.rs1Addr) (hex l.rs1Data)
   , printf "  rs2[%2d] : %s" (toInteger l.rs2Addr) (hex l.rs2Data)

@@ -2,8 +2,8 @@
 module Cuintet.Stage.Decode (decode, DecodeIn (..), DecodeOut (..), immI, immS, immB, immU, immJ) where
 
 import Clash.Prelude
-import Cuintet.CoreCtrl (InstCtrl (..), InstType (..), usesRs1, usesRs2)
-import Cuintet.Eei (Access (..), AluOp, Inst, Opcode (..), RegAddr, System12 (..), SystemOp (..), XLen, parseBranch, parseCsr, parseLoad, parseStore, pattern BREAKPOINT, pattern ENVIRONMENT_CALL_FROM_M_MODE, pattern ILLEGAL_INSTRUCTION)
+import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), usesRs1, usesRs2)
+import Cuintet.Eei (AluOp, Inst, MemOp (..), Opcode (..), RegAddr, System12 (..), SystemOp (..), XLen, parseBranchOp, parseCsr, parseLoad, parseStore, pattern BREAKPOINT, pattern ENVIRONMENT_CALL_FROM_M_MODE, pattern ILLEGAL_INSTRUCTION)
 import Cuintet.Pipeline (IdEx (..), IfId (..), srcRegs)
 import Cuintet.Unit.RegFile (RegResp (..))
 import Cuintet.Util (orNothing)
@@ -70,21 +70,21 @@ instDecode instBits = case opcode instBits of
   JAL -> Just (jType {rwbEn = True, isJump = True}, immJ instBits)
   JALR -> orNothing (f3 == 0) (iType {rwbEn = True, isJump = True}, immI instBits)
   BRANCH -> do
-    cond <- parseBranch f3
-    Just (bType {branch = Just cond}, immB instBits)
+    cond <- parseBranchOp f3
+    Just (bType {branchOp = Just cond}, immB instBits)
   LOAD -> do
     (width, sign) <- parseLoad f3
-    Just (iType {rwbEn = True, access = Just (Load width sign)}, immI instBits)
+    Just (iType {rwbEn = True, memOp = Just (Load width sign)}, immI instBits)
   STORE -> do
     width <- parseStore f3
-    Just (sType {access = Just (Store width)}, immS instBits)
+    Just (sType {memOp = Just (Store width)}, immS instBits)
   OP_IMM -> do
     op <- parseOpImm instBits
     Just (iType {rwbEn = True, aluOp = Just op}, immI instBits)
   OP_REG -> case funct7 instBits of
     0b0000000 -> Just (opReg 0)
     0b0100000 -> orNothing (f3 == 0b000 || f3 == 0b101) (opReg 1) -- SUB, SRA
-    0b0000001 -> Just (rType {rwbEn = True, mulDiv = Just (unpack f3)}, noImm) -- M
+    0b0000001 -> Just (rType {rwbEn = True, mulDivOp = Just (unpack f3)}, noImm) -- M
     _ -> Nothing
   OP_IMM_32 -> do
     op <- parseOpImm32 instBits
@@ -92,7 +92,7 @@ instDecode instBits = case opcode instBits of
   OP_REG_32 -> case funct7 instBits of
     0b0000000 -> orNothing (f3 == 0b000 || f3 == 0b001 || f3 == 0b101) (opReg32 0) -- ADDW, SLLW, SRLW
     0b0100000 -> orNothing (f3 == 0b000 || f3 == 0b101) (opReg32 1) -- SUBW, SRAW
-    0b0000001 -> orNothing (f3 == 0b000 || msb f3 == 1) (rType {rwbEn = True, mulDiv = Just (unpack f3), isOp32 = True}, noImm) -- MULW, DIVW, DIVUW, REMW, REMUW
+    0b0000001 -> orNothing (f3 == 0b000 || msb f3 == 1) (rType {rwbEn = True, mulDivOp = Just (unpack f3), isOp32 = True}, noImm) -- MULW, DIVW, DIVUW, REMW, REMUW
     _ -> Nothing
   -- FENCE orders nothing this core reorders, so it is a nop; FENCE.I is Zifencei, which it does not have
   MISC_MEM -> orNothing (f3 == 0 && noRegs instBits) (iType, immI instBits)
@@ -113,8 +113,8 @@ instDecode instBits = case opcode instBits of
     noImm = 0 -- the opcode carries no immediate; kept zero so nothing downstream sees an X
 
 -- | An 'InstCtrl' of the given form that does nothing at all; what every arm of 'instDecode' starts from.
-blank :: InstType -> InstCtrl
-blank itype = InstCtrl {itype, rwbEn = False, isLui = False, aluOp = Nothing, isOp32 = False, isJump = False, access = Nothing, branch = Nothing, mulDiv = Nothing, systemOp = Nothing}
+blank :: InstFormat -> InstCtrl
+blank format = InstCtrl {format, rwbEn = False, isLui = False, aluOp = Nothing, isOp32 = False, isJump = False, memOp = Nothing, branchOp = Nothing, mulDivOp = Nothing, systemOp = Nothing}
 
 trapCtrl :: InstCtrl
 trapCtrl = blank IType

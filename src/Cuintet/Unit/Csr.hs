@@ -1,8 +1,8 @@
 module Cuintet.Unit.Csr (
   CsrAddr (..),
   CsrReq (..),
-  CsrAccess (..),
-  CsrTrap (..),
+  AccessSpec (..),
+  TrapSpec (..),
   CsrResp (..),
   CsrFile (led),
   initCsrFile,
@@ -25,14 +25,6 @@ pattern MTVAL = CsrAddr 0x343
 pattern LED = CsrAddr 0x800
 pattern MCYCLE = CsrAddr 0xB00
 
--- | @mcause@ as it reads: the interrupt flag in the top bit, the code in the bottom.
-mcauseValue :: TrapCause -> BitVector XLen
-mcauseValue TrapCause {interrupt, code} = pack interrupt ++# zeroExtend code
-
--- | The inverse. The bits between the flag and the code name no cause, and are dropped.
-mcauseCause :: BitVector XLen -> TrapCause
-mcauseCause value = TrapCause {interrupt = bitToBool (msb value), code = truncateB value}
-
 data CsrFile = CsrFile
   { mtvec :: BitVector XLen
   , mepc :: BitVector XLen
@@ -45,7 +37,7 @@ data CsrFile = CsrFile
 
 deriveAutoReg ''CsrFile
 
-data CsrAccess = CsrAccess
+data AccessSpec = AccessSpec
   { csrAddr :: CsrAddr
   , op :: CsrOp
   , src :: CsrSrc
@@ -54,23 +46,21 @@ data CsrAccess = CsrAccess
   }
   deriving (Generic, NFDataX)
 
--- | Enter a trap taken at @epc@. What raised it is the caller's business.
-data CsrTrap = CsrTrap
+data TrapSpec = TrapSpec
   { epc :: Addr
   , value :: BitVector XLen
   , cause :: TrapCause
   }
   deriving (Generic, NFDataX)
 
--- | The two things the unit is asked for are mutually exclusive.
 data CsrReq
-  = Access CsrAccess
-  | Trap CsrTrap
-  | Mret
+  = CsrAccess AccessSpec
+  | TrapEnter TrapSpec
+  | TrapReturn
   deriving (Generic, NFDataX)
 
 data CsrResp
-  = Accessed (BitVector XLen)
+  = ReadValue (BitVector XLen)
   | Redirect Addr
   deriving (Generic, NFDataX)
 
@@ -89,26 +79,26 @@ aligned :: BitVector XLen -> BitVector XLen
 aligned bits = slice d63 d2 bits ++# zeroBits
 
 serve :: CsrFile -> CsrReq -> (CsrFile, CsrResp)
-serve file (Trap CsrTrap {..}) =
+serve file (TrapEnter TrapSpec {..}) =
   ( file {mepc = aligned (pack epc), mcause = cause, mtval = value}
   , Redirect $ unpack file.mtvec
   )
-serve file Mret = (file, Redirect $ unpack file.mepc)
-serve file (Access CsrAccess {..})
+serve file TrapReturn = (file, Redirect $ unpack file.mepc)
+serve file (CsrAccess AccessSpec {..})
   | MTVEC <- csrAddr =
       let old = unpack file.mtvec
-       in (file {mtvec = aligned (written old)}, Accessed old)
+       in (file {mtvec = aligned (written old)}, ReadValue old)
   | MEPC <- csrAddr =
       let old = unpack file.mepc
-       in (file {mepc = aligned (written old)}, Accessed old)
+       in (file {mepc = aligned (written old)}, ReadValue old)
   | MCAUSE <- csrAddr =
-      let old = mcauseValue file.mcause
-       in (file {mcause = mcauseCause (written old)}, Accessed old)
+      let old = pack file.mcause.interrupt ++# zeroExtend file.mcause.code
+       in (file {mcause = trapCause (written old)}, ReadValue old)
   | MTVAL <- csrAddr =
       let old = unpack file.mtval
-       in (file {mtval = written old}, Accessed old)
-  | LED <- csrAddr = (file {led = written file.led}, Accessed file.led)
-  | MCYCLE <- csrAddr = (file {mcycle = written file.mcycle}, Accessed file.mcycle)
+       in (file {mtval = written old}, ReadValue old)
+  | LED <- csrAddr = (file {led = written file.led}, ReadValue file.led)
+  | MCYCLE <- csrAddr = (file {mcycle = written file.mcycle}, ReadValue file.mcycle)
   | otherwise = deepErrorX "csrStep: unimplemented CSR instruction"
   where
     written old = csrWrite op old wdata
@@ -119,6 +109,7 @@ serve file (Access CsrAccess {..})
       ReadWrite -> Just wvalue
       -- For both CSRRS and CSRRC, if rs1=x0, then the instruction will not write to the CSR at all
       _ -> orNothing (rs1Addr /= 0) wvalue
+    trapCause value = TrapCause {interrupt = bitToBool (msb value), code = truncateB value}
 
 initCsrFile :: CsrFile
 initCsrFile = CsrFile {mtvec = 0, mepc = 0, mcause = TrapCause False 0, mtval = 0, led = 0, mcycle = 0}

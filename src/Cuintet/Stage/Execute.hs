@@ -2,10 +2,10 @@
 module Cuintet.Stage.Execute (execute, ExecuteIn (..), ExecuteOut (..)) where
 
 import Clash.Prelude
-import Cuintet.CoreCtrl (InstCtrl (..), InstType (..))
-import Cuintet.Eei (Addr, AluOp (..), BranchCond (..), XLen)
+import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..))
+import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), XLen)
 import Cuintet.Pipeline (ExMa (..), IdEx (..))
-import Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState, mkMulDivInst, mulDivStep)
+import Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState, mkMulDivJob, mulDivStep)
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust)
 
@@ -25,7 +25,7 @@ newtype ExecuteOut = ExecuteOut
 execute :: MulDivState -> ExecuteIn -> (MulDivState, ExecuteOut)
 execute mulDivState ExecuteIn {..} = (mulDivState', exOut)
   where
-    (mulDivState', mulDivResp) = mulDivStep mulDivState MulDivReq {inst = mkMulDivInst =<< entry, wready}
+    (mulDivState', mulDivResp) = mulDivStep mulDivState MulDivReq {job = mkMulDivJob =<< entry, wready}
 
     -- the instruction leaves once the multiply/divide unit has let go of it
     issued = isJust entry && wready && not mulDivResp.stall
@@ -40,10 +40,10 @@ mkExMa mulDivResult IdEx {..} = ExMa {op1, op2, aluResult, branchTaken, ..}
     (op1, op2) = operands ctrl imm rs1Data rs2Data pc
     aluResult = alu ctrl op1 op2
 
-    branchTaken = maybe False (\cond -> branchUnit cond op1 op2) ctrl.branch
+    branchTaken = maybe False (\cond -> branchUnit cond op1 op2) ctrl.branchOp
 
     wbData
-      | isJust ctrl.mulDiv = fromMaybe (deepErrorX "execute: muldiv committed without a result") mulDivResult
+      | isJust ctrl.mulDivOp = fromMaybe (deepErrorX "execute: muldiv committed without a result") mulDivResult
       | ctrl.isLui = imm
       | ctrl.isJump = bitCoerce (pc + 4)
       | otherwise = aluResult
@@ -56,7 +56,7 @@ operands ::
   BitVector XLen ->
   Addr ->
   (BitVector XLen, BitVector XLen)
-operands InstCtrl {itype} imm rs1Data rs2Data pc = case itype of
+operands InstCtrl {format} imm rs1Data rs2Data pc = case format of
   RType -> (rs1Data, rs2Data)
   BType -> (rs1Data, rs2Data)
   IType -> (rs1Data, imm)
@@ -91,7 +91,7 @@ alu InstCtrl {aluOp, isOp32} op1 op2 = maybe (op1 + op2) run aluOp
         signed x = bitCoerce x :: Signed n
 
 -- | Whether the branch is taken. Every condition the type can hold names a branch, so the match is total.
-branchUnit :: BranchCond -> BitVector XLen -> BitVector XLen -> Bool
+branchUnit :: BranchOp -> BitVector XLen -> BitVector XLen -> Bool
 branchUnit cond op1 op2 = case cond of
   BEQ -> beq
   BNE -> not beq

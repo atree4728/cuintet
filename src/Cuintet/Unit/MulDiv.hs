@@ -1,27 +1,28 @@
-module Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState (..), mkMulDivInst, mulDivStep) where
+module Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState (..), mkMulDivJob, mulDivStep) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..))
-import Cuintet.Eei (DivOp (..), MulDivType (..), MulOp (..), Sign (..), XLen)
+import Cuintet.Eei (DivOp (..), MulDivOp (..), MulOp (..), Sign (..), XLen)
 import Cuintet.Pipeline (IdEx (..))
 import Cuintet.Unit.MulDiv.Div (DivOperands (..), DivResult (..), DivState, divInit, divResult, divStep)
 import Cuintet.Unit.MulDiv.Mul (MulOperands (..), MulResult (..), MulState, mulInit, mulResult, mulStep)
 import Data.Function (applyWhen)
 import Data.Maybe (isJust, isNothing)
 
-data MulDivInst = MulDivInst
-  { mulDivType :: MulDivType
+-- | One multiply or divide for the unit to carry out.
+data MulDivJob = MulDivJob
+  { mulDivOp :: MulDivOp
   , isOp32 :: Bool
   , op1, op2 :: BitVector XLen
   }
 
-mkMulDivInst :: IdEx -> Maybe MulDivInst
-mkMulDivInst IdEx {..}
-  | Just mulDivType <- ctrl.mulDiv = Just MulDivInst {mulDivType, isOp32 = ctrl.isOp32, op1 = rs1Data, op2 = rs2Data}
+mkMulDivJob :: IdEx -> Maybe MulDivJob
+mkMulDivJob IdEx {..}
+  | Just mulDivOp <- ctrl.mulDivOp = Just MulDivJob {mulDivOp, isOp32 = ctrl.isOp32, op1 = rs1Data, op2 = rs2Data}
   | otherwise = Nothing
 
 data MulDivReq = MulDivReq
-  { inst :: Maybe MulDivInst
+  { job :: Maybe MulDivJob
   , wready :: Bool
   }
 
@@ -34,10 +35,10 @@ data MulDivState = Idle | Multiplying MulState | Dividing DivState
   deriving (Generic, NFDataX)
 
 mulDivStep :: MulDivState -> MulDivReq -> (MulDivState, MulDivResp)
-mulDivStep _ MulDivReq {inst = Nothing} = (Idle, MulDivResp {stall = False, result = Nothing})
-mulDivStep state MulDivReq {inst = Just inst, wready} = (state', MulDivResp {stall = isNothing result, result})
+mulDivStep _ MulDivReq {job = Nothing} = (Idle, MulDivResp {stall = False, result = Nothing})
+mulDivStep state MulDivReq {job = Just job, wready} = (state', MulDivResp {stall = isNothing result, result})
   where
-    (result, stepped) = case inst.mulDivType of
+    (result, stepped) = case job.mulDivOp of
       Multiply op -> (finish <$> (mulResult =<< running), Multiplying next)
         where
           running = case state of
@@ -47,9 +48,9 @@ mulDivStep state MulDivReq {inst = Just inst, wready} = (state', MulDivResp {sta
             MulLow -> ((Signed, Signed), snd)
             MulHighHom sign -> ((sign, sign), fst)
             MulHighHetero -> ((Signed, Unsigned), fst)
-          ops = mulOperands signs inst
+          ops = mulOperands signs job
           next = maybe (mulInit ops) (mulStep ops) running
-          finish mres = sextWord inst.isOp32 $ pick (bitCoerce mres.product)
+          finish mres = sextWord job.isOp32 $ pick (bitCoerce mres.product)
       Division op -> (finish <$> (divResult =<< running), Dividing next)
         where
           running = case state of
@@ -58,10 +59,10 @@ mulDivStep state MulDivReq {inst = Just inst, wready} = (state', MulDivResp {sta
           (sign, pick) = case op of
             Div s -> (s, fst)
             Rem s -> (s, snd)
-          (dividend, divisor) = magnitudes sign inst
+          (dividend, divisor) = magnitudes sign job
           ops = DivOperands {dividend = dividend.value, divisor = divisor.value}
           next = maybe (divInit ops) (divStep ops) running
-          finish DivResult {quotient = q, remainder = r} = sextWord inst.isOp32 . pack $ pick (quotient, remainder)
+          finish DivResult {quotient = q, remainder = r} = sextWord job.isOp32 . pack $ pick (quotient, remainder)
             where
               quotient
                 | divisor.value == 0 = maxBound
@@ -73,8 +74,8 @@ mulDivStep state MulDivReq {inst = Just inst, wready} = (state', MulDivResp {sta
       | otherwise = stepped
 {-# OPAQUE mulDivStep #-}
 
-mulOperands :: (Sign, Sign) -> MulDivInst -> MulOperands
-mulOperands (sign1, sign2) MulDivInst {op1, op2} =
+mulOperands :: (Sign, Sign) -> MulDivJob -> MulOperands
+mulOperands (sign1, sign2) MulDivJob {op1, op2} =
   MulOperands {multiplicand = widen sign1 op1, multiplier = widen sign2 op2}
   where
     widen sign =
@@ -84,8 +85,8 @@ mulOperands (sign1, sign2) MulDivInst {op1, op2} =
 
 data Magnitude = Magnitude {negative :: Bool, value :: Unsigned XLen}
 
-magnitudes :: Sign -> MulDivInst -> (Magnitude, Magnitude)
-magnitudes sign MulDivInst {isOp32, op1, op2} = (magnitude op1, magnitude op2)
+magnitudes :: Sign -> MulDivJob -> (Magnitude, Magnitude)
+magnitudes sign MulDivJob {isOp32, op1, op2} = (magnitude op1, magnitude op2)
   where
     magnitude x = Magnitude {negative, value = applyWhen negative negate (bitCoerce narrowed)}
       where
