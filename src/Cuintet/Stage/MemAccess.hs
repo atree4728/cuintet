@@ -7,7 +7,7 @@ import Cuintet.CoreCtrl (InstCtrl (..), isBranchOp, isLoad)
 import Cuintet.Eei (Addr, MemReq, MemResp, SystemOp (..))
 import Cuintet.Pipeline (ExMa (..), MaWb (..))
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
-import Cuintet.Unit.Csr (AccessSpec (..), CsrAddr (..), CsrFile, CsrReq (..), CsrResp (..), TrapSpec (..), csrStep, initCsrFile)
+import Cuintet.Unit.Csr (AccessSpec (..), CsrFile, CsrReq (..), CsrResp (..), TrapSpec (..), csrStep, initCsrFile)
 import Cuintet.Unit.LoadStore (LoadStoreJob (..), LoadStoreReq (..), LoadStoreResp (..), LoadStoreState (..), loadStoreStep)
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust, isNothing)
@@ -61,8 +61,8 @@ memAccess MemAccessState {..} MemAccessIn {..} =
     csrReq
       | not valid = Nothing
       | Just (cause, value) <- exception = Just $ TrapEnter TrapSpec {epc = pc, ..}
-      | Just (SysCsr (src, op)) <- ctrl.systemOp =
-          Just $ CsrAccess AccessSpec {csrAddr = CsrAddr (slice d11 d0 imm), op, src, rs1Addr, rs1Data}
+      | Just (SysCsr (src, op, csrAddr)) <- ctrl.systemOp =
+          Just $ CsrAccess AccessSpec {csrAddr, op, src, rs1Addr, rs1Data}
       | Just SysMret <- ctrl.systemOp = Just TrapReturn
       | otherwise = Nothing
     csrRdata = case csrResp of Just (ReadValue v) -> Just v; _ -> Nothing

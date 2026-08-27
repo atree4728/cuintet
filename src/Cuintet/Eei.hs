@@ -30,6 +30,8 @@ module Cuintet.Eei (
   MulOp (..),
   DivOp (..),
   MulDivOp (..),
+  CsrAddr (..),
+  parseCsrAddr,
   CsrOp (..),
   CsrSrc (..),
   parseCsr,
@@ -47,6 +49,7 @@ module Cuintet.Eei (
 import Clash.Annotations.BitRepresentation
 import Clash.Annotations.BitRepresentation.Deriving
 import Clash.Prelude
+import Control.Monad (guard)
 import Cuintet.Util (orNothing)
 
 -- | The length of integer registers.
@@ -308,6 +311,18 @@ deriveBitPack [t|DivOp|]
 
 deriveBitPack [t|MulDivOp|]
 
+data CsrAddr = MTVEC | MEPC | MCAUSE | MTVAL | LED | MCYCLE
+  deriving (Generic, NFDataX)
+
+parseCsrAddr :: BitVector 12 -> Maybe CsrAddr
+parseCsrAddr 0x305 = Just MTVEC
+parseCsrAddr 0x341 = Just MEPC
+parseCsrAddr 0x342 = Just MCAUSE
+parseCsrAddr 0x343 = Just MTVAL
+parseCsrAddr 0x800 = Just LED
+parseCsrAddr 0xB00 = Just MCYCLE
+parseCsrAddr _ = Nothing
+
 -- | What a CSR access does to the register, derived from @funct3[1:0]@.
 data CsrOp
   = ReadWrite
@@ -346,8 +361,13 @@ data CsrSrc = FromRs1 | FromUimm
 
 deriveBitPack [t|CsrSrc|]
 
-parseCsr :: BitVector 3 -> Maybe (CsrSrc, CsrOp)
-parseCsr f3 = orNothing (slice d1 d0 f3 /= 0) (unpack (slice d2 d2 f3), unpack (slice d1 d0 f3))
+parseCsr :: BitVector 3 -> BitVector 12 -> Maybe (CsrSrc, CsrOp, CsrAddr)
+parseCsr f3 f12 = do
+  guard $ slice d1 d0 f3 /= 0
+  let csrSrc = unpack (slice d2 d2 f3)
+  let csrOp = unpack (slice d1 d0 f3)
+  csrAddr <- parseCsrAddr f12
+  pure (csrSrc, csrOp, csrAddr)
 
 -- | The @funct12@ field of a @SYSTEM@ instruction whose @funct3@ is zero.
 newtype System12 = System12 (BitVector 12)
@@ -362,7 +382,7 @@ pattern MRET   = System12 0b001100000010
 
 -- | What a @SYSTEM@ instruction asks for.
 data SystemOp
-  = SysCsr (CsrSrc, CsrOp)
+  = SysCsr (CsrSrc, CsrOp, CsrAddr)
   | SysEcall
   | SysEbreak
   | SysMret

@@ -128,6 +128,9 @@ funct3 = slice d14 d12
 funct7 :: Inst -> BitVector 7
 funct7 = slice d31 d25
 
+funct12 :: Inst -> BitVector 12
+funct12 = slice d31 d20
+
 -- | Whether @rs1@ and @rd@ are both zero, as the forms that name neither require.
 noRegs :: Inst -> Bool
 noRegs instBits = slice d19 d15 instBits == 0 && slice d11 d7 instBits == 0
@@ -159,14 +162,14 @@ parseOpImm32 instBits = case funct3 instBits of
 -- | What a @SYSTEM@ instruction asks of the execution environment.
 parseSystem :: Inst -> Maybe SystemOp
 parseSystem instBits
-  | funct3 instBits /= 0 = SysCsr <$> parseCsr (funct3 instBits)
+  | funct3 instBits /= 0 = SysCsr <$> parseCsr (funct3 instBits) (funct12 instBits)
   | not (noRegs instBits) = Nothing
-  | ECALL <- system12 = Just SysEcall
-  | EBREAK <- system12 = Just SysEbreak
-  | MRET <- system12 = Just SysMret
+  | ECALL <- System12 f12 = Just SysEcall
+  | EBREAK <- System12 f12 = Just SysEbreak
+  | MRET <- System12 f12 = Just SysMret
   | otherwise = Nothing
   where
-    system12 = System12 $ slice d31 d20 instBits
+    f12 = funct12 instBits
 
 {- | Whether a source register of this instruction is still to be written by an
 instruction downstream, given as 'Cuintet.Pipeline.unresolved' of that stage.

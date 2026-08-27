@@ -10,20 +10,9 @@ module Cuintet.Unit.Csr (
 ) where
 
 import Clash.Prelude
-import Cuintet.Eei (Addr, CsrOp (..), CsrSrc (..), TrapCause (..), XLen)
+import Cuintet.Eei (Addr, CsrAddr (..), CsrOp (..), CsrSrc (..), TrapCause (..), XLen)
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe)
-
-newtype CsrAddr = CsrAddr (BitVector 12)
-  deriving newtype (BitPack, Generic, NFDataX)
-
-pattern MTVEC, MEPC, MCAUSE, MTVAL, LED, MCYCLE :: CsrAddr
-pattern MTVEC = CsrAddr 0x305
-pattern MEPC = CsrAddr 0x341
-pattern MCAUSE = CsrAddr 0x342
-pattern MTVAL = CsrAddr 0x343
-pattern LED = CsrAddr 0x800
-pattern MCYCLE = CsrAddr 0xB00
 
 data CsrFile = CsrFile
   { mtvec :: BitVector XLen
@@ -99,7 +88,6 @@ serve file (CsrAccess AccessSpec {..})
        in (file {mtval = written old}, ReadValue old)
   | LED <- csrAddr = (file {led = written file.led}, ReadValue file.led)
   | MCYCLE <- csrAddr = (file {mcycle = written file.mcycle}, ReadValue file.mcycle)
-  | otherwise = deepErrorX "csrStep: unimplemented CSR instruction"
   where
     written old = csrWrite op old wdata
     wvalue = case src of
