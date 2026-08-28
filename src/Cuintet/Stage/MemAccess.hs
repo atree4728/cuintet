@@ -103,7 +103,7 @@ memAccess MemAccessState {..} MemAccessIn {..} =
     exception' =
       exception
         <|> orNothing
-          ((truncateB (pack resolved) :: BitVector 2) == 0)
+          ((truncateB (pack resolved) :: BitVector 2) /= 0)
           (INSTRUCTION_ADDRESS_MISALIGNED, pack pc)
 
     redirect = orNothing (commit && resolved /= predicted pc prediction) resolved
