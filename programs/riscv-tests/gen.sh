@@ -1,61 +1,32 @@
 #!/bin/sh
-# Assemble riscv-tests into the hex images the unit tests load.
-#
-# The images are checked in, so `cabal test` needs no RISC-V toolchain; run
-# this only when the suites or the environment in env/ changes.
-#
-#   ./programs/riscv-tests/gen.sh                  # every suite below
-#   ./programs/riscv-tests/gen.sh rv64um           # every test in one suite
-#   ./programs/riscv-tests/gen.sh rv64ui add addi  # just these
-#
-# Tests the core cannot run yet are not filtered here: a test needing an
-# extension outside the suite's -march is reported as skipped, and one that
-# assembles but fails is left for the testbench to reject, hex and all.
-#
-# Override the toolchain with RISCV_PREFIX=riscv64-unknown-elf- if needed.
-
 set -eu
 
-# The suites assembled when none is named.  Each names both the source
-# directory under isa/ and the hex/ subdirectory the images land in.
-suites='rv64ui rv64um'
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+root=$(CDPATH= cd -- "$here/../.." && pwd)
+isa=$root/vendor/riscv-tests/isa
+env=$root/vendor/riscv-tests/env
+prefix=${RISCV_PREFIX:-riscv64-unknown-elf-}
 
+. "$root/programs/common/hex.sh"
+
+suites='rv64ui rv64um'
 if [ "$#" -gt 0 ]; then
   suites=$1
   shift
 fi
 tests=$*
 
-here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-root=$(CDPATH= cd -- "$here/../.." && pwd)
-isa=$root/vendor/riscv-tests/isa
-prefix=${RISCV_PREFIX:-riscv64-unknown-elf-}
-
-. "$root/programs/common/hex.sh"
-
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 for suite in $suites; do
-  # The extensions the suite exercises, on top of the base the env/ needs.
-  case $suite in
-  rv64ui) march=rv64i_zicsr ;;
-  rv64um) march=rv64im_zicsr ;;
-  *)
-    echo "$0: unknown suite $suite" >&2
-    exit 1
-    ;;
-  esac
-
   if [ ! -d "$isa/$suite" ]; then
     echo "$0: $isa/$suite is missing; run 'git submodule update --init'" >&2
     exit 1
   fi
 
-  if [ -n "$tests" ]; then
-    names=$tests
-  else
-    names=
+  names=$tests
+  if [ -z "$names" ]; then
     for src in "$isa/$suite"/*.S; do
       base=${src##*/}
       names="$names ${base%.S}"
@@ -68,16 +39,14 @@ for suite in $suites; do
     elf=$work/$name.elf
     hex=$here/hex/$suite/$suite-p-$name.hex
 
-    # -I "$here/env" comes first so our riscv_test.h shadows the one in env/p.
     if ! "${prefix}gcc" \
-      -march="$march" -mabi=lp64 \
+      -march=rv64im_zicsr -mabi=lp64 \
       -nostdlib -nostartfiles -static -fno-pic \
       -Wl,--no-warn-rwx-segments \
-      -T "$here/env/link.ld" \
-      -I "$here/env" -I "$isa/macros/scalar" \
-      -o "$elf" "$isa/$suite/$name.S" 2>"$work/$name.log"; then
-      sed "s/^/  /" "$work/$name.log" >&2
-      echo "$suite-p-$name: skipped, does not assemble as $march"
+      -T "$env/p/link.ld" \
+      -I "$env/p" -I "$env" -I "$isa/macros/scalar" \
+      -o "$elf" "$isa/$suite/$name.S"; then
+      echo "$suite-p-$name: skipped, does not assemble"
       rm -f "$hex"
       continue
     fi

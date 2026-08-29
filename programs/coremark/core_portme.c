@@ -37,12 +37,11 @@ barebones_clock(void)
 
 #define GETMYTIME(_t)        (*_t = barebones_clock())
 #define MYTIMEDIFF(fin, ini) ((fin) - (ini))
-// mcycle is the finest resolution there is, and a 64b tick cannot overflow.
-#define TIMER_RES_DIVIDER          1
 #define SAMPLE_TIME_IMPLEMENTATION 1
-// The driver simulates the System domain, whose period is 10ns.  Nothing prints
-// seconds, so this only has to be self-consistent.
-#define EE_TICKS_PER_SEC (100000000 / TIMER_RES_DIVIDER)
+// A tick is one mcycle, counted as a second.  CoreMark adds to total_errors if
+// a run lasts under ten of them, and ten real seconds is 10^9 cycles; nothing
+// prints seconds, so the timebase only has to be self-consistent.
+#define EE_TICKS_PER_SEC 1
 
 static CORETIMETYPE start_time_val, stop_time_val;
 

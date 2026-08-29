@@ -73,7 +73,7 @@ suite name ramAddrWidth budget verdict images =
 
 riscvTests :: Suite
 riscvTests =
-  suite "riscv-tests" (SNat @10) 200_000 fromTestnum $(makeRelativeToProject "programs/riscv-tests/hex" >>= embedDir)
+  suite "riscv-tests" (SNat @11) 200_000 fromTestnum $(makeRelativeToProject "programs/riscv-tests/hex" >>= embedDir)
 
 -- | The benchmarks, which report a cycle count as well as a verdict.
 benchmarks :: [Suite]
