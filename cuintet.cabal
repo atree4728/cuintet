@@ -53,7 +53,7 @@ common common-options
 
   build-depends:
     base,
-    clash-prelude >=1.10.0 && <1.12,
+    clash-prelude >=1.10.1 && <1.12,
     ghc-typelits-extra,
     ghc-typelits-knownnat,
     ghc-typelits-natnormalise,
@@ -93,6 +93,7 @@ library
 
 common clash-exe
   default-language: GHC2024
+  ghc-options: "-with-rtsopts=-K512M -H -I5 -T"
   build-depends:
     base,
     clash-ghc,
