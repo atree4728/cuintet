@@ -88,6 +88,9 @@ serve file (CsrAccess AccessSpec {..})
        in (file {mtval = written old}, ReadValue old)
   | LED <- csrAddr = (file {led = written file.led}, ReadValue file.led)
   | MCYCLE <- csrAddr = (file {mcycle = written file.mcycle}, ReadValue file.mcycle)
+  | MSTATUS <- csrAddr = (file, ReadValue 0)
+  | MIE <- csrAddr = (file, ReadValue 0)
+  | MHARTID <- csrAddr = (file, ReadValue 0)
   where
     written old = csrWrite op old wdata
     wvalue = case src of

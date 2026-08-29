@@ -315,16 +315,19 @@ deriveBitPack [t|DivOp|]
 
 deriveBitPack [t|MulDivOp|]
 
-data CsrAddr = MTVEC | MEPC | MCAUSE | MTVAL | LED | MCYCLE
+data CsrAddr = MSTATUS | MIE | MTVEC | MEPC | MCAUSE | MTVAL | LED | MCYCLE | MHARTID
   deriving (Generic, NFDataX)
 
 parseCsrAddr :: BitVector 12 -> Maybe CsrAddr
+parseCsrAddr 0x300 = Just MSTATUS
+parseCsrAddr 0x304 = Just MIE
 parseCsrAddr 0x305 = Just MTVEC
 parseCsrAddr 0x341 = Just MEPC
 parseCsrAddr 0x342 = Just MCAUSE
 parseCsrAddr 0x343 = Just MTVAL
 parseCsrAddr 0x800 = Just LED
 parseCsrAddr 0xB00 = Just MCYCLE
+parseCsrAddr 0xF14 = Just MHARTID
 parseCsrAddr _ = Nothing
 
 -- | What a CSR access does to the register, derived from @funct3[1:0]@.
