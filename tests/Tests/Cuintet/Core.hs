@@ -5,23 +5,23 @@ import Cuintet (system)
 import Cuintet.Core (CoreOut (..), CoreTrace (..))
 import Cuintet.Debug.Image (memImage)
 import Cuintet.Eei (Inst, RegFile)
-import Cuintet.Pipeline (MaWb (..), destReg)
+import Cuintet.Pipeline (Retire (..))
 import Cuintet.Unit.Ram (initRamLanes)
 import Data.Maybe (mapMaybe)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 import Prelude qualified as P
 
-runProgram :: Int -> [Inst] -> [MaWb]
+runProgram :: Int -> [Inst] -> [Retire]
 runProgram n prog =
-  P.take n $ mapMaybe (.instLog) traces
+  P.take n $ mapMaybe (.retired) traces
   where
     traces = sampleN @System (32 + 24 * n) $ (.trace) $ system $ initRamLanes $ memImage prog
 
 finalRegs :: Int -> [Inst] -> RegFile
 finalRegs n prog = P.foldl apply (replicate d32 0) (runProgram n prog)
   where
-    apply regs l = maybe regs (\a -> replace a l.wbData regs) (destReg l)
+    apply regs l = maybe regs (\(a, v) -> replace a v regs) l.rd
 
 aluProg :: [Inst]
 aluProg =

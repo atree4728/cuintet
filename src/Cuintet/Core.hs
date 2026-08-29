@@ -3,7 +3,7 @@ module Cuintet.Core (CoreIn (..), CoreOut (..), CoreTrace (..), core) where
 
 import Clash.Prelude
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, XLen)
-import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), MaWb (..), forwardable, unresolved)
+import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), MaWb (..), Retire (..), forwardable, unresolved)
 import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
 import Cuintet.Stage.Execute (ExecuteIn (..), ExecuteOut (..), execute)
 import Cuintet.Stage.Fetch (FetchIn (..), FetchOut (..), FetchState (..), fetch, initFetchState)
@@ -28,7 +28,7 @@ data CoreOut = CoreOut
   -- ^ Instruction fetch request.
   , dReq :: Maybe MemReq
   -- ^ Load/store request.
-  , instLog :: Maybe MaWb
+  , retired :: Maybe Retire
   -- ^ Execution log of a single instruction, emitted only in the clock it retires.
   , led :: BitVector XLen
   , trace :: CoreTrace
@@ -52,7 +52,7 @@ data CoreTrace = CoreTrace
   , idIssue :: Bool
   , exIssue :: Bool
   , maIssue :: Bool
-  , instLog :: Maybe MaWb
+  , retired :: Maybe Retire
   , flush :: Bool
   }
   deriving (Generic, NFDataX)
@@ -91,7 +91,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, ifIdResp, idExResp, exMaRe
     flush = isJust maOut.redirect
     forwards = (forwardable =<< exOut.issue) :> (forwardable =<< exMaResp.rdata) :> Nil
 
-    regReq = mkRegReq ifIdResp.rdata wbOut.write
+    regReq = mkRegReq ifIdResp.rdata $ wbOut.retired >>= (.rd)
     btbReq = BtbReq {lookupAddr = ifOut.btbLookup, prefetchAddr = ifOut.btbPrefetch, write = maOut.btbWrite}
 
     ifIdReq = FifoReq {wdata = ifOut.issue, rready = isJust idOut.issue, flush}
@@ -99,7 +99,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, ifIdResp, idExResp, exMaRe
     exMaReq = FifoReq {wdata = exOut.issue, rready = isJust maOut.issue, flush = False}
     maWbReq = FifoReq {wdata = maOut.issue, rready = True, flush = False}
 
-    coreOut = CoreOut {iReq = ifOut.iReq, dReq = maOut.dReq, instLog = wbOut.retired, led = memAccessState.csrFile.led, trace}
+    coreOut = CoreOut {iReq = ifOut.iReq, dReq = maOut.dReq, retired = wbOut.retired, led = memAccessState.csrFile.led, trace}
     trace =
       CoreTrace
         { fetchStart = if iResp.ready && not flush then (.addr) <$> ifOut.iReq else Nothing
@@ -108,7 +108,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, ifIdResp, idExResp, exMaRe
         , idIssue = isJust idOut.issue
         , exIssue = isJust exOut.issue
         , maIssue = isJust maOut.issue
-        , instLog = wbOut.retired
+        , retired = wbOut.retired
         , flush
         }
 

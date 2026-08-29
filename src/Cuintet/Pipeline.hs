@@ -1,9 +1,9 @@
 -- | The payloads that cross the stage boundaries, one record per FIFO.
-module Cuintet.Pipeline (IfId (..), IdEx (..), ExMa (..), MaWb (..), srcRegs, destReg, forwardable, unresolved) where
+module Cuintet.Pipeline (IfId (..), IdEx (..), ExMa (..), MaWb (..), Retire (..), srcRegs, destReg, forwardable, unresolved) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), isCsrRead, isLoad)
-import Cuintet.Eei (Addr, Inst, RegAddr, TrapCause, XLen)
+import Cuintet.Eei (Addr, Inst, MemReq, RegAddr, TrapCause, XLen)
 import Cuintet.Unit.Btb (Prediction)
 import Cuintet.Util (orNothing)
 import Data.Maybe (isNothing)
@@ -70,6 +70,16 @@ data MaWb = MaWb
   , branchTaken :: Maybe Bool
   , wbData :: BitVector XLen
   , csrRdata :: Maybe (BitVector XLen)
+  , completed :: Maybe MemReq
+  }
+  deriving (Generic, NFDataX)
+
+data Retire = Retire
+  { pc :: Addr
+  , instBits :: Inst
+  , rd :: Maybe (RegAddr, BitVector XLen)
+  , mem :: Maybe MemReq
+  , trap :: Maybe TrapCause
   }
   deriving (Generic, NFDataX)
 

@@ -91,6 +91,7 @@ memAccess MemAccessState {..} MemAccessIn {..} =
         , branchTaken = orNothing (isBranchOp ctrl) branchTaken
         , wbData = wbData'
         , csrRdata
+        , completed = loadStoreResp.completed
         , ..
         }
 

@@ -9,6 +9,7 @@ module Cuintet.Unit.LoadStore (
   LoadStoreState (..),
   loadStoreStep,
   loadResult,
+  storeLanes,
 ) where
 
 import Clash.Prelude
@@ -19,7 +20,7 @@ import Data.Maybe (isJust, isNothing)
 
 -- | One memory access for the unit to carry out.
 data LoadStoreJob = LoadStoreJob
-  { ctrl :: InstCtrl
+  { ctrl :: InstCtrl -- TODO: to be memOp
   , addr :: Addr
   -- ^ The access address computed by the ALU.
   , wdata :: BitVector XLen
@@ -40,6 +41,7 @@ data LoadStoreResp = LoadStoreResp
   , stall :: Bool
   -- ^ Whether the core must stall for an access in flight
   , memReq :: Maybe MemReq
+  , completed :: Maybe MemReq
   }
   deriving (Generic, NFDataX)
 
@@ -49,13 +51,17 @@ data BusAccess
   | BusLoad LoadShape
   deriving (Generic, NFDataX)
 
+busReq :: Addr -> BusAccess -> MemReq
+busReq addr (BusStore wdata) = BusReq {addr, wdata = Just wdata}
+busReq addr (BusLoad _) = BusReq {addr, wdata = Nothing}
+
 data LoadStoreState
   = -- | Wait for a new memory instruction; latch its request and move to 'WaitReady'.
     Idle
   | -- | Keep sending the request until the memory accepts it, then move to 'WaitValid', with @(addr, wdata)@
     WaitReady Addr BusAccess
   | -- | Wait until the access completes, then move back to 'Idle'.
-    WaitValid BusAccess
+    WaitValid Addr BusAccess
   deriving (Generic, NFDataX)
 
 -- | One cycle of the load\/store unit.
@@ -63,26 +69,25 @@ loadStoreStep :: LoadStoreState -> LoadStoreReq -> (LoadStoreState, LoadStoreRes
 loadStoreStep state LoadStoreReq {job, memResp} = (memUnitState, memUnitResp)
   where
     memUnitState = case state of
-      Idle | Just i <- job, Just acc <- i.ctrl.memOp -> WaitReady i.addr (busAccess acc i.addr i.wdata)
-      WaitReady _ acc | memResp.ready -> WaitValid acc
-      WaitValid _ | isJust memResp.rdata -> Idle
+      Idle | Just LoadStoreJob {..} <- job, Just memOp <- ctrl.memOp -> WaitReady addr (busAccess memOp addr wdata)
+      WaitReady addr acc | memResp.ready -> WaitValid addr acc
+      WaitValid _ _ | isJust memResp.rdata -> Idle
       _ -> state
     memUnitResp =
       LoadStoreResp
         { result = case state of
-            WaitValid (BusLoad fmt) -> loadResult fmt <$> memResp.rdata
+            WaitValid _ (BusLoad shape) -> loadResult shape <$> memResp.rdata
             _ -> Nothing
-        , -- in 'Idle' when a new memory instruction arrives,
-          -- in 'WaitReady' always,
-          -- in 'WaitValid' until the response arrives.
-          stall = case (job, state) of
+        , stall = case (job, state) of
             (Nothing, _) -> False
-            (Just i, Idle) -> isMemOp i.ctrl
+            (Just LoadStoreJob {ctrl}, Idle) -> isMemOp ctrl
             (Just _, WaitReady _ _) -> True
-            (Just _, WaitValid _) -> isNothing memResp.rdata
+            (Just _, WaitValid _ _) -> isNothing memResp.rdata
         , memReq = case state of
-            WaitReady reqAddr (BusLoad _) -> Just BusReq {addr = reqAddr, wdata = Nothing}
-            WaitReady reqAddr (BusStore wdata) -> Just BusReq {addr = reqAddr, wdata = Just wdata}
+            WaitReady addr access -> Just $ busReq addr access
+            _ -> Nothing
+        , completed = case state of
+            WaitValid addr access | isJust memResp.rdata -> Just (busReq addr access)
             _ -> Nothing
         }
 

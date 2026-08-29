@@ -4,9 +4,9 @@
 module Cuintet.Debug.Konata (konataLog) where
 
 import Cuintet.Core (CoreTrace (..))
-import Cuintet.Debug.Show (hex, instLogLines)
+import Cuintet.Debug.Show (hex, retireLines)
 import Cuintet.Eei (Addr, Inst)
-import Cuintet.Pipeline (IfId (..), MaWb (..))
+import Cuintet.Pipeline (IfId (..), Retire (..))
 import Data.Function (applyWhen)
 import Data.Maybe (fromMaybe, isJust, listToMaybe, maybeToList)
 import Text.Printf (printf)
@@ -62,7 +62,7 @@ modelStep Model {..} CoreTrace {..} = applyWhen flush flushed moved
     moved =
       Model
         { nextId = applyWhen (isJust fetchStart) (+ 1) nextId
-        , commits = applyWhen (isJust instLog) (+ 1) commits
+        , commits = applyWhen (isJust retired) (+ 1) commits
         , fetching = case fetchStart of
             Just pc -> Just Inflight {instId = nextId, pc, instBits = Nothing}
             Nothing -> if fetchDone then Nothing else fetching
@@ -70,7 +70,7 @@ modelStep Model {..} CoreTrace {..} = applyWhen flush flushed moved
         , ifIdQ = ifIdQ'
         , idExQ = shift idIssue exIssue (listToMaybe ifIdQ) idExQ
         , exMaQ = shift exIssue maIssue idExQ exMaQ
-        , maWbQ = shift maIssue (isJust instLog) exMaQ maWbQ
+        , maWbQ = shift maIssue (isJust retired) exMaQ maWbQ
         }
 
     ifIdQ' = case ifIssue of
@@ -97,7 +97,7 @@ label :: Addr -> Maybe Inst -> String
 label pc bits = printf "%s: %s" (hex pc) (maybe "(not fetched)" hex bits)
 
 clockLines :: CoreTrace -> [(Inflight, Stage)] -> Model -> [String]
-clockLines CoreTrace {instLog, flush} was cur@Model {..} = concatMap entering (stages cur) <> retired <> flushed
+clockLines CoreTrace {..} was cur@Model {..} = concatMap entering (stages cur) <> retiredLog <> flushed
   where
     seen = [(i.instId, s) | (i, s) <- was]
     entering (i, s) = case lookup i.instId seen of
@@ -107,12 +107,12 @@ clockLines CoreTrace {instLog, flush} was cur@Model {..} = concatMap entering (s
 
     sLine i s = printf "S\t%d\t0\t%s" i.instId (show s)
 
-    retired = case instLog of
+    retiredLog = case retired of
       Nothing -> []
       Just l ->
         let i = issued maWbQ
          in printf "L\t%d\t0\t%s" i.instId (label l.pc (Just l.instBits))
-              : [printf "L\t%d\t1\t%s" i.instId ln | ln <- instLogLines l]
+              : [printf "L\t%d\t1\t%s" i.instId ln | ln <- retireLines l]
                 <> [printf "R\t%d\t%d\t0" i.instId commits]
 
     flushed
