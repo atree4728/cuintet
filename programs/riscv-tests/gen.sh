@@ -9,7 +9,7 @@ prefix=${RISCV_PREFIX:-riscv64-unknown-elf-}
 
 . "$root/programs/common/hex.sh"
 
-suites='rv64ui rv64um'
+suites='rv64ui rv64um rv64mi'
 if [ "$#" -gt 0 ]; then
   suites=$1
   shift
