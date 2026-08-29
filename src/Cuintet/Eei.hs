@@ -44,7 +44,10 @@ module Cuintet.Eei (
   pattern INSTRUCTION_ADDRESS_MISALIGNED,
   pattern ILLEGAL_INSTRUCTION,
   pattern BREAKPOINT,
+  pattern LOAD_ADDRESS_MISALIGNED,
+  pattern STORE_AMO_ADDRESS_MISALIGNED,
   pattern ENVIRONMENT_CALL_FROM_M_MODE,
+  misalignedCause,
 ) where
 
 import Clash.Annotations.BitRepresentation
@@ -399,8 +402,17 @@ data TrapCause
 
 deriveAutoReg ''TrapCause
 
-pattern INSTRUCTION_ADDRESS_MISALIGNED, ILLEGAL_INSTRUCTION, BREAKPOINT, ENVIRONMENT_CALL_FROM_M_MODE :: TrapCause
+pattern INSTRUCTION_ADDRESS_MISALIGNED, ILLEGAL_INSTRUCTION, BREAKPOINT, LOAD_ADDRESS_MISALIGNED, STORE_AMO_ADDRESS_MISALIGNED, ENVIRONMENT_CALL_FROM_M_MODE :: TrapCause
 pattern INSTRUCTION_ADDRESS_MISALIGNED = TrapCause False 0
 pattern ILLEGAL_INSTRUCTION = TrapCause False 2
 pattern BREAKPOINT = TrapCause False 3
+pattern LOAD_ADDRESS_MISALIGNED = TrapCause False 4
+pattern STORE_AMO_ADDRESS_MISALIGNED = TrapCause False 6
 pattern ENVIRONMENT_CALL_FROM_M_MODE = TrapCause False 11
+
+misalignedCause :: MemOp -> Addr -> Maybe TrapCause
+misalignedCause memOp addr = orNothing (not $ aligned width $ laneOffset addr) cause
+  where
+    (width, cause) = case memOp of
+      Load w _ -> (w, LOAD_ADDRESS_MISALIGNED)
+      Store w -> (w, STORE_AMO_ADDRESS_MISALIGNED)

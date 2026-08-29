@@ -4,7 +4,7 @@ module Cuintet.Stage.MemAccess (initMemAccessState, memAccess, MemAccessIn (..),
 import Clash.Prelude
 import Control.Monad (guard)
 import Cuintet.CoreCtrl (InstCtrl (..), isBranchOp, isLoad)
-import Cuintet.Eei (Addr, MemReq, MemResp, SystemOp (..), pattern INSTRUCTION_ADDRESS_MISALIGNED)
+import Cuintet.Eei (Addr, MemReq, MemResp, SystemOp (..), misalignedCause, pattern INSTRUCTION_ADDRESS_MISALIGNED)
 import Cuintet.Pipeline (ExMa (..), MaWb (..))
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
 import Cuintet.Unit.Csr (AccessSpec (..), CsrFile, CsrReq (..), CsrResp (..), TrapSpec (..), csrStep, initCsrFile)
@@ -60,19 +60,19 @@ memAccess MemAccessState {..} MemAccessIn {..} =
     (csrFile', csrResp) = csrStep csrFile csrReq
     csrReq
       | not valid = Nothing
-      | Just (cause, value) <- exception = Just $ TrapEnter TrapSpec {epc = pc, ..}
+      | Just (cause, value) <- trap = Just $ TrapEnter TrapSpec {epc = pc, ..}
       | Just (SysCsr (src, op, csrAddr)) <- ctrl.systemOp =
           Just $ CsrAccess AccessSpec {csrAddr, op, src, rs1Addr, rs1Data}
       | Just SysMret <- ctrl.systemOp = Just TrapReturn
       | otherwise = Nothing
     csrRdata = case csrResp of Just (ReadValue v) -> Just v; _ -> Nothing
-    csrRedirect = case csrResp of Just (Redirect a) -> Just a; _ -> Nothing
+    csrRedirect = case csrResp of Just (Redirect v) -> Just v; _ -> Nothing
 
     (loadStoreState', loadStoreResp) =
       loadStoreStep
         loadStoreState
         LoadStoreReq
-          { job = orNothing (valid && isNothing exception) LoadStoreJob {ctrl, addr = bitCoerce aluResult, wdata = rs2Data}
+          { job = orNothing (valid && isNothing trap) LoadStoreJob {ctrl, addr = bitCoerce aluResult, wdata = rs2Data}
           , memResp = dResp
           }
 
@@ -87,28 +87,34 @@ memAccess MemAccessState {..} MemAccessIn {..} =
 
     maWb =
       MaWb
-        { exception = exception'
+        { exception = trap
         , branchTaken = orNothing (isBranchOp ctrl) branchTaken
         , wbData = wbData'
         , csrRdata
         , ..
         }
 
-    resolved
-      | Just target <- csrRedirect = target
-      | ctrl.isJump = bitCoerce (aluResult .&. complement 1)
+    nextPc
+      | ctrl.isJump = unpack $ aluResult .&. complement 1
       | isBranchOp ctrl && branchTaken = pc + numConvert imm
       | otherwise = pc + 4
 
-    exception' =
-      exception
-        <|> orNothing
-          ((truncateB (pack resolved) :: BitVector 2) /= 0)
-          (INSTRUCTION_ADDRESS_MISALIGNED, pack pc)
+    resolved = fromMaybe nextPc csrRedirect
 
+    targetException =
+      orNothing
+        ((truncateB (pack nextPc) :: BitVector 2) /= 0)
+        (INSTRUCTION_ADDRESS_MISALIGNED, pack nextPc)
+
+    accessException = do
+      memOp <- ctrl.memOp
+      cause <- misalignedCause memOp (unpack aluResult)
+      pure (cause, aluResult)
+
+    trap = exception <|> targetException <|> accessException
     redirect = orNothing (commit && resolved /= predicted pc prediction) resolved
 
     taken = orNothing (resolved /= pc + 4) resolved
 
-    btbWrite = guard commit >> train pc prediction taken
+    btbWrite = guard (commit && isNothing trap) >> train pc prediction taken
 {-# OPAQUE memAccess #-}
