@@ -7,6 +7,7 @@ common=$root/programs/common
 src=$root/vendor/coremark
 prefix=${RISCV_PREFIX:-riscv64-unknown-elf-}
 hex=$here/hex/coremark.hex
+elf=$root/build/programs/coremark/coremark.elf
 
 . "$common/hex.sh"
 
@@ -22,7 +23,7 @@ flags="-march=rv64im_zicsr -mabi=lp64 -mcmodel=medany -O3"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-mkdir -p "$here/hex"
+mkdir -p "$here/hex" "${elf%/*}"
 
 sed \
   -e '/list_head structure too big/{n;s/return MAIN_RETURN_VAL;/return -2;/;}' \
@@ -42,7 +43,7 @@ fi
   -DFLAGS_STR="\"$flags\"" \
   -I "$here" -I "$src" \
   -T "$common/link.ld" -Wl,--no-warn-rwx-segments \
-  -o "$work/coremark.elf" \
+  -o "$elf" \
   "$common/crt0.S" \
   "$src/core_list_join.c" \
   "$work/core_main.c" \
@@ -52,7 +53,7 @@ fi
   "$here/core_portme.c" \
   "$here/ee_printf.c"
 
-elf2hex "$work/coremark.elf" "$hex"
+elf2hex "$elf" "$hex"
 
-"${prefix}size" "$work/coremark.elf"
+"${prefix}size" "$elf"
 echo "coremark.hex: $(wc -l <"$hex" | tr -d ' ') words"

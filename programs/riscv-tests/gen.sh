@@ -6,6 +6,7 @@ root=$(CDPATH= cd -- "$here/../.." && pwd)
 isa=$root/vendor/riscv-tests/isa
 env=$root/vendor/riscv-tests/env
 prefix=${RISCV_PREFIX:-riscv64-unknown-elf-}
+out=$root/build/programs/riscv-tests
 
 . "$root/programs/common/hex.sh"
 
@@ -15,9 +16,6 @@ if [ "$#" -gt 0 ]; then
   shift
 fi
 tests=$*
-
-work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
 
 for suite in $suites; do
   if [ ! -d "$isa/$suite" ]; then
@@ -33,10 +31,10 @@ for suite in $suites; do
     done
   fi
 
-  mkdir -p "$here/hex/$suite"
+  mkdir -p "$here/hex/$suite" "$out/$suite"
 
   for name in $names; do
-    elf=$work/$name.elf
+    elf=$out/$suite/$name.elf
     hex=$here/hex/$suite/$suite-p-$name.hex
 
     if ! "${prefix}gcc" \
@@ -47,7 +45,7 @@ for suite in $suites; do
       -I "$env/p" -I "$env" -I "$isa/macros/scalar" \
       -o "$elf" "$isa/$suite/$name.S"; then
       echo "$suite-p-$name: skipped, does not assemble"
-      rm -f "$hex"
+      rm -f "$hex" "$elf"
       continue
     fi
 
