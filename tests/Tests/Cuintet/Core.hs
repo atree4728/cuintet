@@ -1,27 +1,28 @@
 module Tests.Cuintet.Core (tests) where
 
 import Clash.Prelude
-import Cuintet (system)
-import Cuintet.Core (CoreOut (..), CoreTrace (..))
-import Cuintet.Debug.Image (memImage)
+import Cuintet.Debug.Image (instImage)
+import Cuintet.Debug.Sim (finalRegs, retires, traceImage)
 import Cuintet.Eei (Inst, RegFile, resetVector)
 import Cuintet.Pipeline (Retire (..))
-import Cuintet.Unit.Ram (initRamLanes)
-import Data.Maybe (mapMaybe)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 import Prelude qualified as P
 
-runProgram :: Int -> [Inst] -> [Retire]
-runProgram n prog =
-  P.take n $ mapMaybe (.retired) traces
-  where
-    traces = sampleN @System (32 + 24 * n) $ (.trace) $ system $ initRamLanes $ memImage prog
+-- | Bus words of memory the programs below are assembled into.
+ramAddrWidth :: SNat 7
+ramAddrWidth = SNat
 
-finalRegs :: Int -> [Inst] -> RegFile
-finalRegs n prog = P.foldl apply (replicate d32 0) (runProgram n prog)
-  where
-    apply regs l = maybe regs (\(a, v) -> replace a v regs) l.rd
+{- | The first @n@ 'Retire's of a program.
+
+The trace is not cut at an @ecall@: 'ecallProg' checks what the trap handler
+retires after it.
+-}
+runProgram :: Int -> [Inst] -> [Retire]
+runProgram n prog = P.take n $ retires $ traceImage (32 + 24 * n) (instImage ramAddrWidth prog)
+
+regsAfter :: Int -> [Inst] -> RegFile
+regsAfter n = finalRegs . runProgram n
 
 aluProg :: [Inst]
 aluProg =
@@ -146,29 +147,29 @@ tests =
     "Cuintet.Core"
     [ testCase "Commit each instruction once, in order" $ do
         ((.pc) <$> runProgram 8 aluProg) @?= ((resetVector +) <$> [0, 4, 8, 12, 16, 20, 24, 28])
-        (finalRegs 3 aluProg !! (3 :: Int)) @?= pack (resetVector + 0x00100024)
+        (regsAfter 3 aluProg !! (3 :: Int)) @?= pack (resetVector + 0x00100024)
     , testCase "Load the value that was stored using store" $ do
         ((.pc) <$> runProgram 8 loadStoreProg) @?= ((resetVector +) <$> [0, 4, 8, 12, 16, 20, 24, 28])
-        let regs = finalRegs 4 loadStoreProg
+        let regs = regsAfter 4 loadStoreProg
         (regs !! (2 :: Int)) @?= 42
         (regs !! (3 :: Int)) @?= 43
     , testCase "Ignore write back to x0" $ do
         ((.pc) <$> runProgram 2 x0Prog) @?= ((resetVector +) <$> [0, 4])
-        let regs = finalRegs 2 x0Prog
+        let regs = regsAfter 2 x0Prog
         (regs !! (0 :: Int)) @?= 0
         (regs !! (1 :: Int)) @?= 0
     , testCase "Properly handle variants of load instruction" $ do
-        let regs = finalRegs 4 loadProg
+        let regs = regsAfter 4 loadProg
         (regs !! (1 :: Int)) @?= 0xffffffffffffffef
         (regs !! (2 :: Int)) @?= 0x00000000000000be
         (regs !! (3 :: Int)) @?= 0xffffffffffffdead
         (regs !! (4 :: Int)) @?= 0x000000000000dead
     , testCase "Properly handle variants of store instruction" $ do
-        let regs = finalRegs 5 storeProg
+        let regs = regsAfter 5 storeProg
         (regs !! (2 :: Int)) @?= 0x00000023
         (regs !! (3 :: Int)) @?= 0x00000123
     , testCase "Set less than, signed and unsigned" $ do
-        let regs = finalRegs 6 sltProg
+        let regs = regsAfter 6 sltProg
         (regs !! (3 :: Int)) @?= 1
         (regs !! (4 :: Int)) @?= 0
         (regs !! (5 :: Int)) @?= 1
@@ -179,22 +180,22 @@ tests =
     , testCase "Conditional jump" $ do
         ((.pc) <$> runProgram 5 branchProg) @?= ((resetVector +) <$> [0x0, 0x04, 0x08, 0x18, 0x18])
     , testCase "Zicsr" $ do
-        let regs = finalRegs 2 csrProg
+        let regs = regsAfter 2 csrProg
         (regs !! (2 :: Int)) @?= 0b10100
     , testCase "ecall" $ do
         -- mtvec is an absolute 0x10, truncated back into the image like jumpProg's
         ((.pc) <$> runProgram 4 ecallProg) @?= [resetVector, resetVector + 0x04, 0x10, 0x14]
-        let regs = finalRegs 4 ecallProg
+        let regs = regsAfter 4 ecallProg
         (regs !! (1 :: Int)) @?= 0xb
         (regs !! (2 :: Int)) @?= pack (resetVector + 0x4)
     , testCase "mret"
         $ ((.pc) <$> runProgram 3 mretProg)
         @?= [resetVector, resetVector + 0x04, 0x10]
     , testCase "Interlock a data dependency" $ do
-        let regs = finalRegs 2 dataHazardProg
+        let regs = regsAfter 2 dataHazardProg
         (regs !! (2 :: Int)) @?= 2
     , testCase "Interlock a load-use dependency" $ do
-        let regs = finalRegs 5 loadUseProg
+        let regs = regsAfter 5 loadUseProg
         (regs !! (2 :: Int)) @?= 42
         (regs !! (3 :: Int)) @?= 43
         (regs !! (4 :: Int)) @?= 44

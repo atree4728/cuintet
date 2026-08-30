@@ -2,7 +2,8 @@ module Main (main) where
 
 import Clash.Prelude
 import Cuintet.Debug.Konata (konataLog)
-import Cuintet.Debug.Sim (hexProgram, traceImage)
+import Cuintet.Debug.Image (hexImage)
+import Cuintet.Debug.Sim (traceImage, upToEcall)
 import System.Environment (getArgs)
 import System.Exit (die)
 import Prelude qualified as P
@@ -22,5 +23,5 @@ main = do
 
 run :: FilePath -> IO ()
 run input = do
-  img <- hexProgram ramAddrWidth input <$> P.readFile input
-  P.putStr $ P.unlines $ konataLog $ traceImage budget img
+  img <- hexImage ramAddrWidth <$> P.readFile input
+  P.putStr $ P.unlines $ konataLog $ upToEcall $ traceImage budget img

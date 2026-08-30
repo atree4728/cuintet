@@ -1,7 +1,8 @@
 module Main (main) where
 
 import Clash.Prelude
-import Cuintet.Debug.Sim (elfProgram, isEcall, retireImage)
+import Cuintet.Debug.Image (elfImage)
+import Cuintet.Debug.Sim (isEcall, retires, traceImage, upToEcall)
 import Cuintet.Debug.Spike (diverged, divergenceLines, withCommits)
 import Cuintet.Pipeline (Retire (..))
 import Data.Maybe (isNothing)
@@ -29,8 +30,8 @@ main = do
 
 run :: FilePath -> IO ()
 run elf = do
-  img <- elfProgram ramAddrWidth elf
-  let ours = retireImage budget img
+  img <- elfImage ramAddrWidth elf
+  let ours = retires $ upToEcall $ traceImage budget img
   case P.reverse ours of
     [] -> die (printf "%s: the core retired nothing" elf)
     l : _ | not (isEcall l) -> die (printf "%s: no ecall within %d cycles" elf budget)

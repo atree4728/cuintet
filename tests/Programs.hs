@@ -8,7 +8,8 @@ handles the rest.
 module Programs (Suite (..), Outcome (..), Stats (..), ipc, failure, riscvTests, benchmarks) where
 
 import Clash.Prelude
-import Cuintet.Debug.Sim (Run (..), hexProgram, runImage)
+import Cuintet.Debug.Image (hexImage)
+import Cuintet.Debug.Sim (Run (..), runImage)
 import Cuintet.Eei (RegFile)
 import Data.ByteString.Char8 qualified as BC
 import Data.FileEmbed (embedDir, makeRelativeToProject)
@@ -63,9 +64,9 @@ suite ::
   [(FilePath, BC.ByteString)] ->
   Suite
 suite name ramAddrWidth budget verdict images =
-  Suite {name, outcomes = [(takeBaseName path, run path bs) | (path, bs) <- sortOn fst images]}
+  Suite {name, outcomes = [(takeBaseName path, run bs) | (path, bs) <- sortOn fst images]}
   where
-    run path bs = case runImage budget (hexProgram ramAddrWidth path (BC.unpack bs)) of
+    run bs = case runImage budget (hexImage ramAddrWidth (BC.unpack bs)) of
       Left err -> Hung err
       Right r -> either (Failed (stats r)) (const (Ok (stats r))) (verdict r.regs)
       where

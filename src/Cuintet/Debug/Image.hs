@@ -1,9 +1,10 @@
-module Cuintet.Debug.Image (memImage, hexImage, binImage, elfImage) where
+-- | The memory image a core boots from, built from whatever holds the program.
+module Cuintet.Debug.Image (Image, instImage, hexImage, binImage, elfImage) where
 
 import Clash.Prelude
 import Clash.Sized.Vector (unsafeFromList)
 import Control.Exception (bracket)
-import Cuintet.Eei (Inst, XLen)
+import Cuintet.Eei (Inst, MemDataBytes)
 import Data.ByteString qualified as BS
 import Data.Maybe (fromMaybe)
 import Numeric (readHex)
@@ -14,48 +15,48 @@ import System.Process (callProcess)
 import Text.Printf (printf)
 import Prelude qualified as P
 
+-- | The whole of the core's memory, @2 ^ ramAddrWidth@ bus words of it.
+type Image ramAddrWidth = Vec (2 ^ ramAddrWidth) (BitVector (MemDataBytes * 8))
+
 nop :: Inst
 nop = 0x00000013
 
-packInsts :: [Inst] -> [BitVector XLen]
+packInsts :: [Inst] -> [BitVector (MemDataBytes * 8)]
 packInsts [] = []
 packInsts [_] = error "packInsts: odd number of instructions"
 packInsts (l : h : rest) = h ++# l : packInsts rest
 
 -- | The instructions padded out to the whole RAM.
-image :: forall n. (KnownNat n) => FilePath -> [Inst] -> Vec n (BitVector XLen)
-image path ws
-  | P.length ws > maxInsts = error (printf "%s: RAM size is insufficient" path)
+instImage :: forall w. (KnownNat w) => SNat w -> [Inst] -> Image w
+instImage SNat ws
+  | P.length ws > maxInsts = error (printf "image: %d instructions, only %d fit" (P.length ws) maxInsts)
   | otherwise = unsafeFromList (packInsts $ P.take maxInsts (ws <> P.repeat nop))
   where
-    maxInsts = 2 * natToNum @n
+    maxInsts = 2 * natToNum @(2 ^ w)
 
-memImage :: [Inst] -> Vec 128 (BitVector XLen)
-memImage = image "<program>"
-
-hexImage :: (KnownNat n) => FilePath -> String -> Vec n (BitVector XLen)
-hexImage path src = image path (P.zipWith parseWord [1 :: Int ..] (P.lines src))
+hexImage :: (KnownNat w) => SNat w -> String -> Image w
+hexImage w src = instImage w (P.zipWith parseWord [1 :: Int ..] (P.lines src))
   where
     parseWord lineNo s = case readHex s of
-      [(w, "")] -> w
-      _ -> error (printf "%s:%d: not a hex word: %s" path lineNo s)
+      [(x, "")] -> x
+      _ -> error (printf "line %d: not a hex word: %s" lineNo s)
 
 -- | The image read straight from the flat bytes @objcopy -O binary@ writes.
-binImage :: (KnownNat n) => FilePath -> BS.ByteString -> Vec n (BitVector XLen)
-binImage path = image path . words32 . pad
+binImage :: (KnownNat w) => SNat w -> BS.ByteString -> Image w
+binImage w = instImage w . words32 . pad
   where
     pad bs = bs <> BS.replicate ((4 - BS.length bs `mod` 4) `mod` 4) 0
     words32 bs
       | BS.null bs = []
-      | otherwise = let (w, rest) = BS.splitAt 4 bs in little w : words32 rest
+      | otherwise = let (x, rest) = BS.splitAt 4 bs in little x : words32 rest
     little = BS.foldr (\b acc -> acc * 256 + fromIntegral b) 0
 
 -- | The image an ELF loads, as @objcopy -O binary@ lays it out.
-elfImage :: (KnownNat n) => FilePath -> IO (Vec n (BitVector XLen))
-elfImage elf = do
+elfImage :: (KnownNat w) => SNat w -> FilePath -> IO (Image w)
+elfImage w elf = do
   objcopy <- (<> "objcopy") . fromMaybe "riscv64-unknown-elf-" <$> lookupEnv "RISCV_PREFIX"
   tmp <- getTemporaryDirectory
   bracket (openBinaryTempFile tmp "cuintet.bin") (removeFile . fst) $ \(path, h) -> do
     hClose h
     callProcess objcopy ["-O", "binary", elf, path]
-    binImage elf <$> BS.readFile path
+    binImage w <$> BS.readFile path

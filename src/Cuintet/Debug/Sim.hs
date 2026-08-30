@@ -1,19 +1,16 @@
 -- | Running a bare-metal image on the core in simulation.
-module Cuintet.Debug.Sim (Image, Run (..), hexProgram, elfProgram, isEcall, runImage, traceImage, retireImage) where
+module Cuintet.Debug.Sim (Run (..), isEcall, traceImage, upToEcall, retires, finalRegs, runImage) where
 
 import Clash.Prelude
 import Cuintet (system)
 import Cuintet.Core (CoreOut (..), CoreTrace (..))
-import Cuintet.Debug.Image (elfImage, hexImage)
-import Cuintet.Eei (MemDataBytes, RegFile, pattern ENVIRONMENT_CALL_FROM_M_MODE)
+import Cuintet.Debug.Image (Image)
+import Cuintet.Eei (RegFile, pattern ENVIRONMENT_CALL_FROM_M_MODE)
 import Cuintet.Pipeline (Retire (..))
 import Cuintet.Unit.Ram (initRamLanes)
 import Data.Maybe (mapMaybe)
 import Text.Printf (printf)
 import Prelude qualified as P
-
--- | The whole of the core's memory, @2 ^ ramAddrWidth@ bus words of it.
-type Image ramAddrWidth = Vec (2 ^ ramAddrWidth) (BitVector (MemDataBytes * 8))
 
 -- | What an image left behind when it reached its @ecall@.
 data Run = Run
@@ -24,34 +21,37 @@ data Run = Run
   -- ^ The register file, rebuilt from the write-backs the core logged.
   }
 
-hexProgram :: (KnownNat ramAddrWidth) => SNat ramAddrWidth -> FilePath -> String -> Image ramAddrWidth
-hexProgram SNat = hexImage
-
-elfProgram :: (KnownNat ramAddrWidth) => SNat ramAddrWidth -> FilePath -> IO (Image ramAddrWidth)
-elfProgram SNat = elfImage
-
 -- | Whether a 'Retire' is the @ecall@ that halts an image.
 isEcall :: Retire -> Bool
 isEcall l
   | Just ENVIRONMENT_CALL_FROM_M_MODE <- l.trap = True
   | otherwise = False
 
-runImage :: (KnownNat ramAddrWidth) => Int -> Image ramAddrWidth -> Either String Run
-runImage budget img = go 0 0 (replicate d32 0) instLogs
-  where
-    instLogs = sampleWithResetN @System d1 budget $ (.retired) <$> system (initRamLanes img)
-
-    go :: Int -> Int -> RegFile -> [Maybe Retire] -> Either String Run
-    go _ _ _ [] = Left (printf "no ecall within %d cycles" budget)
-    go !n !r regs (entry : rest) = case entry of
-      Just l | isEcall l -> Right Run {cycles = n, retired = r, regs}
-      Just l -> go (n + 1) (r + 1) (maybe regs (\(a, v) -> replace a v regs) l.rd) rest
-      Nothing -> go (n + 1) r regs rest
-
+-- | Every clock the core ran, up to @budget@ of them.  Reset is not among them.
 traceImage :: (KnownNat ramAddrWidth) => Int -> Image ramAddrWidth -> [CoreTrace]
-traceImage budget img = upToEcall $ sampleWithResetN @System d1 budget $ (.trace) <$> system (initRamLanes img)
-  where
-    upToEcall = P.foldr (\t rest -> t : if maybe False isEcall t.retired then [] else rest) []
+traceImage budget img = sampleWithResetN @System d1 budget $ (.trace) <$> system (initRamLanes img)
 
-retireImage :: (KnownNat ramAddrWidth) => Int -> Image ramAddrWidth -> [Retire]
-retireImage budget = mapMaybe (.retired) . traceImage budget
+-- | The trace cut short at the @ecall@ that halts an image, which it keeps.
+upToEcall :: [CoreTrace] -> [CoreTrace]
+upToEcall = P.foldr (\t rest -> t : if maybe False isEcall t.retired then [] else rest) []
+
+retires :: [CoreTrace] -> [Retire]
+retires = mapMaybe (.retired)
+
+-- | The register file a run of 'Retire's leaves behind.
+finalRegs :: [Retire] -> RegFile
+finalRegs = P.foldl' writeBack (replicate d32 0)
+
+writeBack :: RegFile -> Retire -> RegFile
+writeBack regs l = maybe regs (\(a, v) -> replace a v regs) l.rd
+
+-- | Runs an image to its @ecall@, summarising it as it goes.
+runImage :: (KnownNat ramAddrWidth) => Int -> Image ramAddrWidth -> Either String Run
+runImage budget img = go 0 0 (replicate d32 0) (traceImage budget img)
+  where
+    go :: Int -> Int -> RegFile -> [CoreTrace] -> Either String Run
+    go _ _ _ [] = Left (printf "no ecall within %d cycles" budget)
+    go !n !r regs (t : rest) = case t.retired of
+      Just l | isEcall l -> Right Run {cycles = n, retired = r, regs}
+      Just l -> go (n + 1) (r + 1) (writeBack regs l) rest
+      Nothing -> go (n + 1) r regs rest
