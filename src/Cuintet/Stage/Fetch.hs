@@ -2,7 +2,7 @@
 module Cuintet.Stage.Fetch (FetchState (..), initFetchState, FetchIn (..), FetchOut (..), fetch) where
 
 import Clash.Prelude
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, instAt)
+import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, instAt, resetVector)
 import Cuintet.Pipeline (IfId (..))
 import Cuintet.Unit.Btb (BtbResp (..), Prediction (..), predicted)
 import Cuintet.Unit.Fifo (FifoResp (..))
@@ -32,7 +32,7 @@ data FetchState = FetchState
 initFetchState :: FetchState
 initFetchState =
   FetchState
-    { next = 0
+    { next = resetVector
     , fetching = Nothing
     , staged = Nothing
     }

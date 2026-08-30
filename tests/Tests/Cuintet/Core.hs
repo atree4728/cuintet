@@ -4,7 +4,7 @@ import Clash.Prelude
 import Cuintet (system)
 import Cuintet.Core (CoreOut (..), CoreTrace (..))
 import Cuintet.Debug.Image (memImage)
-import Cuintet.Eei (Inst, RegFile)
+import Cuintet.Eei (Inst, RegFile, resetVector)
 import Cuintet.Pipeline (Retire (..))
 import Cuintet.Unit.Ram (initRamLanes)
 import Data.Maybe (mapMaybe)
@@ -145,15 +145,15 @@ tests =
   testGroup
     "Cuintet.Core"
     [ testCase "Commit each instruction once, in order" $ do
-        ((.pc) <$> runProgram 8 aluProg) @?= [0, 4, 8, 12, 16, 20, 24, 28]
-        (finalRegs 3 aluProg !! (3 :: Int)) @?= 0x00100024
+        ((.pc) <$> runProgram 8 aluProg) @?= ((resetVector +) <$> [0, 4, 8, 12, 16, 20, 24, 28])
+        (finalRegs 3 aluProg !! (3 :: Int)) @?= pack (resetVector + 0x00100024)
     , testCase "Load the value that was stored using store" $ do
-        ((.pc) <$> runProgram 8 loadStoreProg) @?= [0, 4, 8, 12, 16, 20, 24, 28]
+        ((.pc) <$> runProgram 8 loadStoreProg) @?= ((resetVector +) <$> [0, 4, 8, 12, 16, 20, 24, 28])
         let regs = finalRegs 4 loadStoreProg
         (regs !! (2 :: Int)) @?= 42
         (regs !! (3 :: Int)) @?= 43
     , testCase "Ignore write back to x0" $ do
-        ((.pc) <$> runProgram 2 x0Prog) @?= [0, 4]
+        ((.pc) <$> runProgram 2 x0Prog) @?= ((resetVector +) <$> [0, 4])
         let regs = finalRegs 2 x0Prog
         (regs !! (0 :: Int)) @?= 0
         (regs !! (1 :: Int)) @?= 0
@@ -174,20 +174,22 @@ tests =
         (regs !! (5 :: Int)) @?= 1
         (regs !! (6 :: Int)) @?= 0
     , testCase "Unconditional jump" $ do
-        ((.pc) <$> runProgram 5 jumpProg) @?= [0x0, 0x10, 0x14, 0x20, 0x0]
+        -- jalr lands on an absolute 0x20, which toRamAddr truncates back into the image
+        ((.pc) <$> runProgram 5 jumpProg) @?= [resetVector, resetVector + 0x10, resetVector + 0x14, 0x20, 0x0]
     , testCase "Conditional jump" $ do
-        ((.pc) <$> runProgram 5 branchProg) @?= [0x0, 0x04, 0x08, 0x18, 0x18]
+        ((.pc) <$> runProgram 5 branchProg) @?= ((resetVector +) <$> [0x0, 0x04, 0x08, 0x18, 0x18])
     , testCase "Zicsr" $ do
         let regs = finalRegs 2 csrProg
         (regs !! (2 :: Int)) @?= 0b10100
     , testCase "ecall" $ do
-        ((.pc) <$> runProgram 4 ecallProg) @?= [0x0, 0x04, 0x10, 0x14]
+        -- mtvec is an absolute 0x10, truncated back into the image like jumpProg's
+        ((.pc) <$> runProgram 4 ecallProg) @?= [resetVector, resetVector + 0x04, 0x10, 0x14]
         let regs = finalRegs 4 ecallProg
         (regs !! (1 :: Int)) @?= 0xb
-        (regs !! (2 :: Int)) @?= 0x4
+        (regs !! (2 :: Int)) @?= pack (resetVector + 0x4)
     , testCase "mret"
         $ ((.pc) <$> runProgram 3 mretProg)
-        @?= [0x0, 0x04, 0x10]
+        @?= [resetVector, resetVector + 0x04, 0x10]
     , testCase "Interlock a data dependency" $ do
         let regs = finalRegs 2 dataHazardProg
         (regs !! (2 :: Int)) @?= 2

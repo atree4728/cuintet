@@ -4,6 +4,7 @@ module Cuintet.Eei (
   XLenBytes,
   ILen,
   Addr,
+  resetVector,
   Inst,
   Sign (..),
   Width (..),
@@ -67,6 +68,10 @@ type XLenBytes = XLen `Div` 8
 
 -- | A physical memory address.
 type Addr = Unsigned XLen
+
+-- | Where fetch starts, and where the images are linked.
+resetVector :: Addr
+resetVector = 0x80000000
 
 -- | An instruction word. RV64I has the 32-bit form only.
 type Inst = BitVector ILen
