@@ -81,7 +81,7 @@ data Retire = Retire
   , mem :: Maybe MemReq
   , trap :: Maybe TrapCause
   }
-  deriving (Generic, NFDataX)
+  deriving (Generic, NFDataX, Eq)
 
 -- | The @rs1@ and @rs2@ fields, shared by ID and the register file read.
 srcRegs :: Inst -> (RegAddr, RegAddr)

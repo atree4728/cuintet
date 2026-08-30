@@ -70,6 +70,7 @@ library
     Cuintet.Debug.Konata
     Cuintet.Debug.Show
     Cuintet.Debug.Sim
+    Cuintet.Debug.Spike
     Cuintet.Eei
     Cuintet.Pipeline
     Cuintet.Stage.Decode
@@ -117,6 +118,15 @@ executable konata
     cuintet,
     directory,
     filepath,
+    process,
+
+executable tracediff
+  import: common-options
+  main-is: bin/TraceDiff.hs
+  build-depends:
+    bytestring,
+    cuintet,
+    directory,
     process,
 
 common plain-options

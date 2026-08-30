@@ -145,6 +145,7 @@ instAt addr busWord = truncateB (busWord `shiftR` bitOffset (laneOffset addr))
 newtype StoreLanes nBytes = StoreLanes (Vec nBytes (Maybe (BitVector 8)))
   deriving stock (Generic)
   deriving anyclass (NFDataX)
+  deriving newtype (Eq)
 
 -- | Load request, which is to be sliced and extended.
 data LoadShape = LoadShape {width :: Width, sign :: Sign, offset :: LaneOffset}
@@ -159,7 +160,7 @@ data BusReq nBytes = BusReq
   , wdata :: Maybe (StoreLanes nBytes)
   -- ^ 'Just' the data to write for stores, 'Nothing' for loads.
   }
-  deriving (Generic, NFDataX)
+  deriving (Generic, NFDataX, Eq)
 
 -- | The memory's half of the bus: whether it takes a request this cycle, and the word read for one it took earlier.
 data BusResp nBytes = BusResp
@@ -401,7 +402,7 @@ data TrapCause
   { interrupt :: Bool
   , code :: BitVector 4
   }
-  deriving (Generic, NFDataX)
+  deriving (Generic, NFDataX, Eq)
 
 deriveAutoReg ''TrapCause
 

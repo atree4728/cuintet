@@ -6,6 +6,10 @@
 mod tangnano9k "fpga/tangnano9k"
 mod timing "fpga/timing"
 
+# Diff a linked ELF's retire trace against spike's commit log.
+tracediff elf:
+    cabal run -v0 tracediff -- {{elf}}
+
 default:
     @just --list --list-submodules
 
