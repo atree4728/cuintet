@@ -1,26 +1,22 @@
-{- | Reading spike's @--log-commits@ output, and diffing it against the core's.
-
-Spike logs one line per committed instruction, carrying exactly what a 'Retire'
-carries.  What it leaves out is what the core can be held to anyway: an
-instruction that traps is never committed, so it has no line at all, and a load
-reports only its address because its value is the register write beside it.
--}
-module Cuintet.Debug.Spike (base, commits, diverged) where
+-- | Reading spike's @--log-commits@ output, and diffing it against the core's.
+module Cuintet.Debug.Spike (base, commits, diverged, divergenceLines, withCommits) where
 
 import Clash.Prelude
 import Control.Monad (guard)
+import Cuintet.Debug.Show (retireLines)
 import Cuintet.Eei (Addr, BusReq (..), MemReq, Width (..), XLen, laneOffset)
 import Cuintet.Pipeline (Retire (..))
 import Cuintet.Unit.LoadStore (storeLanes)
 import Data.List (stripPrefix)
 import Data.Maybe (listToMaybe, mapMaybe)
 import Numeric (readHex)
+import System.Exit (die)
+import System.IO (hGetContents)
+import System.Process (CreateProcess (..), StdStream (CreatePipe), proc, withCreateProcess)
+import Text.Printf (printf)
 import Prelude qualified as P
 
-{- | Where the images are linked.  The core's RAM starts at zero and
-'Cuintet.Unit.Ram.ram' truncates the address to its width, so the core reports
-an offset where spike reports the absolute address.
--}
+-- | Where the images are linked.
 base :: Addr
 base = 0x80000000
 
@@ -72,7 +68,7 @@ commit line = case P.words line of
 fields :: Retire -> [String] -> Maybe Retire
 fields l [] = Just l
 fields l ("mem" : addr : rest) = do
-  a <- (subtract (toInteger base)) <$> hex addr
+  a <- subtract (toInteger base) <$> hex addr
   access <- case rest of
     [] -> Just BusReq {addr = fromInteger a, wdata = Nothing}
     [value] -> stored (fromInteger a) value
@@ -137,3 +133,32 @@ diverged = go 0
       | otherwise = Just (i, Just x, Just y)
     go _ [] _ = Nothing
     go i xs [] = Just (i, listToMaybe xs, Nothing)
+
+divergenceLines :: Int -> [Retire] -> (Int, Maybe Retire, Maybe Retire) -> [String]
+divergenceLines context ours (i, ourEntry, theirEntry) =
+  ["  cuintet:"]
+    <> side ourEntry
+    <> ["  spike:"]
+    <> side theirEntry
+    <> ["", printf "  the %d retires before it:" context]
+    <> foldMap indent (P.drop (i - context) (P.take i ours))
+  where
+    side = maybe ["    (the trace ends here)"] indent
+    indent = P.map ("    " <>) . retireLines
+
+withCommits :: FilePath -> ([Retire] -> IO r) -> IO r
+withCommits elf k =
+  withCreateProcess (proc "spike" args) {std_err = CreatePipe} $ \_ _ err _ ->
+    case err of
+      Nothing -> die "spike: could not open a pipe to its log"
+      Just h -> k . commits =<< hGetContents h
+  where
+    args =
+      [ "--isa=rv64im_zicsr_zicntr"
+      , "-m0x80000000:0x20000"
+      , "--priv=m"
+      , -- the images skip past CSRs that trap, so cut spike down to the core's
+        "--pmpregions=0"
+      , "--log-commits"
+      , elf
+      ]

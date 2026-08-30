@@ -10,8 +10,22 @@ build-type: Simple
 extra-doc-files:
   README.md
 
-common common-options
+common warnings
   default-language: GHC2024
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wmissing-home-modules
+    -Wpartial-fields
+    -Wredundant-constraints
+    -Wunused-packages
+
+common clash
+  import: warnings
   default-extensions:
     DefaultSignatures
     DeriveAnyClass
@@ -29,27 +43,9 @@ common common-options
     ViewPatterns
 
   ghc-options:
-    -Wall
-    -Wcompat
-    -Widentities
-    -Wincomplete-record-updates
-    -Wincomplete-uni-patterns
-    -Wmissing-export-lists
-    -Wmissing-home-modules
-    -Wpartial-fields
-    -Wredundant-constraints
-    -Wunused-packages
-    -haddock
-    -fplugin
-    GHC.TypeLits.Extra.Solver
-    -fplugin
-    GHC.TypeLits.Normalise
-    -fplugin
-    GHC.TypeLits.KnownNat.Solver
-    -fexpose-all-unfoldings
-    -fno-worker-wrapper
-    -fno-unbox-small-strict-fields
-    -fno-unbox-strict-fields
+    -fplugin=GHC.TypeLits.Extra.Solver
+    -fplugin=GHC.TypeLits.KnownNat.Solver
+    -fplugin=GHC.TypeLits.Normalise
 
   build-depends:
     base,
@@ -59,8 +55,15 @@ common common-options
     ghc-typelits-natnormalise,
 
 library
-  import: common-options
+  import: clash
   hs-source-dirs: src
+  ghc-options:
+    -haddock
+    -fexpose-all-unfoldings
+    -fno-worker-wrapper
+    -fno-unbox-small-strict-fields
+    -fno-unbox-strict-fields
+
   -- cabal-gild: discover src
   exposed-modules:
     Cuintet
@@ -92,6 +95,40 @@ library
     Cuintet.Unit.RegFile
     Cuintet.Util
 
+  build-depends:
+    bytestring,
+    directory,
+    process,
+
+executable konata
+  import: clash
+  main-is: bin/Konata.hs
+  build-depends: cuintet
+
+executable tracediff
+  import: clash
+  main-is: bin/TraceDiff.hs
+  build-depends: cuintet
+
+executable timing
+  import: warnings
+  main-is: bin/Timing.hs
+  default-extensions:
+    DuplicateRecordFields
+    NoFieldSelectors
+    OverloadedRecordDot
+    OverloadedStrings
+    ViewPatterns
+
+  build-depends:
+    aeson >=2.2 && <2.3,
+    base,
+    containers,
+    directory,
+    filepath,
+    prettyprinter >=1.7 && <1.8,
+    text,
+
 common clash-exe
   default-language: GHC2024
   ghc-options: "-with-rtsopts=-K512M -H -I5 -T"
@@ -111,62 +148,22 @@ executable clashi
   import: clash-exe
   main-is: bin/Clashi.hs
 
-executable konata
-  import: common-options
-  main-is: bin/Konata.hs
-  build-depends:
-    cuintet,
-    directory,
-    filepath,
-    process,
-
-executable tracediff
-  import: common-options
-  main-is: bin/TraceDiff.hs
-  build-depends:
-    bytestring,
-    cuintet,
-    directory,
-    process,
-
-common plain-options
-  default-language: GHC2024
-  ghc-options:
-    -Wall
-    -Wcompat
-
-executable timing
-  import: plain-options
-  main-is: bin/Timing.hs
-  default-extensions:
-    DuplicateRecordFields
-    NoFieldSelectors
-    OverloadedRecordDot
-    OverloadedStrings
-    ViewPatterns
-
-  build-depends:
-    aeson >=2.2 && <2.3,
-    base,
-    containers,
-    directory,
-    filepath,
-    prettyprinter >=1.7 && <1.8,
-    text,
-
 test-suite doctests
-  import: plain-options
+  import: warnings
   type: exitcode-stdio-1.0
   main-is: doctests.hs
   hs-source-dirs: tests
-  ghc-options: -threaded
+  ghc-options:
+    -threaded
+    -Wno-unused-packages
+
   build-depends:
     base,
     cuintet,
     doctest-parallel >=0.2 && <0.5,
 
 common programs
-  import: common-options
+  import: clash
   hs-source-dirs: tests
   other-modules: Programs
   build-depends:

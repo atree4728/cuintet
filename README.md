@@ -34,8 +34,14 @@ cabal haddock --open
 
 To log the core as Kanata format, use:
 
+```sh
+just konata IMAGE.hex
 ```
-cabal run konata
+
+To diff a linked ELF's retire trace against spike's, use:
+
+```sh
+just tracediff IMAGE.elf
 ```
 
 ## Synthesis

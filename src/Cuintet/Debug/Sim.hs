@@ -1,18 +1,10 @@
-{- | Running a bare-metal image on the core in simulation.
-
-Every image the project runs -- the riscv-tests suites, CoreMark, anything added
-beside them -- reports itself the same way: it leaves a result in a register and
-executes @ecall@, and the simulation stops there.  'runImage' is that protocol
-and nothing more.  It returns the cycle count and the register file; which
-register carries the verdict, and what counts as a pass, is the caller's
-business.
--}
-module Cuintet.Debug.Sim (Image, Run (..), hexProgram, runImage, traceImage, retireImage) where
+-- | Running a bare-metal image on the core in simulation.
+module Cuintet.Debug.Sim (Image, Run (..), hexProgram, elfProgram, isEcall, runImage, traceImage, retireImage) where
 
 import Clash.Prelude
 import Cuintet (system)
 import Cuintet.Core (CoreOut (..), CoreTrace (..))
-import Cuintet.Debug.Image (hexImage)
+import Cuintet.Debug.Image (elfImage, hexImage)
 import Cuintet.Eei (MemDataBytes, RegFile, pattern ENVIRONMENT_CALL_FROM_M_MODE)
 import Cuintet.Pipeline (Retire (..))
 import Cuintet.Unit.Ram (initRamLanes)
@@ -35,6 +27,10 @@ data Run = Run
 hexProgram :: (KnownNat ramAddrWidth) => SNat ramAddrWidth -> FilePath -> String -> Image ramAddrWidth
 hexProgram SNat = hexImage
 
+elfProgram :: (KnownNat ramAddrWidth) => SNat ramAddrWidth -> FilePath -> IO (Image ramAddrWidth)
+elfProgram SNat = elfImage
+
+-- | Whether a 'Retire' is the @ecall@ that halts an image.
 isEcall :: Retire -> Bool
 isEcall l
   | Just ENVIRONMENT_CALL_FROM_M_MODE <- l.trap = True
