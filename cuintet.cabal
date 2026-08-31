@@ -111,25 +111,6 @@ executable tracediff
   main-is: bin/TraceDiff.hs
   build-depends: cuintet
 
-executable timing
-  import: warnings
-  main-is: bin/Timing.hs
-  default-extensions:
-    DuplicateRecordFields
-    NoFieldSelectors
-    OverloadedRecordDot
-    OverloadedStrings
-    ViewPatterns
-
-  build-depends:
-    aeson >=2.2 && <2.3,
-    base,
-    containers,
-    directory,
-    filepath,
-    prettyprinter >=1.7 && <1.8,
-    text,
-
 common clash-exe
   default-language: GHC2024
   ghc-options: "-with-rtsopts=-K512M -H -I5 -T"

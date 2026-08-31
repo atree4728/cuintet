@@ -24,9 +24,9 @@ synth: hdl
 
 # max frequency and critical path (minutes)
 fmax: synth
-    nextpnr-ecp5 -q {{ device }} --json {{ out }}/{{ entity }}.json --freq {{ freq }} --seed {{ seed }} --timing-allow-fail --report {{ out }}/report.json --detailed-timing-report -l {{ out }}/nextpnr.log
+    nextpnr-ecp5 -q {{ device }} --json {{ out }}/{{ entity }}.json --freq {{ freq }} --seed {{ seed }} --timing-allow-fail --report {{ out }}/report.json -l {{ out }}/nextpnr.log
     @just timing::report
 
 # the last fmax run, summarised; reads the artefacts, so it does not re-place
 report:
-    @cabal run timing -- {{ out }} {{ src }}
+    @python3 bin/timing.py {{ out }}
