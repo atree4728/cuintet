@@ -96,6 +96,7 @@ library
     Cuintet.Util
 
   build-depends:
+    attoparsec >=0.14 && <0.15,
     bytestring,
     directory,
     process,

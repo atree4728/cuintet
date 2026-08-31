@@ -1,83 +1,79 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- | Reading spike's @--log-commits@ output, and diffing it against the core's.
 module Cuintet.Debug.Spike (commits, diverged, divergenceLines, withCommits) where
 
 import Clash.Prelude
 import Control.Monad (guard)
 import Cuintet.Debug.Show (retireLines)
-import Cuintet.Eei (Addr, BusReq (..), MemReq, Width (..), XLen, laneOffset, resetVector)
+import Cuintet.Eei (Addr, BusReq (..), MemReq, RegAddr, Width (..), XLen, laneOffset, resetVector)
 import Cuintet.Pipeline (Retire (..))
 import Cuintet.Unit.LoadStore (storeLanes)
-import Data.List (stripPrefix)
+import Data.Attoparsec.ByteString (match)
+import Data.Attoparsec.ByteString.Char8 (Parser, char, decimal, endOfInput, hexadecimal, many', option, parseOnly, skipSpace, skipWhile, string)
+import Data.ByteString qualified as BS
+import Data.ByteString.Lazy.Char8 qualified as BL
+import Data.Char (isSpace)
 import Data.Maybe (listToMaybe, mapMaybe)
-import Numeric (readHex)
 import System.Exit (die)
-import System.IO (hGetContents)
 import System.Process (CreateProcess (..), StdStream (CreatePipe), proc, withCreateProcess)
 import Text.Printf (printf)
 import Prelude qualified as P
 
 -- | The 'Retire's in a spike commit log.
-commits :: String -> [Retire]
-commits = mapMaybe commit . P.lines
+commits :: BL.ByteString -> [Retire]
+commits = mapMaybe (either (const Nothing) Just . parseOnly line . BL.toStrict) . BL.lines
 
-commit :: String -> Maybe Retire
-commit line = case P.words line of
-  "core" : _hart : _priv : pc : inst : rest -> do
-    addr <- hex pc
-    guard (addr >= toInteger resetVector)
-    instBits <- hex (P.filter (`P.notElem` "()") inst)
-    fields
-      Retire
-        { pc = fromInteger addr
-        , instBits = fromInteger instBits
-        , rd = Nothing
-        , mem = Nothing
-        , trap = Nothing
-        }
-      rest
-  _ -> Nothing
+line :: Parser Retire
+line = do
+  _hart <- string "core" *> skipSpace *> decimal @Int <* char ':'
+  _priv <- skipSpace *> decimal @Int
+  pc <- skipSpace *> hex
+  guard (pc >= toInteger resetVector)
+  instBits <- skipSpace *> char '(' *> hex <* char ')'
+  effects <- many' (skipSpace *> effect)
+  endOfInput
+  pure $ P.foldr id (bare pc instBits) effects
+
+bare :: Integer -> Integer -> Retire
+bare pc instBits =
+  Retire {pc = fromInteger pc, instBits = fromInteger instBits, rd = Nothing, mem = Nothing, trap = Nothing}
 
 -- | The register, CSR and memory tokens trailing a commit line.
-fields :: Retire -> [String] -> Maybe Retire
-fields l [] = Just l
-fields l ("mem" : addr : rest) = do
-  a <- hex addr
-  access <- case rest of
-    [] -> Just BusReq {addr = fromInteger a, wdata = Nothing}
-    [value] -> stored (fromInteger a) value
-    _ -> Nothing
-  fields l {mem = Just access} []
-fields l (name : value : rest)
-  | Just reg <- regNumber name, Just v <- hex value = fields l {rd = Just (fromInteger reg, fromInteger v)} rest
-  | 'c' : _ <- name, Just _ <- hex value = fields l rest
-fields _ _ = Nothing
+effect :: Parser (Retire -> Retire)
+effect =
+  (\a l -> l {mem = Just a})
+    <$> (string "mem" *> skipSpace *> access)
+    <|> (\r l -> l {rd = Just r})
+    <$> reg
+    <|> id
+    <$ csr
+
+reg :: Parser (RegAddr, BitVector XLen)
+reg = ((,) P.. fromInteger P.<$> (char 'x' *> decimal)) <*> (fromInteger <$> (skipSpace *> hex))
+
+csr :: Parser Integer
+csr = char 'c' *> skipWhile (not . isSpace) *> skipSpace *> hex
+
+access :: Parser MemReq
+access = do
+  addr <- fromInteger <$> hex
+  option BusReq {addr, wdata = Nothing} (skipSpace *> stored addr)
 
 -- | A store, whose width spike gives as the number of digits it padded to.
-stored :: Addr -> String -> Maybe MemReq
-stored addr value = do
-  digits <- stripPrefix "0x" value
-  width <- case P.length digits of
-    2 -> Just Byte
-    4 -> Just Half
-    8 -> Just Word
-    16 -> Just Double
-    _ -> Nothing
-  v <- hex value
+stored :: Addr -> Parser MemReq
+stored addr = do
+  (digits, v) <- string "0x" *> match hexadecimal
+  width <- case BS.length digits of
+    2 -> pure Byte
+    4 -> pure Half
+    8 -> pure Word
+    16 -> pure Double
+    _ -> empty
   pure BusReq {addr, wdata = Just (storeLanes width (laneOffset addr) (fromInteger v :: BitVector XLen))}
 
--- | The register number in an @x7@ token.
-regNumber :: String -> Maybe Integer
-regNumber ('x' : ds) = case reads ds of
-  [(n, "")] -> Just n
-  _ -> Nothing
-regNumber _ = Nothing
-
-hex :: String -> Maybe Integer
-hex s = do
-  digits <- stripPrefix "0x" s
-  case readHex digits of
-    [(v, "")] -> Just v
-    _ -> Nothing
+hex :: Parser Integer
+hex = string "0x" *> hexadecimal
 
 -- | The first retire at which the core's trace departs from spike's.
 diverged :: [Retire] -> [Retire] -> Maybe (Int, Maybe Retire, Maybe Retire)
@@ -106,7 +102,7 @@ withCommits elf k =
   withCreateProcess (proc "spike" args) {std_err = CreatePipe} $ \_ _ err _ ->
     case err of
       Nothing -> die "spike: could not open a pipe to its log"
-      Just h -> k . commits =<< hGetContents h
+      Just h -> k . commits =<< BL.hGetContents h
   where
     args =
       [ "--isa=rv64im_zicsr_zicntr"
