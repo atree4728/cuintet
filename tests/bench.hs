@@ -2,8 +2,10 @@
 module Main (main) where
 
 import Control.Monad (unless)
+import Cuintet.Debug.Sim (Run (..), ipc)
 import Data.List (intercalate)
-import Programs (Outcome (..), Stats (..), Suite (..), benchmarks, ipc)
+import Data.Maybe (isNothing)
+import Programs (Outcome (..), Suite (..), benchmarks)
 import System.Environment (getArgs)
 import System.Exit (die, exitFailure)
 import Text.Printf (printf)
@@ -21,11 +23,9 @@ main = do
   passed <- mapM (uncurry report) [(s.name, o) | s <- selected, o <- s.outcomes]
   unless (and passed) exitFailure
 
-report :: String -> (String, Outcome) -> IO Bool
-report suite (name, outcome) = case outcome of
-  Ok stats -> row (cost stats) "ok" >> pure True
-  Failed stats err -> row (cost stats) ("FAIL: " <> err) >> pure False
-  Hung err -> row ("-", "-") ("TIMEOUT: " <> err) >> pure False
+report :: String -> Outcome -> IO Bool
+report suite o = do
+  printf "%-12s  %-16s  %10d  %5.3f  %s\n" suite o.name o.run.cycles (ipc o.run) result
+  pure (isNothing o.failure)
   where
-    cost stats = (show stats.cycles, printf "%.3f" (ipc stats))
-    row (cycles, rate) = printf "%-12s  %-16s  %10s  %5s  %s\n" suite name cycles rate
+    result = maybe "ok" ("FAIL: " <>) o.failure

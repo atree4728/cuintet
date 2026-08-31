@@ -3,7 +3,8 @@
 -- | Reading spike's @--log-commits@ output, and diffing it against the core's.
 module Cuintet.Debug.Spike (commits, diverged, divergenceLines, withCommits) where
 
-import Clash.Prelude
+import Clash.Prelude (BitVector)
+import Control.Applicative (empty, (<|>))
 import Control.Monad (guard)
 import Cuintet.Debug.Show (retireLines)
 import Cuintet.Eei (Addr, BusReq (..), MemReq, RegAddr, Width (..), XLen, laneOffset, resetVector)
@@ -18,7 +19,7 @@ import Data.Maybe (listToMaybe, mapMaybe)
 import System.Exit (die)
 import System.Process (CreateProcess (..), StdStream (CreatePipe), proc, withCreateProcess)
 import Text.Printf (printf)
-import Prelude qualified as P
+import Prelude
 
 -- | The 'Retire's in a spike commit log.
 commits :: BL.ByteString -> [Retire]
@@ -33,7 +34,7 @@ line = do
   instBits <- skipSpace *> char '(' *> hex <* char ')'
   effects <- many' (skipSpace *> effect)
   endOfInput
-  pure $ P.foldr id (bare pc instBits) effects
+  pure $ foldr id (bare pc instBits) effects
 
 bare :: Integer -> Integer -> Retire
 bare pc instBits =
@@ -42,15 +43,12 @@ bare pc instBits =
 -- | The register, CSR and memory tokens trailing a commit line.
 effect :: Parser (Retire -> Retire)
 effect =
-  (\a l -> l {mem = Just a})
-    <$> (string "mem" *> skipSpace *> access)
-    <|> (\r l -> l {rd = Just r})
-    <$> reg
-    <|> id
-    <$ csr
+  (\a l -> l {mem = Just a}) <$> (string "mem" *> skipSpace *> access)
+    <|> (\r l -> l {rd = Just r}) <$> reg
+    <|> id <$ csr
 
 reg :: Parser (RegAddr, BitVector XLen)
-reg = ((,) P.. fromInteger P.<$> (char 'x' *> decimal)) <*> (fromInteger <$> (skipSpace *> hex))
+reg = ((,) . fromInteger <$> (char 'x' *> decimal)) <*> (fromInteger <$> (skipSpace *> hex))
 
 csr :: Parser Integer
 csr = char 'c' *> skipWhile (not . isSpace) *> skipSpace *> hex
@@ -60,7 +58,6 @@ access = do
   addr <- fromInteger <$> hex
   option BusReq {addr, wdata = Nothing} (skipSpace *> stored addr)
 
--- | A store, whose width spike gives as the number of digits it padded to.
 stored :: Addr -> Parser MemReq
 stored addr = do
   (digits, v) <- string "0x" *> match hexadecimal
@@ -92,10 +89,10 @@ divergenceLines context ours (i, ourEntry, theirEntry) =
     <> ["  spike:"]
     <> side theirEntry
     <> ["", printf "  the %d retires before it:" context]
-    <> foldMap indent (P.drop (i - context) (P.take i ours))
+    <> foldMap indent (drop (i - context) (take i ours))
   where
     side = maybe ["    (the trace ends here)"] indent
-    indent = P.map ("    " <>) . retireLines
+    indent = map ("    " <>) . retireLines
 
 withCommits :: FilePath -> ([Retire] -> IO r) -> IO r
 withCommits elf k =

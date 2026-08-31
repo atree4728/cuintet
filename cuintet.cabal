@@ -98,8 +98,8 @@ library
   build-depends:
     attoparsec >=0.14 && <0.15,
     bytestring,
-    directory,
     process,
+    temporary,
 
 executable konata
   import: clash
