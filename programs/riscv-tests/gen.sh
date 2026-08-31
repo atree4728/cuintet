@@ -8,8 +8,6 @@ env=$root/vendor/riscv-tests/env
 prefix=${RISCV_PREFIX:-riscv64-unknown-elf-}
 out=$root/build/programs/riscv-tests
 
-. "$root/programs/common/hex.sh"
-
 suites='rv64ui rv64um rv64mi'
 if [ "$#" -gt 0 ]; then
   suites=$1
@@ -31,11 +29,11 @@ for suite in $suites; do
     done
   fi
 
-  mkdir -p "$here/hex/$suite" "$out/$suite"
+  mkdir -p "$here/bin/$suite" "$out/$suite"
 
   for name in $names; do
     elf=$out/$suite/$name.elf
-    hex=$here/hex/$suite/$suite-p-$name.hex
+    bin=$here/bin/$suite/$suite-p-$name.bin
 
     if ! "${prefix}gcc" \
       -march=rv64im_zicsr -mabi=lp64 \
@@ -45,12 +43,12 @@ for suite in $suites; do
       -I "$env/p" -I "$env" -I "$isa/macros/scalar" \
       -o "$elf" "$isa/$suite/$name.S"; then
       echo "$suite-p-$name: skipped, does not assemble"
-      rm -f "$hex" "$elf"
+      rm -f "$bin" "$elf"
       continue
     fi
 
-    elf2hex "$elf" "$hex"
+    "${prefix}objcopy" -O binary "$elf" "$bin"
 
-    echo "$suite-p-$name: $(wc -l <"$hex" | tr -d ' ') words"
+    echo "$suite-p-$name: $(wc -c <"$bin" | tr -d ' ') bytes"
   done
 done

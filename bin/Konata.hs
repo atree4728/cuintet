@@ -1,8 +1,8 @@
 module Main (main) where
 
 import Clash.Prelude
+import Cuintet.Debug.Image (elfImage)
 import Cuintet.Debug.Konata (konataLog)
-import Cuintet.Debug.Image (hexImage)
 import Cuintet.Debug.Sim (traceImage, upToEcall)
 import System.Environment (getArgs)
 import System.Exit (die)
@@ -18,10 +18,10 @@ main :: IO ()
 main = do
   args <- getArgs
   case args of
-    [input] -> run input
-    _ -> die "usage: konata IMAGE.hex"
+    [elf] -> run elf
+    _ -> die "usage: konata IMAGE.elf"
 
 run :: FilePath -> IO ()
-run input = do
-  img <- hexImage ramAddrWidth <$> P.readFile input
+run elf = do
+  img <- elfImage ramAddrWidth elf
   P.putStr $ P.unlines $ konataLog $ upToEcall $ traceImage budget img

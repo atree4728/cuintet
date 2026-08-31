@@ -1,5 +1,5 @@
 -- | The memory image a core boots from, built from whatever holds the program.
-module Cuintet.Debug.Image (Image, instImage, hexImage, binImage, elfImage) where
+module Cuintet.Debug.Image (Image, instImage, binImage, elfImage) where
 
 import Clash.Prelude
 import Clash.Sized.Vector (unsafeFromList)
@@ -7,7 +7,6 @@ import Control.Exception (bracket)
 import Cuintet.Eei (Inst, MemDataBytes)
 import Data.ByteString qualified as BS
 import Data.Maybe (fromMaybe)
-import Numeric (readHex)
 import System.Directory (getTemporaryDirectory, removeFile)
 import System.Environment (lookupEnv)
 import System.IO (hClose, openBinaryTempFile)
@@ -33,13 +32,6 @@ instImage SNat ws
   | otherwise = unsafeFromList (packInsts $ P.take maxInsts (ws <> P.repeat nop))
   where
     maxInsts = 2 * natToNum @(2 ^ w)
-
-hexImage :: (KnownNat w) => SNat w -> String -> Image w
-hexImage w src = instImage w (P.zipWith parseWord [1 :: Int ..] (P.lines src))
-  where
-    parseWord lineNo s = case readHex s of
-      [(x, "")] -> x
-      _ -> error (printf "line %d: not a hex word: %s" lineNo s)
 
 -- | The image read straight from the flat bytes @objcopy -O binary@ writes.
 binImage :: (KnownNat w) => SNat w -> BS.ByteString -> Image w

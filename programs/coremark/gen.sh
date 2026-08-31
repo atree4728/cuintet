@@ -6,10 +6,8 @@ root=$(CDPATH= cd -- "$here/../.." && pwd)
 common=$root/programs/common
 src=$root/vendor/coremark
 prefix=${RISCV_PREFIX:-riscv64-unknown-elf-}
-hex=$here/hex/coremark.hex
+bin=$here/bin/coremark.bin
 elf=$root/build/programs/coremark/coremark.elf
-
-. "$common/hex.sh"
 
 if [ ! -f "$src/core_main.c" ]; then
   echo "$0: $src is missing; run 'git submodule update --init'" >&2
@@ -23,7 +21,7 @@ flags="-march=rv64im_zicsr -mabi=lp64 -mcmodel=medany -O3"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-mkdir -p "$here/hex" "${elf%/*}"
+mkdir -p "$here/bin" "${elf%/*}"
 
 sed \
   -e '/list_head structure too big/{n;s/return MAIN_RETURN_VAL;/return -2;/;}' \
@@ -53,7 +51,7 @@ fi
   "$here/core_portme.c" \
   "$here/ee_printf.c"
 
-elf2hex "$elf" "$hex"
+"${prefix}objcopy" -O binary "$elf" "$bin"
 
 "${prefix}size" "$elf"
-echo "coremark.hex: $(wc -l <"$hex" | tr -d ' ') words"
+echo "coremark.bin: $(wc -c <"$bin" | tr -d ' ') bytes"

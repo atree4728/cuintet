@@ -8,10 +8,10 @@ handles the rest.
 module Programs (Suite (..), Outcome (..), Stats (..), ipc, failure, riscvTests, benchmarks) where
 
 import Clash.Prelude
-import Cuintet.Debug.Image (hexImage)
+import Cuintet.Debug.Image (binImage)
 import Cuintet.Debug.Sim (Run (..), runImage)
 import Cuintet.Eei (RegFile)
-import Data.ByteString.Char8 qualified as BC
+import Data.ByteString qualified as BS
 import Data.FileEmbed (embedDir, makeRelativeToProject)
 import Data.List (sortOn)
 import System.FilePath (takeBaseName)
@@ -61,12 +61,12 @@ suite ::
   -- | reads the verdict out of the register file the image left behind
   (RegFile -> Either String ()) ->
   -- | the images, as 'embedDir' produced them
-  [(FilePath, BC.ByteString)] ->
+  [(FilePath, BS.ByteString)] ->
   Suite
 suite name ramAddrWidth budget verdict images =
   Suite {name, outcomes = [(takeBaseName path, run bs) | (path, bs) <- sortOn fst images]}
   where
-    run bs = case runImage budget (hexImage ramAddrWidth (BC.unpack bs)) of
+    run bs = case runImage budget (binImage ramAddrWidth bs) of
       Left err -> Hung err
       Right r -> either (Failed (stats r)) (const (Ok (stats r))) (verdict r.regs)
       where
@@ -74,12 +74,12 @@ suite name ramAddrWidth budget verdict images =
 
 riscvTests :: Suite
 riscvTests =
-  suite "riscv-tests" (SNat @11) 200_000 fromTestnum $(makeRelativeToProject "programs/riscv-tests/hex" >>= embedDir)
+  suite "riscv-tests" (SNat @11) 200_000 fromTestnum $(makeRelativeToProject "programs/riscv-tests/bin" >>= embedDir)
 
 -- | The benchmarks, which report a cycle count as well as a verdict.
 benchmarks :: [Suite]
 benchmarks =
-  [ suite "coremark" (SNat @14) 20_000_000 fromCoremark $(makeRelativeToProject "programs/coremark/hex" >>= embedDir)
+  [ suite "coremark" (SNat @14) 20_000_000 fromCoremark $(makeRelativeToProject "programs/coremark/bin" >>= embedDir)
   ]
 
 {- | riscv-tests reports through @gp@, which it uses as @TESTNUM@: 1 once a test

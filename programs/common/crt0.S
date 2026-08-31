@@ -1,10 +1,3 @@
-# Startup for a bare cuintet: no bootloader, no traps and no I/O.  Shared by
-# every C benchmark under programs/.
-#
-# The contract with the testbench: the ECALL below halts the simulation, and a0
-# holds main's return value.  Reaching it says the benchmark ran to completion;
-# a0 == 0 says it validated its own result.
-
         .section .text.init
         .globl _start
 _start:
@@ -38,12 +31,3 @@ _start:
 trap_spin:
         j       trap_spin
 
-# IF runs ahead of the instruction that redirects it, so the `ret` ending the
-# last function in .text is followed into whatever the linker put next.  The
-# decoder rejects an opcode it does not name, and .rodata is not instructions,
-# so .text ends in more NOPs than the pipeline can be ahead by.  Nothing
-# branches here; it is only ever fetched down the wrong path.
-        .section .guard, "ax", @progbits
-        .rept 64
-        nop
-        .endr
