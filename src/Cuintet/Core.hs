@@ -2,7 +2,7 @@
 module Cuintet.Core (CoreIn (..), CoreOut (..), CoreTrace (..), core) where
 
 import Clash.Prelude
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, XLen)
+import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, SSWay, XLen)
 import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), MaWb (..), Retire (..), forwardable, unresolved)
 import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
 import Cuintet.Stage.Execute (ExecuteIn (..), ExecuteOut (..), execute)
@@ -28,7 +28,7 @@ data CoreOut = CoreOut
   -- ^ Instruction fetch request.
   , dReq :: Maybe MemReq
   -- ^ Load/store request.
-  , retired :: Maybe Retire
+  , retired :: Vec SSWay (Maybe Retire)
   -- ^ Execution log of a single instruction, emitted only in the clock it retires.
   , led :: BitVector XLen
   , trace :: CoreTrace
@@ -52,7 +52,7 @@ data CoreTrace = CoreTrace
   , idIssue :: Bool
   , exIssue :: Bool
   , maIssue :: Bool
-  , retired :: Maybe Retire
+  , retired :: Vec SSWay (Maybe Retire)
   , flush :: Bool
   }
   deriving (Generic, NFDataX)
@@ -99,7 +99,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, ifIdResp, idExResp, exMaRe
     exMaReq = FifoReq {wdata = exOut.issue, rready = isJust maOut.issue, flush = False}
     maWbReq = FifoReq {wdata = maOut.issue, rready = True, flush = False}
 
-    coreOut = CoreOut {iReq = ifOut.iReq, dReq = maOut.dReq, retired = wbOut.retired, led = memAccessState.csrFile.led, trace}
+    coreOut = CoreOut {iReq = ifOut.iReq, dReq = maOut.dReq, retired = wbOut.retired :> Nil, led = memAccessState.csrFile.led, trace}
     trace =
       CoreTrace
         { fetchStart = if iResp.ready && not flush then (.addr) <$> ifOut.iReq else Nothing
@@ -108,7 +108,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, ifIdResp, idExResp, exMaRe
         , idIssue = isJust idOut.issue
         , exIssue = isJust exOut.issue
         , maIssue = isJust maOut.issue
-        , retired = wbOut.retired
+        , retired = wbOut.retired :> Nil
         , flush
         }
 

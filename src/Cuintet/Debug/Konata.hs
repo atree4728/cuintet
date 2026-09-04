@@ -62,7 +62,7 @@ modelStep Model {..} CoreTrace {..} = applyWhen flush flushed moved
     moved =
       Model
         { nextId = applyWhen (isJust fetchStart) (+ 1) nextId
-        , commits = applyWhen (isJust retired) (+ 1) commits
+        , commits = applyWhen (any isJust retired) (+ 1) commits
         , fetching = case fetchStart of
             Just pc -> Just Inflight {instId = nextId, pc, instBits = Nothing}
             Nothing -> if fetchDone then Nothing else fetching
@@ -70,7 +70,7 @@ modelStep Model {..} CoreTrace {..} = applyWhen flush flushed moved
         , ifIdQ = ifIdQ'
         , idExQ = shift idIssue exIssue (listToMaybe ifIdQ) idExQ
         , exMaQ = shift exIssue maIssue idExQ exMaQ
-        , maWbQ = shift maIssue (isJust retired) exMaQ maWbQ
+        , maWbQ = shift maIssue (any isJust retired) exMaQ maWbQ
         }
 
     ifIdQ' = case ifIssue of
@@ -107,13 +107,15 @@ clockLines CoreTrace {..} was cur@Model {..} = concatMap entering (stages cur) <
 
     sLine i s = printf "S\t%d\t0\t%s" i.instId (show s)
 
-    retiredLog = case retired of
-      Nothing -> []
-      Just l ->
-        let i = issued maWbQ
-         in printf "L\t%d\t0\t%s" i.instId (label l.pc (Just l.instBits))
-              : [printf "L\t%d\t1\t%s" i.instId ln | ln <- retireLines l]
-                <> [printf "R\t%d\t%d\t0" i.instId commits]
+    retiredLog = concatMap ofRetire retired
+      where
+        ofRetire = \case
+          Nothing -> []
+          Just l ->
+            let i = issued maWbQ
+             in printf "L\t%d\t0\t%s" i.instId (label l.pc (Just l.instBits))
+                  : [printf "L\t%d\t1\t%s" i.instId ln | ln <- retireLines l]
+                    <> [printf "R\t%d\t%d\t0" i.instId commits]
 
     flushed
       | flush = concatMap flushLines (maybeToList idExQ <> ifIdQ <> maybeToList staged <> maybeToList fetching)

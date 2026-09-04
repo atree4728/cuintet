@@ -49,6 +49,7 @@ module Cuintet.Eei (
   pattern STORE_AMO_ADDRESS_MISALIGNED,
   pattern ENVIRONMENT_CALL_FROM_M_MODE,
   misalignedCause,
+  SSWay,
 ) where
 
 import Clash.Annotations.BitRepresentation
@@ -425,3 +426,6 @@ misalignedCause memOp addr = orNothing (not $ aligned width $ laneOffset addr) c
     (width, cause) = case memOp of
       Load w _ -> (w, LOAD_ADDRESS_MISALIGNED)
       Store w -> (w, STORE_AMO_ADDRESS_MISALIGNED)
+
+-- | # of superscalar ways
+type SSWay = 1

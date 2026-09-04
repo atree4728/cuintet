@@ -8,7 +8,7 @@ import Cuintet.Debug.Image (Image)
 import Cuintet.Eei (RegFile, pattern ENVIRONMENT_CALL_FROM_M_MODE)
 import Cuintet.Pipeline (Retire (..))
 import Cuintet.Unit.Ram (initRamLanes)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (catMaybes)
 import Prelude qualified as P
 
 -- | What an image left behind when it stopped.
@@ -34,10 +34,12 @@ traceImage budget img = sampleWithResetN @System d1 budget $ (.trace) <$> system
 
 -- | The trace cut short at the @ecall@ that halts an image, which it keeps.
 upToEcall :: [CoreTrace] -> [CoreTrace]
-upToEcall = P.foldr (\t rest -> t : if maybe False isEcall t.retired then [] else rest) []
+upToEcall = P.foldr (\t rest -> t : if containEcall t then [] else rest) []
+  where
+    containEcall tr = any (maybe False isEcall) tr.retired
 
 retires :: [CoreTrace] -> [Retire]
-retires = mapMaybe (.retired)
+retires = P.concatMap (catMaybes . toList . (.retired))
 
 -- | The register file a run of 'Retire's leaves behind.
 finalRegs :: [Retire] -> RegFile
@@ -51,12 +53,7 @@ runImage :: (KnownNat ramAddrWidth) => Int -> Image ramAddrWidth -> Run
 runImage budget = P.foldl' step initial . upToEcall . traceImage budget
   where
     initial = Run {cycles = 0, retired = 0, regs = replicate d32 0, halted = False}
-    step r t = case t.retired of
-      Nothing -> r {cycles = r.cycles + 1}
-      Just l ->
-        Run
-          { cycles = r.cycles + 1
-          , retired = r.retired + 1
-          , regs = writeBack r.regs l
-          , halted = isEcall l
-          }
+    step :: Run -> CoreTrace -> Run
+    step run tr = P.foldl' commit run {cycles = run.cycles + 1} (catMaybes (toList tr.retired))
+      where
+        commit r retire = run {retired = r.retired + 1, regs = writeBack r.regs retire, halted = isEcall retire}
