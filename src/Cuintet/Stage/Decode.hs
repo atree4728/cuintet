@@ -3,7 +3,8 @@ module Cuintet.Stage.Decode (decode, DecodeIn (..), DecodeOut (..), immI, immS, 
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), usesRs1, usesRs2)
-import Cuintet.Eei (AluOp, Inst, MemOp (..), Opcode (..), RegAddr, System12 (..), SystemOp (..), XLen, parseBranchOp, parseCsr, parseLoad, parseStore, pattern BREAKPOINT, pattern ENVIRONMENT_CALL_FROM_M_MODE, pattern ILLEGAL_INSTRUCTION)
+import Cuintet.Eei (AluOp, Inst, MemOp (..), Opcode (..), System12 (..), SystemOp (..), XLen, parseBranchOp, parseCsr, parseLoad, parseStore, pattern BREAKPOINT, pattern ENVIRONMENT_CALL_FROM_M_MODE, pattern ILLEGAL_INSTRUCTION)
+import Cuintet.Forwarding (Forwarding, bypass)
 import Cuintet.Pipeline (IdEx (..), IfId (..), srcRegs)
 import Cuintet.Unit.RegFile (RegResp (..))
 import Cuintet.Util (orNothing)
@@ -14,8 +15,7 @@ data DecodeIn = DecodeIn
   -- ^ The instruction at the head of the IF-ID FIFO.
   , regResp :: RegResp
   -- ^ The operands, read out of 'Cuintet.RegFile.regFile' for that same entry.
-  , forwards :: Vec 2 (Maybe (RegAddr, BitVector XLen))
-  , pending :: Vec 2 (Maybe RegAddr)
+  , forwards :: Vec 2 Forwarding
   -- ^ What each stage downstream will write back but cannot forward yet.
   , wready :: Bool
   -- ^ Whether the ID-EX FIFO can accept a write.
@@ -36,14 +36,13 @@ decode DecodeIn {..} = DecodeOut {issue = orNothing issued idEx}
     (rs1Addr, rs2Addr) = srcRegs instBits
     rdAddr = slice d11 d7 instBits
     RegResp {rs1Data = rs1Read, rs2Data = rs2Read} = regResp
-    rs1Data = resolveForwarding (usesRs1 ctrl) rs1Addr rs1Read
-    rs2Data = resolveForwarding (usesRs2 ctrl) rs2Addr rs2Read
 
-    resolveForwarding uses rs old
-      | not uses = old
-      | otherwise = fromMaybe old $ foldr ((<|>) . (>>= match)) Nothing forwards
-      where
-        match (rd, d) = orNothing (rd == rs) d
+    operands = (,) <$> resolve (usesRs1 ctrl) rs1Addr rs1Read <*> resolve (usesRs2 ctrl) rs2Addr rs2Read
+    resolve uses rs regRead = if uses then bypass forwards rs regRead else Just regRead
+
+    (rs1Data, rs2Data) = fromMaybe (rs1Read, rs2Read) operands
+
+    issued = isJust entry && isJust operands && wready && not flush
 
     exception
       | isNothing decoded = Just (ILLEGAL_INSTRUCTION, zeroExtend instBits)
@@ -52,7 +51,6 @@ decode DecodeIn {..} = DecodeOut {issue = orNothing issued idEx}
       | otherwise = Nothing
 
     idEx = IdEx {..}
-    issued = isJust entry && not (any (hazard idEx) pending) && wready && not flush
 {-# OPAQUE decode #-}
 
 immI, immS, immB, immU, immJ :: Inst -> BitVector XLen
@@ -170,10 +168,3 @@ parseSystem instBits
   | otherwise = Nothing
   where
     f12 = funct12 instBits
-
-{- | Whether a source register of this instruction is still to be written by an
-instruction downstream, given as 'Cuintet.Pipeline.unresolved' of that stage.
--}
-hazard :: IdEx -> Maybe RegAddr -> Bool
-hazard IdEx {ctrl, rs1Addr, rs2Addr} = maybe False
-  $ \rd -> usesRs1 ctrl && rd == rs1Addr || usesRs2 ctrl && rd == rs2Addr

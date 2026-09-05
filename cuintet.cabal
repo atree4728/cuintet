@@ -75,6 +75,7 @@ library
     Cuintet.Debug.Sim
     Cuintet.Debug.Spike
     Cuintet.Eei
+    Cuintet.Forwarding
     Cuintet.Pipeline
     Cuintet.Stage.Commit
     Cuintet.Stage.Decode

@@ -1,5 +1,5 @@
 -- | The payloads that cross the stage boundaries, one record per FIFO.
-module Cuintet.Pipeline (IfId (..), IdEx (..), ExMa (..), MaCm (..), Retire (..), srcRegs, destReg, forwardable, unresolved, serializing) where
+module Cuintet.Pipeline (IfId (..), IdEx (..), ExMa (..), MaCm (..), Retire (..), srcRegs, destReg, serializing, hasResult) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), isCsrRead, isLoad)
@@ -80,22 +80,8 @@ destReg ::
   stage -> Maybe RegAddr
 destReg stage = orNothing (isNothing stage.exception && stage.ctrl.rwbEn && stage.rdAddr /= 0) stage.rdAddr
 
-forwardable ::
-  ( HasField "exception" stage (Maybe (TrapCause, BitVector XLen))
-  , HasField "ctrl" stage InstCtrl
-  , HasField "rdAddr" stage RegAddr
-  , HasField "wbData" stage t
-  ) =>
-  stage -> Maybe (RegAddr, t)
-forwardable stage = (,stage.wbData) <$> destReg stage
-
-unresolved ::
-  ( HasField "exception" stage (Maybe (TrapCause, BitVector XLen))
-  , HasField "ctrl" stage InstCtrl
-  , HasField "rdAddr" stage RegAddr
-  ) =>
-  stage -> Maybe RegAddr
-unresolved stage = orNothing (isLoad stage.ctrl || isCsrRead stage.ctrl) =<< destReg stage
+hasResult :: (HasField "ctrl" stage InstCtrl) => stage -> Bool
+hasResult stage = not (isLoad stage.ctrl || isCsrRead stage.ctrl)
 
 serializing :: (HasField "exception" stage (Maybe a), HasField "ctrl" stage InstCtrl) => stage -> Bool
 serializing stage = isJust stage.exception || stage.ctrl.systemOp == Just SysMret

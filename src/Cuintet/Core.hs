@@ -3,7 +3,8 @@ module Cuintet.Core (CoreIn (..), CoreOut (..), CoreTrace (..), core) where
 
 import Clash.Prelude
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, SSWay, XLen)
-import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), MaCm (..), Retire (..), forwardable, serializing, unresolved)
+import Cuintet.Forwarding (forwarding)
+import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), MaCm (..), Retire (..), destReg, hasResult, serializing)
 import Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit)
 import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
 import Cuintet.Stage.Execute (ExecuteIn (..), ExecuteOut (..), execute)
@@ -17,6 +18,7 @@ import Cuintet.Unit.LoadStore qualified as L
 import Cuintet.Unit.MulDiv (MulDivState)
 import Cuintet.Unit.MulDiv qualified as M
 import Cuintet.Unit.RegFile (RegReq (..), RegResp, mkRegReq, regFile)
+import Cuintet.Util (orNothing)
 import Data.Maybe (isJust)
 
 data CoreIn = CoreIn
@@ -85,12 +87,10 @@ coreT ::
 coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, ifIdResp, idExResp, exMaResp, maCmResp) =
   (state', (coreOut, regReq, btbReq, ifIdReq, idExReq, exMaReq, maCmReq))
   where
-    pending = (unresolved =<< idExResp.rdata) :> (unresolved =<< exMaResp.rdata) :> Nil
-    forwards = (forwardable =<< exOut.issue) :> (forwardable =<< exMaResp.rdata) :> Nil
     serializingInFlight = maybe False serializing exMaResp.rdata || maybe False serializing maCmResp.rdata
 
     fetchIn = FetchIn {iResp, fifo = ifIdResp, redirect, btbResp}
-    decodeIn = DecodeIn {entry = ifIdResp.rdata, regResp, forwards, pending, wready = idExResp.wready, flush}
+    decodeIn = DecodeIn {entry = ifIdResp.rdata, regResp, forwards, wready = idExResp.wready, flush}
     executeIn = ExecuteIn {entry = idExResp.rdata, wready = exMaResp.wready, serializingInFlight}
     memAccessIn = MemAccessIn {entry = exMaResp.rdata, dResp}
     commitIn = CommitIn {entry = maCmResp.rdata}
@@ -101,6 +101,15 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, ifIdResp, idExResp, exMaRe
     (loadStoreState', maOut) = memAccess loadStoreState memAccessIn
     (csrFile', cmOut) = commit csrFile commitIn
 
+    forwards = forwarding (destReg =<< idExResp.rdata) fromEx :> forwarding (destReg =<< exMaResp.rdata) fromMa :> Nil
+      where
+        fromEx = do
+          entry <- idExResp.rdata
+          out <- exOut.issue
+          orNothing (hasResult entry) out.wbData
+        fromMa = do
+          entry <- exMaResp.rdata
+          orNothing (hasResult entry) entry.wbData
     redirect = cmOut.redirect <|> exOut.redirect
     flush = isJust redirect
 
