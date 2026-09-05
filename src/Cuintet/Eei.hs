@@ -49,7 +49,8 @@ module Cuintet.Eei (
   pattern STORE_AMO_ADDRESS_MISALIGNED,
   pattern ENVIRONMENT_CALL_FROM_M_MODE,
   misalignedCause,
-  SSWay,
+  NLanes,
+  InstsPerBusWord,
 ) where
 
 import Clash.Annotations.BitRepresentation
@@ -185,6 +186,8 @@ type MemReq = BusReq MemDataBytes
 
 -- | 'BusResp' at the width the memory bus is.
 type MemResp = BusResp MemDataBytes
+
+type InstsPerBusWord = MemDataBytes * 8 `Div` ILen
 
 -- | The @opcode@ field.
 newtype Opcode = Opcode (BitVector 7)
@@ -428,4 +431,4 @@ misalignedCause memOp addr = orNothing (not $ aligned width $ laneOffset addr) c
       Store w -> (w, STORE_AMO_ADDRESS_MISALIGNED)
 
 -- | # of superscalar ways
-type SSWay = 1
+type NLanes = 1

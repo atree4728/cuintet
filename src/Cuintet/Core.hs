@@ -2,7 +2,7 @@
 module Cuintet.Core (CoreIn (..), CoreOut (..), CoreTrace (..), core) where
 
 import Clash.Prelude
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, SSWay, XLen)
+import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, NLanes, XLen)
 import Cuintet.Forwarding (forwarding)
 import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), MaCm (..), Retire (..), destReg, hasResult, serializing)
 import Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit)
@@ -33,7 +33,7 @@ data CoreOut = CoreOut
   -- ^ Instruction fetch request.
   , dReq :: Maybe MemReq
   -- ^ Load/store request.
-  , retired :: Vec SSWay (Maybe Retire)
+  , retired :: Vec NLanes (Maybe Retire)
   -- ^ Execution log of a single instruction, emitted only in the clock it retires.
   , led :: BitVector XLen
   , coreTrace :: CoreTrace
@@ -58,7 +58,7 @@ data CoreTrace = CoreTrace
   , idIssue :: Bool
   , exIssue :: Bool
   , maIssue :: Bool
-  , retired :: Vec SSWay (Maybe Retire)
+  , retired :: Vec NLanes (Maybe Retire)
   , flush :: Bool
   }
   deriving (Generic, NFDataX)

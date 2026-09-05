@@ -1,12 +1,12 @@
-module Cuintet.Unit.Btb (BtbReq (..), BtbResp (..), BtbWrite (..), Prediction (..), btb, predicted, train) where
+module Cuintet.Unit.Btb (BtbReq (..), BtbResp (..), BtbWrite (..), Prediction (..), btb, predicted, train, bankOf) where
 
 import Clash.Prelude
 import Control.Monad (guard)
-import Cuintet.Eei (Addr)
+import Cuintet.Eei (Addr, InstsPerBusWord)
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust)
 
-type IdxBits = 8
+type IdxBits = 7
 
 type TagBits = 16
 
@@ -41,11 +41,14 @@ data BtbReq = BtbReq
   }
   deriving (Generic, NFDataX)
 
-newtype BtbResp = BtbResp {prediction :: Maybe Prediction}
+newtype BtbResp = BtbResp {predictions :: Vec 2 (Maybe Prediction)}
   deriving newtype (Generic, NFDataX)
 
 idxOf :: Addr -> Unsigned IdxBits
-idxOf pc = unpack (slice d9 d2 (pack pc))
+idxOf pc = unpack (slice d9 d3 (pack pc))
+
+bankOf :: Addr -> Index 2
+bankOf pc = unpack (slice d2 d2 (pack pc))
 
 tagOf :: Addr -> BitVector TagBits
 tagOf pc = slice d25 d10 (pack pc)
@@ -57,21 +60,24 @@ unpackTarget :: Addr -> BitVector TargetBits -> Addr
 unpackTarget pc t = unpack (slice d63 d32 (pack pc) ++# t ++# (0 :: BitVector 2))
 
 btb :: (HiddenClockResetEnable dom) => Signal dom BtbReq -> Signal dom BtbResp
-btb req = BtbResp <$> (lookupEntry <$> armed <*> ((.lookupAddr) <$> req) <*> entry)
+btb req = BtbResp <$> (lookupPair <$> armed <*> ((.lookupAddr) <$> req) <*> bundle entries)
   where
     -- the blockRam output is undefined for the first clock out of reset
     armed = register False (pure True)
-    entry =
+    entries = bank <$> (indicesI @InstsPerBusWord)
+    bank i =
       blockRamPow2
         (replicate (SNat @(2 ^ IdxBits)) Nothing)
         (idxOf . (.prefetchAddr) <$> req)
-        (toWrite . (.write) <$> req)
+        (toWrite i . (.write) <$> req)
 
-    toWrite w = do
+    toWrite i w = do
       BtbWrite {..} <- w
+      guard (bankOf pc == i)
       pure (idxOf pc, Just (mkBtbEntry pc target hint))
 
-    lookupEntry ready pc e
+    lookupPair ready base = imap (\i e -> hit ready (base .&. complement 0b111 + 4 * numConvert i) e)
+    hit ready pc e
       | not ready = Nothing
       | otherwise = do
           BtbEntry {..} <- e

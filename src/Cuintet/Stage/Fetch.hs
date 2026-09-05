@@ -4,7 +4,7 @@ module Cuintet.Stage.Fetch (FetchState (..), initFetchState, FetchIn (..), Fetch
 import Clash.Prelude
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, instAt, resetVector)
 import Cuintet.Pipeline (IfId (..))
-import Cuintet.Unit.Btb (BtbResp (..), Prediction (..), predicted)
+import Cuintet.Unit.Btb (BtbResp (..), Prediction (..), bankOf, predicted)
 import Cuintet.Unit.Fifo (FifoResp (..))
 import Cuintet.Util (orNothing)
 import Data.Maybe (isJust)
@@ -68,11 +68,10 @@ fetch FetchState {..} FetchIn {..} =
 
     (next', fetching')
       | Just target <- redirect = (target, Nothing)
-      | accepted =
-          ( predicted next btbResp.prediction
-          , Just Fetching {pc = next, prediction = btbResp.prediction}
-          )
+      | accepted = (predicted next prediction, Just Fetching {pc = next, prediction})
       | otherwise = (next, fetching)
+      where
+        prediction = btbResp.predictions !! bankOf next
 
     fetched = mkIfId <$> fetching <*> iResp.rdata
     mkIfId Fetching {..} busWord = IfId {pc, instBits = instAt pc busWord, prediction}
