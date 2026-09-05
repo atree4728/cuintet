@@ -30,7 +30,7 @@ isEcall Retire {trap}
 
 -- | Every clock the core ran, up to @budget@ of them.
 traceImage :: (KnownNat ramAddrWidth) => Int -> Image ramAddrWidth -> [CoreTrace]
-traceImage budget img = sampleWithResetN @System d1 budget $ (.trace) <$> system (initRamLanes img)
+traceImage budget img = sampleWithResetN @System d1 budget $ (.coreTrace) <$> system (initRamLanes img)
 
 -- | The trace cut short at the @ecall@ that halts an image, which it keeps.
 upToEcall :: [CoreTrace] -> [CoreTrace]

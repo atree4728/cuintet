@@ -76,11 +76,11 @@ library
     Cuintet.Debug.Spike
     Cuintet.Eei
     Cuintet.Pipeline
+    Cuintet.Stage.Commit
     Cuintet.Stage.Decode
     Cuintet.Stage.Execute
     Cuintet.Stage.Fetch
     Cuintet.Stage.MemAccess
-    Cuintet.Stage.Writeback
     Cuintet.Top.TangNano9k
     Cuintet.Top.Timing
     Cuintet.Unit.Btb

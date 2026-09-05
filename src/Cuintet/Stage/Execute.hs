@@ -2,51 +2,73 @@
 module Cuintet.Stage.Execute (execute, ExecuteIn (..), ExecuteOut (..)) where
 
 import Clash.Prelude
-import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..))
-import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), XLen)
+import Control.Monad (guard)
+import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), isBranchOp)
+import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), SystemOp (..), XLen, misalignedCause, pattern INSTRUCTION_ADDRESS_MISALIGNED)
 import Cuintet.Pipeline (ExMa (..), IdEx (..))
+import Cuintet.Unit.Btb (BtbWrite, predicted, train)
 import Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState, mkMulDivJob, mulDivStep)
 import Cuintet.Util (orNothing)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 
 data ExecuteIn = ExecuteIn
   { entry :: Maybe IdEx
   -- ^ The instruction at the head of the ID-EX FIFO.
   , wready :: Bool
   -- ^ Whether the EX-MA FIFO can accept a write.
+  , serializingInFlight :: Bool
   }
 
-newtype ExecuteOut = ExecuteOut
+data ExecuteOut = ExecuteOut
   { issue :: Maybe ExMa
   -- ^ The instruction handed to MA.
+  , redirect :: Maybe Addr
+  , btbWrite :: Maybe BtbWrite
   }
 
 -- | One clock of EX. A multiply or divide sits here for several of them; it leaves on the one the unit produces its result.
 execute :: MulDivState -> ExecuteIn -> (MulDivState, ExecuteOut)
 execute mulDivState ExecuteIn {..} = (mulDivState', exOut)
   where
-    (mulDivState', mulDivResp) = mulDivStep mulDivState MulDivReq {job = mkMulDivJob =<< entry, wready}
+    (mulDivState', mulDivResp) = mulDivStep mulDivState MulDivReq {job = mkMulDivJob =<< entry, wready = wready && not serializingInFlight}
 
-    -- the instruction leaves once the multiply/divide unit has let go of it
-    issued = isJust entry && wready && not mulDivResp.stall
-    exMa = mkExMa mulDivResp.result $ fromMaybe (deepErrorX "execute: ID-EX FIFO is empty") entry
-    exOut = ExecuteOut {issue = orNothing issued exMa}
-{-# OPAQUE execute #-}
+    issued = isJust entry && wready && not serializingInFlight && not mulDivResp.stall
+    IdEx {..} = fromMaybe (deepErrorX "execute: ID-EX FIFO is empty") entry
+    exOut = ExecuteOut {issue = orNothing issued ExMa {exception = exception', ..}, ..}
 
--- | Run the instruction through the ALU and the branch unit.
-mkExMa :: Maybe (BitVector XLen) -> IdEx -> ExMa
-mkExMa mulDivResult IdEx {..} = ExMa {op1, op2, aluResult, branchTaken, ..}
-  where
     (op1, op2) = operands ctrl imm rs1Data rs2Data pc
     aluResult = alu ctrl op1 op2
-
     branchTaken = maybe False (\cond -> branchUnit cond op1 op2) ctrl.branchOp
 
     wbData
-      | isJust ctrl.mulDivOp = fromMaybe (deepErrorX "execute: muldiv committed without a result") mulDivResult
+      | isJust ctrl.mulDivOp = fromMaybe (deepErrorX "execute: muldiv committed without a result") mulDivResp.result
       | ctrl.isLui = imm
       | ctrl.isJump = bitCoerce (pc + 4)
       | otherwise = aluResult
+
+    nextPc
+      | ctrl.isJump = unpack (aluResult .&. complement 1)
+      | isBranchOp ctrl && branchTaken = pc + numConvert imm
+      | otherwise = pc + 4
+
+    targetException =
+      orNothing
+        ((truncateB (pack nextPc) :: BitVector 2) /= 0)
+        (INSTRUCTION_ADDRESS_MISALIGNED, pack nextPc)
+
+    accessException = do
+      memOp <- ctrl.memOp
+      cause <- misalignedCause memOp (unpack aluResult)
+      pure (cause, aluResult)
+
+    exception' = exception <|> targetException <|> accessException
+
+    isSerial = isJust exception' || ctrl.systemOp == Just SysMret
+
+    redirect = orNothing (issued && not isSerial && nextPc /= predicted pc prediction) nextPc
+
+    btbWrite = guard (issued && isNothing exception') >> train pc prediction (orNothing (nextPc /= pc + 4) nextPc)
+{-# OPAQUE execute #-}
 
 -- | Extract the two operands according to the instruction form.
 operands ::

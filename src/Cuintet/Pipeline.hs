@@ -1,12 +1,12 @@
 -- | The payloads that cross the stage boundaries, one record per FIFO.
-module Cuintet.Pipeline (IfId (..), IdEx (..), ExMa (..), MaWb (..), Retire (..), srcRegs, destReg, forwardable, unresolved) where
+module Cuintet.Pipeline (IfId (..), IdEx (..), ExMa (..), MaCm (..), Retire (..), srcRegs, destReg, forwardable, unresolved, serializing) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), isCsrRead, isLoad)
-import Cuintet.Eei (Addr, Inst, MemReq, RegAddr, TrapCause, XLen)
+import Cuintet.Eei (Addr, Inst, MemReq, RegAddr, SystemOp (..), TrapCause, XLen)
 import Cuintet.Unit.Btb (Prediction)
 import Cuintet.Util (orNothing)
-import Data.Maybe (isNothing)
+import Data.Maybe (isJust, isNothing)
 import GHC.Records (HasField)
 
 data IfId = IfId
@@ -34,42 +34,26 @@ data IdEx = IdEx
 data ExMa = ExMa
   { pc :: Addr
   , instBits :: Inst
-  , prediction :: Maybe Prediction
   , ctrl :: InstCtrl
-  , imm :: BitVector XLen
   , rs1Addr :: RegAddr
-  , rs2Addr :: RegAddr
-  , rdAddr :: RegAddr
   , rs1Data :: BitVector XLen
   , rs2Data :: BitVector XLen
+  , rdAddr :: RegAddr
   , exception :: Maybe (TrapCause, BitVector XLen)
-  , op1 :: BitVector XLen
-  , op2 :: BitVector XLen
   , aluResult :: BitVector XLen
-  , branchTaken :: Bool
   , wbData :: BitVector XLen
   }
   deriving (Generic, NFDataX)
 
--- | 'ExMa' plus what the memory and CSR accesses produced.
-data MaWb = MaWb
+data MaCm = MaCm
   { pc :: Addr
   , instBits :: Inst
-  , prediction :: Maybe Prediction
   , ctrl :: InstCtrl
-  , imm :: BitVector XLen
   , rs1Addr :: RegAddr
-  , rs2Addr :: RegAddr
-  , rdAddr :: RegAddr
   , rs1Data :: BitVector XLen
-  , rs2Data :: BitVector XLen
+  , rdAddr :: RegAddr
   , exception :: Maybe (TrapCause, BitVector XLen)
-  , op1 :: BitVector XLen
-  , op2 :: BitVector XLen
-  , aluResult :: BitVector XLen
-  , branchTaken :: Maybe Bool
   , wbData :: BitVector XLen
-  , csrRdata :: Maybe (BitVector XLen)
   , completed :: Maybe MemReq
   }
   deriving (Generic, NFDataX)
@@ -112,3 +96,6 @@ unresolved ::
   ) =>
   stage -> Maybe RegAddr
 unresolved stage = orNothing (isLoad stage.ctrl || isCsrRead stage.ctrl) =<< destReg stage
+
+serializing :: (HasField "exception" stage (Maybe a), HasField "ctrl" stage InstCtrl) => stage -> Bool
+serializing stage = isJust stage.exception || stage.ctrl.systemOp == Just SysMret

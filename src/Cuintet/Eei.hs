@@ -323,7 +323,7 @@ deriveBitPack [t|DivOp|]
 deriveBitPack [t|MulDivOp|]
 
 data CsrAddr = MSTATUS | MIE | MTVEC | MEPC | MCAUSE | MTVAL | LED | MCYCLE | MHARTID
-  deriving (Generic, NFDataX)
+  deriving (Generic, NFDataX, Eq, Show)
 
 parseCsrAddr :: BitVector 12 -> Maybe CsrAddr
 parseCsrAddr 0x300 = Just MSTATUS
@@ -342,7 +342,7 @@ data CsrOp
   = ReadWrite
   | ReadSet
   | ReadClear
-  deriving (Generic, NFDataX, Show)
+  deriving (Generic, NFDataX, Eq, Show)
 
 {-# ANN
   module
@@ -360,7 +360,7 @@ deriveBitPack [t|CsrOp|]
 
 -- | Where the operand of a CSR access comes from, derived from @funct3[2]@
 data CsrSrc = FromRs1 | FromUimm
-  deriving (Generic, NFDataX, Show)
+  deriving (Generic, NFDataX, Eq, Show)
 
 {-# ANN
   module
@@ -400,7 +400,7 @@ data SystemOp
   | SysEcall
   | SysEbreak
   | SysMret
-  deriving (Generic, NFDataX)
+  deriving (Generic, NFDataX, Eq)
 
 -- | The reason a trap was taken.
 data TrapCause

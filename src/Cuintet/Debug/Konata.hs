@@ -18,7 +18,7 @@ data Inflight = Inflight
   , instBits :: Maybe Inst
   }
 
-data Stage = F | Fs | Iq | D | X | M | W
+data Stage = IF | Fs | Iq | ID | Ex | Ma | Cm
   deriving (Eq, Show)
 
 data Model = Model
@@ -83,12 +83,12 @@ modelStep Model {..} CoreTrace {..} = applyWhen flush flushed moved
 stages :: Model -> [(Inflight, Stage)]
 stages Model {..} =
   concat
-    [ slot F fetching
+    [ slot IF fetching
     , slot Fs staged
-    , zip ifIdQ (D : repeat Iq)
-    , slot X idExQ
-    , slot M exMaQ
-    , slot W maWbQ
+    , zip ifIdQ (ID : repeat Iq)
+    , slot Ex idExQ
+    , slot Ma exMaQ
+    , slot Cm maWbQ
     ]
   where
     slot s mi = [(i, s) | i <- maybeToList mi]

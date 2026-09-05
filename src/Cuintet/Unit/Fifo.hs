@@ -47,15 +47,14 @@ fifoOne ::
   Signal dom (FifoResp dat)
 fifoOne = mealy step Nothing
   where
-    step buf FifoReq {..}
-      | flush = (Nothing, FifoResp {wready = False, wreadyTwo = False, rdata = Nothing})
-      | otherwise = (buf', FifoResp {wready, wreadyTwo, rdata})
+    step buf FifoReq {..} = (buf', FifoResp {wready, wreadyTwo, rdata})
       where
         -- accept write when the buffer is either already empty or going to be emptied by read.
         wready = isNothing buf || rready
         wreadyTwo = False
         rdata = buf
         buf'
+          | flush = Nothing
           | wready && isJust wdata = wdata
           | rready = Nothing
           | otherwise = buf
