@@ -94,6 +94,8 @@ library
     Cuintet.Unit.MulDiv.Mul
     Cuintet.Unit.Ram
     Cuintet.Unit.RegFile
+    Cuintet.Unit.Ring
+    Cuintet.Upto
     Cuintet.Util
 
   build-depends:

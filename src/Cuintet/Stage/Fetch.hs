@@ -1,11 +1,13 @@
--- | IF: runs ahead of the rest on its own, filling the IF-ID FIFO.
+-- | IF: runs ahead of the rest on its own, filling the IF-ID buffer.
 module Cuintet.Stage.Fetch (FetchState (..), initFetchState, FetchIn (..), FetchOut (..), fetch) where
 
 import Clash.Prelude
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, instAt, resetVector)
-import Cuintet.Pipeline (IfId (..))
+import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, NLanes, instAt, resetVector)
+import Cuintet.Pipeline (IfId (..), IfIdDepth)
 import Cuintet.Unit.Btb (BtbResp (..), Prediction (..), bankOf, predicted)
-import Cuintet.Unit.Fifo (FifoResp (..))
+import Cuintet.Unit.Ring (RingResp (..))
+import Cuintet.Upto (Upto (..))
+import Cuintet.Upto qualified as Upto
 import Cuintet.Util (orNothing)
 import Data.Maybe (isJust)
 
@@ -23,8 +25,8 @@ data FetchState = FetchState
   -- ^ The address to fetch next; the predicted successor of @fetching@, if any.
   , fetching :: Maybe Fetching
   -- ^ The fetch whose response has not come back yet.
-  , staged :: Maybe IfId
-  -- ^ A fetched instruction waiting for room in the IF-ID FIFO.
+  , staged :: Upto 1 IfId
+  -- ^ Fetched instructions waiting for room in the IF-ID buffer.
   }
   deriving (Generic, NFDataX)
 
@@ -34,22 +36,22 @@ initFetchState =
   FetchState
     { next = resetVector
     , fetching = Nothing
-    , staged = Nothing
+    , staged = Upto.none
     }
 
 data FetchIn = FetchIn
   { iResp :: MemResp
   -- ^ Response to a fetch request issued on an earlier clock.
-  , fifo :: FifoResp IfId
-  -- ^ The IF-ID FIFO, for the room it has.
+  , buf :: RingResp IfIdDepth NLanes IfId
+  -- ^ The IF-ID buffer, for the room it has.
   , redirect :: Maybe Addr
   -- ^ Where to restart, once MA has resolved control flow.
   , btbResp :: BtbResp
   }
 
 data FetchOut = FetchOut
-  { issue :: Maybe IfId
-  -- ^ What to write into the IF-ID FIFO.
+  { issue :: Upto 1 IfId
+  -- ^ What the IF-ID buffer takes this clock.
   , iReq :: Maybe MemReq
   -- ^ Instruction fetch request.
   , btbLookup :: Addr
@@ -60,11 +62,13 @@ data FetchOut = FetchOut
 fetch :: FetchState -> FetchIn -> (FetchState, FetchOut)
 fetch FetchState {..} FetchIn {..} =
   ( FetchState {next = next', fetching = fetching', staged = staged'}
-  , FetchOut {issue = staged, iReq, btbLookup = next, btbPrefetch = next'}
+  , FetchOut {issue, iReq, btbLookup = next, btbPrefetch = next'}
   )
   where
-    iReq = orNothing fifo.wreadyTwo BusReq {addr = next, wdata = Nothing}
-    accepted = fifo.wreadyTwo && iResp.ready
+    -- A fetch is only started with room for both @staged@ and the instruction it brings back.
+    room = buf.free >= 2
+    iReq = orNothing room BusReq {addr = next, wdata = Nothing}
+    accepted = room && iResp.ready
 
     (next', fetching')
       | Just target <- redirect = (target, Nothing)
@@ -73,12 +77,16 @@ fetch FetchState {..} FetchIn {..} =
       where
         prediction = btbResp.predictions !! bankOf next
 
-    fetched = mkIfId <$> fetching <*> iResp.rdata
-    mkIfId Fetching {..} busWord = IfId {pc, instBits = instAt pc busWord, prediction}
+    fetched = mkGroup <$> fetching <*> iResp.rdata
+    mkGroup Fetching {..} busWord = Upto {len = 1, elems = IfId {pc, instBits = instAt pc busWord, prediction} :> Nil}
+
+    -- Whatever is offered is taken, so @issue@ is exactly what the buffer writes.
+    pushed = buf.free >= 1
+    issue = if pushed then staged else Upto.none
 
     staged'
-      | isJust redirect = Nothing
-      | Just entry <- fetched = Just entry
-      | fifo.wready = Nothing -- the staged write was accepted
+      | isJust redirect = Upto.none
+      | Just entry <- fetched = entry
+      | pushed = Upto.none
       | otherwise = staged
 {-# OPAQUE fetch #-}

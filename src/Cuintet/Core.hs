@@ -4,7 +4,7 @@ module Cuintet.Core (CoreIn (..), CoreOut (..), CoreTrace (..), core) where
 import Clash.Prelude
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, NLanes, XLen)
 import Cuintet.Forwarding (forwarding)
-import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), MaCm (..), Retire (..), destReg, hasResult, serializing)
+import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), IfIdDepth, MaCm (..), Retire (..), destReg, hasResult, serializing)
 import Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit)
 import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
 import Cuintet.Stage.Execute (ExecuteIn (..), ExecuteOut (..), execute)
@@ -18,6 +18,8 @@ import Cuintet.Unit.LoadStore qualified as L
 import Cuintet.Unit.MulDiv (MulDivState)
 import Cuintet.Unit.MulDiv qualified as M
 import Cuintet.Unit.RegFile (RegReq (..), RegResp, mkRegReq, regFile)
+import Cuintet.Unit.Ring (RingReq (..), RingResp (..), ring)
+import Cuintet.Upto qualified as Upto
 import Cuintet.Util (orNothing)
 import Data.Maybe (isJust)
 
@@ -74,23 +76,25 @@ core coreIn = coreOut
       mealyB coreT initState (coreIn, regResp, btbResp, ifIdResp, idExResp, exMaResp, maCmResp)
     btbResp = btb btbReq
     regResp = regFile regReq
-    ifIdResp = fifo d3 ifIdReq
-    idExResp = fifo d1 idExReq
-    exMaResp = fifo d1 exMaReq
-    maCmResp = fifo d1 maCmReq
+    ifIdResp = ring (SNat @IfIdDepth) ifIdReq
+    idExResp = fifo idExReq
+    exMaResp = fifo exMaReq
+    maCmResp = fifo maCmReq
 
 -- | One clock of every stage.
 coreT ::
   CoreState ->
-  (CoreIn, RegResp, BtbResp, FifoResp IfId, FifoResp IdEx, FifoResp ExMa, FifoResp MaCm) ->
-  (CoreState, (CoreOut, RegReq, BtbReq, FifoReq IfId, FifoReq IdEx, FifoReq ExMa, FifoReq MaCm))
+  (CoreIn, RegResp, BtbResp, RingResp IfIdDepth NLanes IfId, FifoResp IdEx, FifoResp ExMa, FifoResp MaCm) ->
+  (CoreState, (CoreOut, RegReq, BtbReq, RingReq 1 NLanes IfId, FifoReq IdEx, FifoReq ExMa, FifoReq MaCm))
 coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, ifIdResp, idExResp, exMaResp, maCmResp) =
   (state', (coreOut, regReq, btbReq, ifIdReq, idExReq, exMaReq, maCmReq))
   where
     serializingInFlight = maybe False serializing exMaResp.rdata || maybe False serializing maCmResp.rdata
 
-    fetchIn = FetchIn {iResp, fifo = ifIdResp, redirect, btbResp}
-    decodeIn = DecodeIn {entry = ifIdResp.rdata, regResp, forwards, wready = idExResp.wready, flush}
+    ifIdEntry = Upto.first ifIdResp.rdata
+
+    fetchIn = FetchIn {iResp, buf = ifIdResp, redirect, btbResp}
+    decodeIn = DecodeIn {entry = ifIdEntry, regResp, forwards, wready = idExResp.wready, flush}
     executeIn = ExecuteIn {entry = idExResp.rdata, wready = exMaResp.wready, serializingInFlight}
     memAccessIn = MemAccessIn {entry = exMaResp.rdata, dResp}
     commitIn = CommitIn {entry = maCmResp.rdata}
@@ -113,10 +117,10 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, ifIdResp, idExResp, exMaRe
     redirect = cmOut.redirect <|> exOut.redirect
     flush = isJust redirect
 
-    regReq = mkRegReq ifIdResp.rdata $ cmOut.write
+    regReq = mkRegReq ifIdEntry $ cmOut.write
     btbReq = BtbReq {lookupAddr = ifOut.btbLookup, prefetchAddr = ifOut.btbPrefetch, write = exOut.btbWrite}
 
-    ifIdReq = FifoReq {wdata = ifOut.issue, rready = isJust idOut.issue, flush}
+    ifIdReq = RingReq {wdata = ifOut.issue, pop = if isJust idOut.issue then 1 else 0, flush}
     idExReq = FifoReq {wdata = idOut.issue, rready = isJust exOut.issue, flush}
     exMaReq = FifoReq {wdata = exOut.issue, rready = isJust maOut.issue, flush = False}
     maCmReq = FifoReq {wdata = maOut.issue, rready = True, flush = False}
@@ -126,7 +130,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, ifIdResp, idExResp, exMaRe
       CoreTrace
         { fetchStart = if iResp.ready && not flush then (.addr) <$> ifOut.iReq else Nothing
         , fetchDone = isJust fetchState.fetching && isJust iResp.rdata && not flush
-        , ifIssue = if ifIdResp.wready && not flush then ifOut.issue else Nothing
+        , ifIssue = if flush then Nothing else Upto.first ifOut.issue
         , idIssue = isJust idOut.issue
         , exIssue = isJust exOut.issue
         , maIssue = isJust maOut.issue

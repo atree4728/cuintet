@@ -1,5 +1,5 @@
 -- | The payloads that cross the stage boundaries, one record per FIFO.
-module Cuintet.Pipeline (IfId (..), IdEx (..), ExMa (..), MaCm (..), Retire (..), srcRegs, destReg, serializing, hasResult) where
+module Cuintet.Pipeline (IfIdDepth, IfId (..), IdEx (..), ExMa (..), MaCm (..), Retire (..), srcRegs, destReg, serializing, hasResult) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), isCsrRead, isLoad)
@@ -8,6 +8,8 @@ import Cuintet.Unit.Btb (Prediction)
 import Cuintet.Util (orNothing)
 import Data.Maybe (isJust, isNothing)
 import GHC.Records (HasField)
+
+type IfIdDepth = 3
 
 data IfId = IfId
   { pc :: Addr
