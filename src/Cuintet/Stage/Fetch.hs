@@ -2,9 +2,9 @@
 module Cuintet.Stage.Fetch (FetchState (..), initFetchState, FetchIn (..), FetchOut (..), fetch) where
 
 import Clash.Prelude
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), InstsPerBusWord, MemReq, MemResp, NLanes, instSlice, resetVector)
-import Cuintet.Pipeline (IfId (..), IfIdDepth)
-import Cuintet.Unit.Btb (BtbResp (..), Prediction (..), bankOf)
+import Cuintet.Eei (Addr, BusReq (..), BusResp (..), FetchWidth, IssueWidth, MemReq, MemResp, instSlice, resetVector)
+import Cuintet.Pipeline (IfId (..), IfIdBits)
+import Cuintet.Unit.Btb (BtbResp (..), Prediction (..), bankOf, isTaken)
 import Cuintet.Unit.Ring (RingResp (..))
 import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
@@ -14,7 +14,7 @@ import Data.Maybe (fromMaybe, isJust)
 -- | A fetch in flight: the address, and what the BTB said about it at the time.
 data Fetching = Fetching
   { pc :: Addr
-  , predictions :: Vec InstsPerBusWord (Maybe Prediction)
+  , predictions :: Vec FetchWidth (Maybe Prediction)
   -- ^ Kept until the instruction arrives, since MA needs it to train the BTB.
   }
   deriving (Generic, NFDataX)
@@ -25,7 +25,7 @@ data FetchState = FetchState
   -- ^ The address to fetch next; the predicted successor of @fetching@, if any.
   , fetching :: Maybe Fetching
   -- ^ The fetch whose response has not come back yet.
-  , staged :: Upto InstsPerBusWord IfId
+  , staged :: Upto FetchWidth IfId
   -- ^ Fetched instructions waiting for room in the IF-ID buffer.
   }
   deriving (Generic, NFDataX)
@@ -42,7 +42,7 @@ initFetchState =
 data FetchIn = FetchIn
   { iResp :: MemResp
   -- ^ Response to a fetch request issued on an earlier clock.
-  , buf :: RingResp IfIdDepth NLanes IfId
+  , buf :: RingResp IfIdBits IssueWidth IfId
   -- ^ The IF-ID buffer, for the room it has.
   , redirect :: Maybe Addr
   -- ^ Where to restart, once MA has resolved control flow.
@@ -50,7 +50,7 @@ data FetchIn = FetchIn
   }
 
 data FetchOut = FetchOut
-  { issue :: Upto InstsPerBusWord IfId
+  { issue :: Upto FetchWidth IfId
   -- ^ What the IF-ID buffer takes this clock.
   , iReq :: Maybe MemReq
   -- ^ Instruction fetch request.
@@ -65,7 +65,7 @@ fetch FetchState {..} FetchIn {..} =
   , FetchOut {issue, iReq, btbLookup = next, btbPrefetch = next'}
   )
   where
-    room = buf.free >= numConvert staged.len + natToNum @InstsPerBusWord
+    room = buf.free >= numConvert staged.len + natToNum @FetchWidth
     iReq = orNothing room BusReq {addr = next, wdata = Nothing}
     accepted = room && iResp.ready
 
@@ -76,7 +76,7 @@ fetch FetchState {..} FetchIn {..} =
       where
         aligned
           | bankOf next == 0 = btbResp.predictions
-          | otherwise = (btbResp.predictions !! (1 :: Index 2)) :> Nothing :> Nil
+          | otherwise = (btbResp.predictions !! bankOf next) :> Nothing :> Nil
         firstTaken = fold (<|>) (takenTarget <$> aligned)
         fallthrough = (next .&. complement 7) + 8
 
@@ -90,7 +90,7 @@ fetch FetchState {..} FetchIn {..} =
 
     takenTarget p = do
       Prediction {target, hint} <- p
-      orNothing (hint >= 2) target
+      orNothing (isTaken hint) target
 
     pushed = buf.free >= numConvert staged.len
     issue = if pushed then staged else Upto.none

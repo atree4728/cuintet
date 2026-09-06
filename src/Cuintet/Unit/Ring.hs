@@ -11,32 +11,32 @@ data RingReq nw nr dat = RingReq
   }
   deriving (Generic, NFDataX)
 
-data RingResp width nr dat = RingResp
+data RingResp bits nr dat = RingResp
   { rdata :: Upto nr dat
-  , free :: Unsigned width
+  , free :: Unsigned bits
   }
   deriving (Generic, NFDataX)
 
-data RingState width dat = RingState
-  { hd :: Unsigned width
-  , tl :: Unsigned width
-  , buf :: Vec (2 ^ width) dat
+data RingState bits dat = RingState
+  { hd :: Unsigned bits
+  , tl :: Unsigned bits
+  , buf :: Vec (2 ^ bits) dat
   }
   deriving (Generic, NFDataX)
 
 ring ::
-  forall dom width nw nr dat.
-  (HiddenClockResetEnable dom, KnownNat width, KnownNat nw, KnownNat nr, NFDataX dat, nw + 1 <= 2 ^ width, nr + 1 <= 2 ^ width) =>
-  SNat width -> Signal dom (RingReq nw nr dat) -> Signal dom (RingResp width nr dat)
+  forall dom bits nw nr dat.
+  (HiddenClockResetEnable dom, KnownNat bits, KnownNat nw, KnownNat nr, NFDataX dat, nw + 1 <= 2 ^ bits, nr + 1 <= 2 ^ bits) =>
+  SNat bits -> Signal dom (RingReq nw nr dat) -> Signal dom (RingResp bits nr dat)
 ring SNat = moore ringUpdate ringOutput initS
   where
-    initS :: RingState width dat
+    initS :: RingState bits dat
     initS = RingState {hd = 0, tl = 0, buf = deepErrorX "ring: uninitialized"}
 
 ringOutput ::
-  forall width nr dat.
-  (KnownNat width, KnownNat nr, nr <= 2 ^ width) =>
-  RingState width dat -> RingResp width nr dat
+  forall bits nr dat.
+  (KnownNat bits, KnownNat nr, nr <= 2 ^ bits) =>
+  RingState bits dat -> RingResp bits nr dat
 ringOutput RingState {..} = RingResp {rdata = Upto {len, elems}, free}
   where
     used = tl - hd
@@ -45,9 +45,9 @@ ringOutput RingState {..} = RingResp {rdata = Upto {len, elems}, free}
     free = maxBound - used
 
 ringUpdate ::
-  forall width nw nr dat.
-  (KnownNat width, KnownNat nw, KnownNat nr, NFDataX dat, nw + 1 <= 2 ^ width, nr + 1 <= 2 ^ width) =>
-  RingState width dat -> RingReq nw nr dat -> RingState width dat
+  forall bits nw nr dat.
+  (KnownNat bits, KnownNat nw, KnownNat nr, NFDataX dat, nw + 1 <= 2 ^ bits, nr + 1 <= 2 ^ bits) =>
+  RingState bits dat -> RingReq nw nr dat -> RingState bits dat
 ringUpdate RingState {..} RingReq {..}
   | flush = RingState {hd = 0, tl = 0, buf = deepErrorX "ring: flushed"}
   | otherwise = RingState {hd = hd + numConvert pop, tl = tl + numConvert wdata.len, buf = buf'}

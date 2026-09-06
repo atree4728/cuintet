@@ -1,25 +1,43 @@
-module Cuintet.Unit.Btb (BtbReq (..), BtbResp (..), BtbWrite (..), Prediction (..), btb, predicted, train, bankOf) where
+module Cuintet.Unit.Btb (BtbReq (..), BtbResp (..), BtbWrite (..), Prediction (..), btb, predicted, train, bankOf, isTaken) where
 
 import Clash.Prelude
 import Control.Monad (guard)
-import Cuintet.Eei (Addr, InstsPerBusWord)
+import Cuintet.Eei (Addr, FetchWidth)
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust)
 
-type IdxBits = 7
+type Idx = Unsigned 7
 
-type TagBits = 16
+type Tag = BitVector 16
 
-type TargetBits = 30
+-- | A target with the bits the PC already carries dropped: @target[31:2]@.
+type PackedTarget = BitVector 30
 
-type Hint = Index 4
+data Hint = StronglyNotTaken | WeaklyNotTaken | WeaklyTaken | StronglyTaken
+  deriving (Generic, NFDataX, Show, Eq)
+
+isTaken :: Hint -> Bool
+isTaken = \case
+  WeaklyTaken -> True
+  StronglyTaken -> True
+  _ -> False
+
+bump :: Bool -> Hint -> Hint
+bump True = \case
+  StronglyNotTaken -> WeaklyNotTaken
+  WeaklyNotTaken -> WeaklyTaken
+  _ -> StronglyTaken
+bump False = \case
+  StronglyTaken -> WeaklyTaken
+  WeaklyTaken -> WeaklyNotTaken
+  _ -> StronglyNotTaken
 
 data Prediction = Prediction {target :: Addr, hint :: Hint}
   deriving (Generic, NFDataX)
 
 data BtbEntry = BtbEntry
-  { tag :: BitVector TagBits
-  , target :: BitVector TargetBits
+  { tag :: Tag
+  , target :: PackedTarget
   , hint :: Hint
   }
   deriving (Generic, NFDataX, Show, Eq)
@@ -41,22 +59,22 @@ data BtbReq = BtbReq
   }
   deriving (Generic, NFDataX)
 
-newtype BtbResp = BtbResp {predictions :: Vec 2 (Maybe Prediction)}
+newtype BtbResp = BtbResp {predictions :: Vec FetchWidth (Maybe Prediction)}
   deriving newtype (Generic, NFDataX)
 
-idxOf :: Addr -> Unsigned IdxBits
+idxOf :: Addr -> Idx
 idxOf pc = unpack (slice d9 d3 (pack pc))
 
-bankOf :: Addr -> Index 2
+bankOf :: Addr -> Index FetchWidth
 bankOf pc = unpack (slice d2 d2 (pack pc))
 
-tagOf :: Addr -> BitVector TagBits
+tagOf :: Addr -> Tag
 tagOf pc = slice d25 d10 (pack pc)
 
-packTarget :: Addr -> BitVector TargetBits
+packTarget :: Addr -> PackedTarget
 packTarget addr = slice d31 d2 (pack addr)
 
-unpackTarget :: Addr -> BitVector TargetBits -> Addr
+unpackTarget :: Addr -> PackedTarget -> Addr
 unpackTarget pc t = unpack (slice d63 d32 (pack pc) ++# t ++# (0 :: BitVector 2))
 
 btb :: (HiddenClockResetEnable dom) => Signal dom BtbReq -> Signal dom BtbResp
@@ -64,10 +82,10 @@ btb req = BtbResp <$> (lookupPair <$> armed <*> ((.lookupAddr) <$> req) <*> bund
   where
     -- the blockRam output is undefined for the first clock out of reset
     armed = register False (pure True)
-    entries = bank <$> (indicesI @InstsPerBusWord)
+    entries = bank <$> (indicesI @FetchWidth)
     bank i =
       blockRamPow2
-        (replicate (SNat @(2 ^ IdxBits)) Nothing)
+        (repeat Nothing)
         (idxOf . (.prefetchAddr) <$> req)
         (toWrite i . (.write) <$> req)
 
@@ -88,11 +106,9 @@ btb req = BtbResp <$> (lookupPair <$> armed <*> ((.lookupAddr) <$> req) <*> bund
 predicted :: Addr -> Maybe Prediction -> Addr
 predicted pc prediction = fromMaybe (pc + 4) $ do
   Prediction {target, hint} <- prediction
-  orNothing (hint >= 2) target
+  orNothing (isTaken hint) target
 
 train :: Addr -> Maybe Prediction -> Maybe Addr -> Maybe BtbWrite
 train pc prediction taken = case prediction of
-  Just Prediction {target, hint} -> Just BtbWrite {pc, target = fromMaybe target taken, hint = bump hint}
-  Nothing -> (\target -> BtbWrite {pc, target, hint = 2}) <$> taken -- initially weakly taken
-  where
-    bump = (if isJust taken then satSucc else satPred) SatBound
+  Just Prediction {target, hint} -> Just BtbWrite {pc, target = fromMaybe target taken, hint = bump (isJust taken) hint}
+  Nothing -> (\target -> BtbWrite {pc, target, hint = WeaklyTaken}) <$> taken

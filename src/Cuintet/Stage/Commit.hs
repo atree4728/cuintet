@@ -3,7 +3,7 @@ module Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..))
-import Cuintet.Eei (Addr, NLanes, RegAddr, SystemOp (..), XLen)
+import Cuintet.Eei (Addr, IssueWidth, RegAddr, SystemOp (..), XLen)
 import Cuintet.Pipeline (MaCm (..), Retire (..), destReg)
 import Cuintet.Unit.Csr (AccessSpec (..), CsrFile (..), CsrReq (..), CsrResp (..), TrapSpec (..), csrStep)
 import Cuintet.Util (orNothing)
@@ -12,7 +12,7 @@ import Data.Maybe (fromMaybe, isJust)
 newtype CommitIn = CommitIn {entry :: Maybe MaCm}
 
 data CommitOut = CommitOut
-  { retired :: Vec NLanes (Maybe Retire)
+  { retired :: Vec IssueWidth (Maybe Retire)
   , redirect :: Maybe Addr
   , write :: Maybe (RegAddr, BitVector XLen)
   , led :: BitVector XLen

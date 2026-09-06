@@ -49,8 +49,8 @@ module Cuintet.Eei (
   pattern STORE_AMO_ADDRESS_MISALIGNED,
   pattern ENVIRONMENT_CALL_FROM_M_MODE,
   misalignedCause,
-  NLanes,
-  InstsPerBusWord,
+  IssueWidth,
+  FetchWidth,
 ) where
 
 import Clash.Annotations.BitRepresentation
@@ -145,9 +145,9 @@ laneMask width off = reverse $ bitCoerce mask
     mask = ones `shiftL` numConvert off
     ones = complement (complement 0 `shiftL` numConvert (sizeBytes width))
 
-instSlice :: Addr -> BitVector (MemDataBytes * 8) -> Upto InstsPerBusWord Inst
+instSlice :: Addr -> BitVector (MemDataBytes * 8) -> Upto FetchWidth Inst
 instSlice addr busWord
-  | pack addr `testBit` 2 = Upto {len = 1, elems = upper :> deepErrorX "instsAt: past the word" :> Nil}
+  | pack addr `testBit` 2 = Upto {len = 1, elems = upper :> deepErrorX "instSlice: past the word" :> Nil}
   | otherwise = Upto {len = 2, elems = lower :> upper :> Nil}
   where
     (upper, lower) = split busWord
@@ -191,7 +191,7 @@ type MemReq = BusReq MemDataBytes
 -- | 'BusResp' at the width the memory bus is.
 type MemResp = BusResp MemDataBytes
 
-type InstsPerBusWord = MemDataBytes * 8 `Div` ILen
+type FetchWidth = MemDataBytes * 8 `Div` ILen
 
 -- | The @opcode@ field.
 newtype Opcode = Opcode (BitVector 7)
@@ -435,4 +435,4 @@ misalignedCause memOp addr = orNothing (not $ aligned width $ laneOffset addr) c
       Store w -> (w, STORE_AMO_ADDRESS_MISALIGNED)
 
 -- | # of superscalar ways
-type NLanes = 1
+type IssueWidth = 1

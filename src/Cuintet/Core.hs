@@ -2,9 +2,9 @@
 module Cuintet.Core (CoreIn (..), CoreOut (..), CoreTrace (..), core) where
 
 import Clash.Prelude
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), InstsPerBusWord, MemReq, MemResp, NLanes, XLen)
+import Cuintet.Eei (Addr, BusReq (..), BusResp (..), FetchWidth, IssueWidth, MemReq, MemResp, XLen)
 import Cuintet.Forwarding (forwarding)
-import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), IfIdDepth, MaCm (..), Retire (..), destReg, hasResult, serializing)
+import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), IfIdBits, MaCm (..), Retire (..), destReg, hasResult, serializing)
 import Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit)
 import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
 import Cuintet.Stage.Execute (ExecuteIn (..), ExecuteOut (..), execute)
@@ -35,7 +35,7 @@ data CoreOut = CoreOut
   -- ^ Instruction fetch request.
   , dReq :: Maybe MemReq
   -- ^ Load/store request.
-  , retired :: Vec NLanes (Maybe Retire)
+  , retired :: Vec IssueWidth (Maybe Retire)
   -- ^ Execution log of a single instruction, emitted only in the clock it retires.
   , led :: BitVector XLen
   , coreTrace :: CoreTrace
@@ -60,7 +60,7 @@ data CoreTrace = CoreTrace
   , idIssue :: Bool
   , exIssue :: Bool
   , maIssue :: Bool
-  , retired :: Vec NLanes (Maybe Retire)
+  , retired :: Vec IssueWidth (Maybe Retire)
   , flush :: Bool
   }
   deriving (Generic, NFDataX)
@@ -76,7 +76,7 @@ core coreIn = coreOut
       mealyB coreT initState (coreIn, regResp, btbResp, ifIdResp, idExResp, exMaResp, maCmResp)
     btbResp = btb btbReq
     regResp = regFile regReq
-    ifIdResp = ring (SNat @IfIdDepth) ifIdReq
+    ifIdResp = ring (SNat @IfIdBits) ifIdReq
     idExResp = fifo idExReq
     exMaResp = fifo exMaReq
     maCmResp = fifo maCmReq
@@ -84,8 +84,8 @@ core coreIn = coreOut
 -- | One clock of every stage.
 coreT ::
   CoreState ->
-  (CoreIn, RegResp, BtbResp, RingResp IfIdDepth NLanes IfId, FifoResp IdEx, FifoResp ExMa, FifoResp MaCm) ->
-  (CoreState, (CoreOut, RegReq, BtbReq, RingReq InstsPerBusWord NLanes IfId, FifoReq IdEx, FifoReq ExMa, FifoReq MaCm))
+  (CoreIn, RegResp, BtbResp, RingResp IfIdBits IssueWidth IfId, FifoResp IdEx, FifoResp ExMa, FifoResp MaCm) ->
+  (CoreState, (CoreOut, RegReq, BtbReq, RingReq FetchWidth IssueWidth IfId, FifoReq IdEx, FifoReq ExMa, FifoReq MaCm))
 coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, ifIdResp, idExResp, exMaResp, maCmResp) =
   (state', (coreOut, regReq, btbReq, ifIdReq, idExReq, exMaReq, maCmReq))
   where
