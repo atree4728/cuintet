@@ -2,7 +2,7 @@
 module Cuintet.Core (CoreIn (..), CoreOut (..), CoreTrace (..), core) where
 
 import Clash.Prelude
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), MemReq, MemResp, NLanes, XLen)
+import Cuintet.Eei (Addr, BusReq (..), BusResp (..), InstsPerBusWord, MemReq, MemResp, NLanes, XLen)
 import Cuintet.Forwarding (forwarding)
 import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), IfIdDepth, MaCm (..), Retire (..), destReg, hasResult, serializing)
 import Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit)
@@ -85,7 +85,7 @@ core coreIn = coreOut
 coreT ::
   CoreState ->
   (CoreIn, RegResp, BtbResp, RingResp IfIdDepth NLanes IfId, FifoResp IdEx, FifoResp ExMa, FifoResp MaCm) ->
-  (CoreState, (CoreOut, RegReq, BtbReq, RingReq 1 NLanes IfId, FifoReq IdEx, FifoReq ExMa, FifoReq MaCm))
+  (CoreState, (CoreOut, RegReq, BtbReq, RingReq InstsPerBusWord NLanes IfId, FifoReq IdEx, FifoReq ExMa, FifoReq MaCm))
 coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, ifIdResp, idExResp, exMaResp, maCmResp) =
   (state', (coreOut, regReq, btbReq, ifIdReq, idExReq, exMaReq, maCmReq))
   where

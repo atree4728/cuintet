@@ -38,7 +38,7 @@ module Cuintet.Eei (
   parseCsr,
   System12 (System12, ECALL, EBREAK, MRET),
   SystemOp (..),
-  instAt,
+  instSlice,
   RegFile,
   RegAddr,
   TrapCause (..),
@@ -57,6 +57,7 @@ import Clash.Annotations.BitRepresentation
 import Clash.Annotations.BitRepresentation.Deriving
 import Clash.Prelude
 import Control.Monad (guard)
+import Cuintet.Upto (Upto (..))
 import Cuintet.Util (orNothing)
 
 -- | The length of integer registers.
@@ -144,9 +145,12 @@ laneMask width off = reverse $ bitCoerce mask
     mask = ones `shiftL` numConvert off
     ones = complement (complement 0 `shiftL` numConvert (sizeBytes width))
 
--- | The instruction sitting at the address, picked out of the bus word that contains it.
-instAt :: Addr -> BitVector (MemDataBytes * 8) -> Inst
-instAt addr busWord = truncateB (busWord `shiftR` bitOffset (laneOffset addr))
+instSlice :: Addr -> BitVector (MemDataBytes * 8) -> Upto InstsPerBusWord Inst
+instSlice addr busWord
+  | pack addr `testBit` 2 = Upto {len = 1, elems = upper :> deepErrorX "instsAt: past the word" :> Nil}
+  | otherwise = Upto {len = 2, elems = lower :> upper :> Nil}
+  where
+    (upper, lower) = split busWord
 
 -- | Data to be written, which is masked and divided into bytes.
 newtype StoreLanes nBytes = StoreLanes (Vec nBytes (Maybe (BitVector 8)))

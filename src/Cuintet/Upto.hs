@@ -1,9 +1,7 @@
 module Cuintet.Upto (Upto (..), none, toMaybes, first) where
 
 import Clash.Prelude hiding (toList)
-import Clash.Prelude qualified as C
 import Cuintet.Util (orNothing)
-import Data.Maybe (catMaybes)
 
 data Upto n a = Upto
   { len :: Index (n + 1)
