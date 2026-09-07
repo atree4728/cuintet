@@ -57,7 +57,6 @@ initState = CoreState {fetchState = initFetchState, mulDivState = M.Idle, loadSt
 
 data CoreTrace = CoreTrace
   { fetchStart :: Maybe Addr
-  , fetchDone :: Bool
   , ifIssue :: Upto FetchWidth IfId
   , idIssue :: Index (IssueWidth + 1)
   , exIssue :: Index (IssueWidth + 1)
@@ -157,7 +156,6 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, ifIdResp, idExResp, exMaRe
     coreTrace =
       CoreTrace
         { fetchStart = if iResp.ready && not flush then (.addr) <$> ifOut.iReq else Nothing
-        , fetchDone = isJust fetchState.fetching && isJust iResp.rdata && not flush
         , ifIssue = if flush then Upto.none else ifOut.issue
         , idIssue = idOut.issue.len
         , exIssue = exOut.issue.len

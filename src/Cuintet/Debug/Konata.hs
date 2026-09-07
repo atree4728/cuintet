@@ -6,12 +6,13 @@ module Cuintet.Debug.Konata (konataLog) where
 import Clash.Prelude (natToNum)
 import Cuintet.Core (CoreTrace (..))
 import Cuintet.Debug.Show (hex, retireLines)
-import Cuintet.Eei (Addr, Inst, IssueWidth)
+import Cuintet.Eei (Addr, FetchWidth, Inst)
 import Cuintet.Pipeline (IfId (..), Retire (..))
+import Cuintet.Unit.Btb (bankOf)
 import Cuintet.Upto qualified as Upto
 import Data.Foldable (toList)
 import Data.Function (applyWhen)
-import Data.Maybe (catMaybes, fromMaybe, isJust, maybeToList)
+import Data.Maybe (catMaybes)
 import Text.Printf (printf)
 import Prelude
 
@@ -21,42 +22,41 @@ data Inflight = Inflight
   , instBits :: Maybe Inst
   }
 
-data Stage = IF | Fs | Iq | ID | Ex | Ma | Cm
+data Stage = IF | ID | EX | MA | Cm
   deriving (Eq, Show)
 
--- | Every stage but IF and Fs holds a group, since a fetch is one bus word and everything after it is one issue group.
+-- | Where everything in flight is. IF holds one list per fetch, since a fetch enters the IF-ID buffer whole.
 data Model = Model
   { nextId :: Int
   , commits :: Int
-  , fetching :: Maybe Inflight
-  , staged :: Maybe Inflight
-  , ifIdQ :: [Inflight]
-  , idExQ :: [Inflight]
-  , exMaQ :: [Inflight]
-  , maCmQ :: [Inflight]
+  , ifQ :: [[Inflight]]
+  , idQ :: [Inflight]
+  , exQ :: [Inflight]
+  , maQ :: [Inflight]
+  , cmQ :: [Inflight]
   }
 
 initModel :: Model
-initModel =
-  Model
-    { nextId = 0
-    , commits = 0
-    , fetching = Nothing
-    , staged = Nothing
-    , ifIdQ = []
-    , idExQ = []
-    , exMaQ = []
-    , maCmQ = []
-    }
+initModel = Model {nextId = 0, commits = 0, ifQ = [], idQ = [], exQ = [], maQ = [], cmQ = []}
 
-issued :: Maybe Inflight -> Inflight
-issued = fromMaybe (errorWithoutStackTrace "konataLog: lost track of the pipeline")
+-- | The instructions a fetch brings back: the slots of the bus word from its address up, as 'Cuintet.Eei.instSlice' cuts them.
+fetchGroup :: Int -> Addr -> [Inflight]
+fetchGroup firstId addr =
+  [ Inflight {instId = firstId + i, pc = addr + 4 * fromIntegral i, instBits = Nothing}
+  | i <- [0 .. natToNum @FetchWidth - 1 - fromIntegral (bankOf addr)]
+  ]
 
-shift :: Bool -> Bool -> Maybe Inflight -> Maybe Inflight -> Maybe Inflight
-shift push pop src cur
-  | push = Just (issued src)
-  | pop = Nothing
-  | otherwise = cur
+-- | What the oldest fetch hands the IF-ID buffer this clock, and the rest of it, cut off by a predicted-taken branch.
+handedOver :: Model -> CoreTrace -> ([Inflight], [Inflight])
+handedOver Model {ifQ} CoreTrace {ifIssue}
+  | null entries = ([], [])
+  | otherwise = (zipWith fill group entries, drop (length entries) group)
+  where
+    group = concat (take 1 ifQ)
+    entries = catMaybes (toList (Upto.toMaybes ifIssue))
+    fill i e
+      | i.pc == e.pc = Inflight {instId = i.instId, pc = e.pc, instBits = Just e.instBits}
+      | otherwise = errorWithoutStackTrace "konataLog: lost track of the fetch path"
 
 -- | A group leaves a stage whole, so a stage holds either what the one upstream just handed it or what it already had.
 move :: Int -> [Inflight] -> Int -> [Inflight] -> [Inflight]
@@ -66,46 +66,30 @@ move push src pop cur
   | otherwise = cur
 
 modelStep :: Model -> CoreTrace -> Model
-modelStep Model {..} CoreTrace {..} = applyWhen flush flushed moved
+modelStep model@Model {..} trace@CoreTrace {..} = applyWhen flush flushed moved
   where
-    flushed x = x {fetching = Nothing, staged = Nothing, ifIdQ = [], idExQ = []}
+    flushed x = x {ifQ = [], idQ = [], exQ = []}
 
-    retires = catMaybes (toList retired)
-    allocated = if isJust fetchStart then 1 else 0
-
-    -- one fetch carries up to two instructions but only one id, so the rest are numbered as they enter the buffer
-    entered = zipWith inflight ids (catMaybes (toList (Upto.toMaybes ifIssue)))
-      where
-        ids = map (.instId) (maybeToList staged) <> [nextId + allocated ..]
-        inflight i e = Inflight {instId = i, pc = e.pc, instBits = Just e.instBits}
+    retires = length (catMaybes (toList retired))
+    entered = fst (handedOver model trace)
+    started = maybe [] (\addr -> [fetchGroup nextId addr]) fetchStart
 
     moved =
       Model
-        { nextId = nextId + allocated + length (drop 1 entered)
-        , commits = commits + length retires
-        , fetching = case fetchStart of
-            Just pc -> Just Inflight {instId = nextId, pc, instBits = Nothing}
-            Nothing -> if fetchDone then Nothing else fetching
-        , staged = shift fetchDone (not (null entered)) fetching staged
-        , ifIdQ = drop (count idIssue) ifIdQ <> entered
-        , idExQ = move (count idIssue) ifIdQ (count exIssue) idExQ
-        , exMaQ = move (count exIssue) idExQ (count maIssue) exMaQ
-        , maCmQ = move (count maIssue) exMaQ (length retires) maCmQ
+        { nextId = nextId + length (concat started)
+        , commits = commits + retires
+        , ifQ = (if null entered then ifQ else drop 1 ifQ) <> started
+        , idQ = drop (count idIssue) idQ <> entered
+        , exQ = move (count idIssue) idQ (count exIssue) exQ
+        , maQ = move (count exIssue) exQ (count maIssue) maQ
+        , cmQ = move (count maIssue) maQ retires cmQ
         }
 
 count :: (Integral a) => a -> Int
 count = fromIntegral
 
 stages :: Model -> [(Inflight, Stage)]
-stages Model {..} =
-  concat
-    [ slot IF (maybeToList fetching)
-    , slot Fs (maybeToList staged)
-    , zip ifIdQ (replicate (natToNum @IssueWidth) ID <> repeat Iq)
-    , slot Ex idExQ
-    , slot Ma exMaQ
-    , slot Cm maCmQ
-    ]
+stages Model {..} = concat [slot IF (concat ifQ), slot ID idQ, slot EX exQ, slot MA maQ, slot Cm cmQ]
   where
     slot s is = [(i, s) | i <- is]
 
@@ -113,7 +97,7 @@ label :: Addr -> Maybe Inst -> String
 label pc bits = printf "%s: %s" (hex pc) (maybe "(not fetched)" hex bits)
 
 clockLines :: CoreTrace -> [(Inflight, Stage)] -> Model -> [String]
-clockLines CoreTrace {..} was cur@Model {..} = concatMap entering (stages cur) <> retiredLog <> concatMap lostLines lost
+clockLines trace@CoreTrace {..} was cur@Model {..} = concatMap entering (stages cur) <> retiredLog <> concatMap lostLines lost
   where
     seen = [(i.instId, s) | (i, s) <- was]
     entering (i, s) = case lookup i.instId seen of
@@ -123,20 +107,18 @@ clockLines CoreTrace {..} was cur@Model {..} = concatMap entering (stages cur) <
 
     sLine i s = printf "S\t%d\t0\t%s" i.instId (show s)
 
-    retiredLog = concat (zipWith3 ofRetire [0 ..] maCmQ (catMaybes (toList retired)))
+    retiredLog = concat (zipWith3 ofRetire [0 ..] cmQ (catMaybes (toList retired)))
       where
         ofRetire k i l =
           printf "L\t%d\t0\t%s" i.instId (label l.pc (Just l.instBits))
             : [printf "L\t%d\t1\t%s" i.instId ln | ln <- retireLines l]
               <> [printf "R\t%d\t%d\t0" i.instId (commits + k)]
 
-    -- EX drops the lanes younger than a redirect or a trap; a flush drops everything still upstream of MA
-    lost = squashed <> flushedOut
+    -- a predicted-taken branch cuts off the rest of its fetch; EX drops the lanes younger than a redirect or a trap; a flush drops everything still upstream of MA
+    lost = snd (handedOver cur trace) <> squashed <> flushedOut
       where
-        squashed = if count exIssue > 0 then drop (count exIssue) idExQ else []
-        flushedOut
-          | flush = (if count exIssue > 0 then [] else idExQ) <> ifIdQ <> maybeToList staged <> maybeToList fetching
-          | otherwise = []
+        squashed = if flush || count exIssue > 0 then drop (count exIssue) exQ else []
+        flushedOut = if flush then idQ <> concat ifQ else []
 
     lostLines i = [printf "L\t%d\t0\t%s" i.instId (label i.pc i.instBits), printf "R\t%d\t%d\t1" i.instId i.instId]
 
