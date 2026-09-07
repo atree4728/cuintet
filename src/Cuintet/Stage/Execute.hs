@@ -57,7 +57,7 @@ execute mulDivState ExecuteIn {..} = (mulDivState', ExecuteOut {..})
       | len == 1 = redirect0
       | otherwise = Nothing
 
-    btbWrites = (guard (len >= 1) >> btbWrite0) :> (guard (len == 2) >> btbWrite1) :> Nil
+    btbWrites = (guard issued >> btbWrite0) :> (guard (issued && entries.len == 2) >> btbWrite1) :> Nil
 {-# OPAQUE execute #-}
 
 executeLane :: Maybe (BitVector XLen) -> IdEx -> (ExMa, Maybe Addr, Maybe BtbWrite)

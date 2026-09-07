@@ -27,6 +27,8 @@ data FetchState = FetchState
   -- ^ The fetch whose response has not come back yet.
   , staged :: Upto FetchWidth IfId
   -- ^ Fetched instructions waiting for room in the IF-ID buffer.
+  , restart :: Maybe Addr
+  -- ^ Where a resolved redirect sends IF, taken one clock later so that it stays out of @next@'s cone.
   }
   deriving (Generic, NFDataX)
 
@@ -37,6 +39,7 @@ initFetchState =
     { next = resetVector
     , fetching = Nothing
     , staged = Upto.none
+    , restart = Nothing
     }
 
 data FetchIn = FetchIn
@@ -61,7 +64,7 @@ data FetchOut = FetchOut
 -- | One clock of IF.
 fetch :: FetchState -> FetchIn -> (FetchState, FetchOut)
 fetch FetchState {..} FetchIn {..} =
-  ( FetchState {next = next', fetching = fetching', staged = staged'}
+  ( FetchState {next = next', fetching = fetching', staged = staged', restart = redirect}
   , FetchOut {issue, iReq, btbLookup = next, btbPrefetch = next'}
   )
   where
@@ -69,16 +72,21 @@ fetch FetchState {..} FetchIn {..} =
     iReq = orNothing room BusReq {addr = next, wdata = Nothing}
     accepted = room && iResp.ready
 
-    (next', fetching')
-      | Just target <- redirect = (target, Nothing)
-      | accepted = (fromMaybe fallthrough firstTaken, Just Fetching {pc = next, predictions = aligned})
-      | otherwise = (next, fetching)
-      where
-        aligned
-          | bankOf next == 0 = btbResp.predictions
-          | otherwise = (btbResp.predictions !! bankOf next) :> Nothing :> Nil
-        firstTaken = fold (<|>) (takenTarget <$> aligned)
-        fallthrough = (next .&. complement 7) + 8
+    next'
+      | Just target <- restart = target
+      | accepted = fromMaybe fallthrough firstTaken
+      | otherwise = next
+
+    fetching'
+      | isJust redirect || isJust restart = Nothing
+      | accepted = Just Fetching {pc = next, predictions = aligned}
+      | otherwise = fetching
+
+    aligned
+      | bankOf next == 0 = btbResp.predictions
+      | otherwise = (btbResp.predictions !! bankOf next) :> Nothing :> Nil
+    firstTaken = fold (<|>) (takenTarget <$> aligned)
+    fallthrough = (next .&. complement 7) + 8
 
     fetched = mkGroup <$> fetching <*> iResp.rdata
     mkGroup Fetching {..} busWord =

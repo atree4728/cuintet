@@ -15,6 +15,7 @@ data MulDivJob = MulDivJob
   , isOp32 :: Bool
   , op1, op2 :: BitVector XLen
   }
+  deriving (Generic, NFDataX)
 
 mkMulDivJob :: IdEx -> Maybe MulDivJob
 mkMulDivJob IdEx {..}
@@ -31,17 +32,21 @@ data MulDivResp = MulDivResp
   , result :: Maybe (BitVector XLen)
   }
 
-data MulDivState = Idle | Multiplying MulState | Dividing DivState
+data MulDivState = Idle | Busy MulDivJob Phase
+  deriving (Generic, NFDataX)
+
+data Phase = Loaded | Multiplying MulState | Dividing DivState
   deriving (Generic, NFDataX)
 
 mulDivStep :: MulDivState -> MulDivReq -> (MulDivState, MulDivResp)
 mulDivStep _ MulDivReq {job = Nothing} = (Idle, MulDivResp {stall = False, result = Nothing})
-mulDivStep state MulDivReq {job = Just job, wready} = (state', MulDivResp {stall = isNothing result, result})
+mulDivStep Idle MulDivReq {job = Just job} = (Busy job Loaded, MulDivResp {stall = True, result = Nothing})
+mulDivStep (Busy job phase) MulDivReq {wready} = (state', MulDivResp {stall = isNothing result, result})
   where
     (result, stepped) = case job.mulDivOp of
       Multiply op -> (finish <$> (mulResult =<< running), Multiplying next)
         where
-          running = case state of
+          running = case phase of
             Multiplying st -> Just st
             _ -> Nothing
           (signs, pick) = case op of
@@ -53,7 +58,7 @@ mulDivStep state MulDivReq {job = Just job, wready} = (state', MulDivResp {stall
           finish mres = sextWord job.isOp32 $ pick (bitCoerce mres.product)
       Division op -> (finish <$> (divResult =<< running), Dividing next)
         where
-          running = case state of
+          running = case phase of
             Dividing st -> Just st
             _ -> Nothing
           (sign, pick) = case op of
@@ -70,8 +75,8 @@ mulDivStep state MulDivReq {job = Just job, wready} = (state', MulDivResp {stall
               remainder = applyWhen dividend.negative negate r
 
     state'
-      | isJust result = if wready then Idle else state
-      | otherwise = stepped
+      | isJust result = if wready then Idle else Busy job phase
+      | otherwise = Busy job stepped
 {-# OPAQUE mulDivStep #-}
 
 mulOperands :: (Sign, Sign) -> MulDivJob -> MulOperands
