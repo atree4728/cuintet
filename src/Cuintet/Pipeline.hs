@@ -1,5 +1,5 @@
 -- | The payloads that cross the stage boundaries, one record per FIFO.
-module Cuintet.Pipeline (IfIdBits, IfId (..), IdEx (..), ExMa (..), MaCm (..), Retire (..), srcRegs, destReg, serializing, hasResult) where
+module Cuintet.Pipeline (IfIdBits, IfId (..), IdEx (..), ExMa (..), MaCm (..), Retire (..), srcRegs, destReg, serializing, hasResult, srcAddrs) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), isCsrRead, isLoad)
@@ -71,7 +71,12 @@ data Retire = Retire
 
 -- | The @rs1@ and @rs2@ fields, shared by ID and the register file read.
 srcRegs :: Inst -> (RegAddr, RegAddr)
-srcRegs instBits = (slice d19 d15 instBits, slice d24 d20 instBits)
+srcRegs instBits = (unpack $ slice d19 d15 instBits, unpack $ slice d24 d20 instBits)
+
+srcAddrs :: Maybe IfId -> Vec 2 RegAddr
+srcAddrs entry = rs1Addr :> rs2Addr :> Nil
+  where
+    (rs1Addr, rs2Addr) = maybe (0, 0) (srcRegs . (.instBits)) entry
 
 -- | The register this instruction writes
 destReg ::

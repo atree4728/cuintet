@@ -4,7 +4,7 @@ module Cuintet.Core (CoreIn (..), CoreOut (..), CoreTrace (..), core) where
 import Clash.Prelude
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), FetchWidth, IssueWidth, MemReq, MemResp, XLen)
 import Cuintet.Forwarding (forwarding)
-import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), IfIdBits, MaCm (..), Retire (..), destReg, hasResult, serializing)
+import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), IfIdBits, MaCm (..), Retire (..), destReg, hasResult, serializing, srcAddrs)
 import Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit)
 import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
 import Cuintet.Stage.Execute (ExecuteIn (..), ExecuteOut (..), execute)
@@ -17,7 +17,7 @@ import Cuintet.Unit.LoadStore (LoadStoreState)
 import Cuintet.Unit.LoadStore qualified as L
 import Cuintet.Unit.MulDiv (MulDivState)
 import Cuintet.Unit.MulDiv qualified as M
-import Cuintet.Unit.RegFile (RegReq (..), RegResp, mkRegReq, regFile)
+import Cuintet.Unit.RegFile (RegReq (..), RegResp (..), regFile)
 import Cuintet.Unit.Ring (RingReq (..), RingResp (..), ring)
 import Cuintet.Upto qualified as Upto
 import Cuintet.Util (orNothing)
@@ -94,7 +94,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, ifIdResp, idExResp, exMaRe
     ifIdEntry = Upto.first ifIdResp.rdata
 
     fetchIn = FetchIn {iResp, buf = ifIdResp, redirect, btbResp}
-    decodeIn = DecodeIn {entry = ifIdEntry, regResp, forwards, wready = idExResp.wready, flush}
+    decodeIn = DecodeIn {entry = ifIdEntry, rsData = takeI regResp.rsData, forwards, wready = idExResp.wready, flush}
     executeIn = ExecuteIn {entry = idExResp.rdata, wready = exMaResp.wready, serializingInFlight}
     memAccessIn = MemAccessIn {entry = exMaResp.rdata, dResp}
     commitIn = CommitIn {entry = maCmResp.rdata}
@@ -117,7 +117,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, ifIdResp, idExResp, exMaRe
     redirect = cmOut.redirect <|> exOut.redirect
     flush = isJust redirect
 
-    regReq = mkRegReq ifIdEntry $ cmOut.write
+    regReq = RegReq {rsAddrs = srcAddrs ifIdEntry ++ srcAddrs Nothing, writes = cmOut.write :> Nothing :> Nil}
     btbReq = BtbReq {lookupAddr = ifOut.btbLookup, prefetchAddr = ifOut.btbPrefetch, write = exOut.btbWrite}
 
     ifIdReq = RingReq {wdata = ifOut.issue, pop = if isJust idOut.issue then 1 else 0, flush}

@@ -83,7 +83,7 @@ type Inst = BitVector ILen
 type RegFile = Vec 32 (BitVector XLen)
 
 -- | A register index.
-type RegAddr = BitVector 5
+type RegAddr = Unsigned 5
 
 -- | Whether a narrower-than-register load fills the high bits with its sign or zero.
 data Sign = Signed | Unsigned

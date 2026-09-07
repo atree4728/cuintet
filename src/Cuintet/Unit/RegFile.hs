@@ -1,46 +1,46 @@
--- | The 32 integer registers, as a RAM with two read ports and one write port.
-module Cuintet.Unit.RegFile (RegReq (..), RegResp (..), regFile, mkRegReq) where
+-- | The 32 integer registers, as one RAM bank per write port with a live value table naming the bank each read takes.
+module Cuintet.Unit.RegFile (NRegs, ReadPorts, WritePorts, RegReq (..), RegResp (..), regFile) where
 
 import Clash.Prelude
-import Control.Arrow (first)
 import Cuintet.Eei (RegAddr, XLen)
-import Cuintet.Pipeline (IfId (..), srcRegs)
 
--- | The two registers to read this clock, and the write to apply at the end of it.
+type NRegs = 32
+
+type ReadPorts = 4
+
+type WritePorts = 2
+
+type Banked = Vec WritePorts (BitVector XLen)
+
+type Lvt = Vec NRegs (Index WritePorts)
+
 data RegReq = RegReq
-  { rs1Addr :: RegAddr
-  , rs2Addr :: RegAddr
-  , write :: Maybe (RegAddr, BitVector XLen)
+  { rsAddrs :: Vec ReadPorts RegAddr
+  , writes :: Vec WritePorts (Maybe (RegAddr, BitVector XLen))
   }
   deriving (Generic, NFDataX)
 
--- | What the two read ports hold this clock.
-data RegResp = RegResp
-  { rs1Data :: BitVector XLen
-  , rs2Data :: BitVector XLen
-  }
-  deriving (Generic, NFDataX)
+newtype RegResp = RegResp {rsData :: Vec ReadPorts (BitVector XLen)}
+  deriving newtype (Generic, NFDataX)
 
--- | One RAM per read port, both written with the same data.
 regFile :: (HiddenClockResetEnable dom) => Signal dom RegReq -> Signal dom RegResp
-regFile req = RegResp <$> port ((.rs1Addr) <$> req) <*> port ((.rs2Addr) <$> req)
+regFile req = mealy regFileT (repeat 0) (bundle (req, banked))
   where
-    zeroX0 0 _ = (0, 0)
-    zeroX0 r d = (r, d)
-    bypass write (rs, d)
-      | Just (rd, wd) <- write, rs == rd = wd
-      | otherwise = d
-    wdata = (.write) <$> req
-    port addr =
-      bypass
-        <$> wdata
-        <*> ( zeroX0
-                <$> addr
-                <*> asyncRamPow2 (unpack <$> addr) (fmap (first unpack) <$> wdata)
-            )
+    writes = unbundle $ (.writes) <$> req
+    rsAddrs = unbundle $ (.rsAddrs) <$> req
+    readPort addr = bundle (asyncRamPow2 addr <$> writes)
+    banked = bundle (readPort <$> rsAddrs)
 
--- | The request for a given IF-ID FIFO head and WB write.
-mkRegReq :: Maybe IfId -> Maybe (RegAddr, BitVector XLen) -> RegReq
-mkRegReq entry write = RegReq {rs1Addr, rs2Addr, write}
+regFileT :: Lvt -> (RegReq, Vec ReadPorts Banked) -> (Lvt, RegResp)
+regFileT lvt (RegReq {..}, banked) =
+  (lvt', RegResp (zipWith (readOut writes lvt) rsAddrs banked))
   where
-    (rs1Addr, rs2Addr) = maybe (0, 0) (srcRegs . (.instBits)) entry
+    lvt' = ifoldl (\acc port write -> maybe acc (\(rd, _) -> replace rd port acc) write) lvt writes
+
+readOut :: Vec WritePorts (Maybe (RegAddr, BitVector XLen)) -> Lvt -> RegAddr -> Banked -> BitVector XLen
+readOut writes lvt rs banked = foldl bypass stored writes
+  where
+    stored = if rs == 0 then 0 else banked !! (lvt !! rs)
+    bypass old = \case
+      Just (rd, v) | rd == rs -> v
+      _ -> old

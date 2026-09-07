@@ -10,7 +10,7 @@ module Cuintet.Unit.Csr (
 ) where
 
 import Clash.Prelude
-import Cuintet.Eei (Addr, CsrAddr (..), CsrOp (..), CsrSrc (..), TrapCause (..), XLen)
+import Cuintet.Eei (Addr, CsrAddr (..), CsrOp (..), CsrSrc (..), RegAddr, TrapCause (..), XLen)
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe)
 
@@ -30,7 +30,7 @@ data AccessSpec = AccessSpec
   { csrAddr :: CsrAddr
   , op :: CsrOp
   , src :: CsrSrc
-  , rs1Addr :: BitVector 5
+  , rs1Addr :: RegAddr
   , rs1Data :: BitVector XLen
   }
   deriving (Generic, NFDataX)
@@ -95,7 +95,7 @@ serve file (CsrAccess AccessSpec {..})
     written old = csrWrite op old wdata
     wvalue = case src of
       FromRs1 -> rs1Data
-      FromUimm -> zeroExtend rs1Addr
+      FromUimm -> zeroExtend $ pack rs1Addr
     wdata = case op of
       ReadWrite -> Just wvalue
       -- For both CSRRS and CSRRC, if rs1=x0, then the instruction will not write to the CSR at all

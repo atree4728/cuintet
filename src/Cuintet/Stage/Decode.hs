@@ -2,19 +2,18 @@
 module Cuintet.Stage.Decode (decode, DecodeIn (..), DecodeOut (..), immI, immS, immB, immU, immJ) where
 
 import Clash.Prelude
+import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), usesRs1, usesRs2)
 import Cuintet.Eei (AluOp, Inst, MemOp (..), Opcode (..), System12 (..), SystemOp (..), XLen, parseBranchOp, parseCsr, parseLoad, parseStore, pattern BREAKPOINT, pattern ENVIRONMENT_CALL_FROM_M_MODE, pattern ILLEGAL_INSTRUCTION)
 import Cuintet.Forwarding (Forwarding, bypass)
 import Cuintet.Pipeline (IdEx (..), IfId (..), srcRegs)
-import Cuintet.Unit.RegFile (RegResp (..))
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 
 data DecodeIn = DecodeIn
   { entry :: Maybe IfId
   -- ^ The instruction at the head of the IF-ID FIFO.
-  , regResp :: RegResp
-  -- ^ The operands, read out of 'Cuintet.RegFile.regFile' for that same entry.
+  , rsData :: Vec 2 (BitVector XLen)
   , forwards :: Vec 2 Forwarding
   -- ^ What each stage downstream will write back but cannot forward yet.
   , wready :: Bool
@@ -34,8 +33,8 @@ decode DecodeIn {..} = DecodeOut {issue = orNothing issued idEx}
     decoded = instDecode instBits
     (ctrl, imm) = fromMaybe (trapCtrl, 0) decoded
     (rs1Addr, rs2Addr) = srcRegs instBits
-    rdAddr = slice d11 d7 instBits
-    RegResp {rs1Data = rs1Read, rs2Data = rs2Read} = regResp
+    rdAddr = unpack $ slice d11 d7 instBits
+    (rs1Read, rs2Read) = vecToTuple rsData
 
     operands = (,) <$> resolve (usesRs1 ctrl) rs1Addr rs1Read <*> resolve (usesRs2 ctrl) rs2Addr rs2Read
     resolve uses rs regRead = if uses then bypass forwards rs regRead else Just regRead
