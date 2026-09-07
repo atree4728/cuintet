@@ -2,7 +2,7 @@
 module Cuintet.Stage.MemAccess (memAccess, MemAccessIn (..), MemAccessOut (..)) where
 
 import Clash.Prelude
-import Cuintet.CoreCtrl (isLoad)
+import Cuintet.CoreCtrl (InstCtrl (..), isLoad)
 import Cuintet.Eei (MemReq, MemResp)
 import Cuintet.Pipeline (ExMa (..), MaCm (..))
 import Cuintet.Unit.LoadStore (LoadStoreJob (..), LoadStoreReq (..), LoadStoreResp (..), LoadStoreState (..), loadStoreStep)
@@ -31,13 +31,14 @@ memAccess loadStoreState MemAccessIn {..} =
     valid = isJust entry
     ExMa {..} = fromMaybe (deepErrorX "memAccess: EX-MA FIFO is empty") entry
 
-    (loadStoreState', loadStoreResp) =
-      loadStoreStep
-        loadStoreState
-        LoadStoreReq
-          { job = orNothing (valid && isNothing exception) LoadStoreJob {ctrl, addr = bitCoerce aluResult, wdata = rs2Data}
-          , memResp = dResp
-          }
+    (loadStoreState', loadStoreResp) = loadStoreStep loadStoreState LoadStoreReq {job, memResp = dResp}
+
+    job
+      | valid
+      , isNothing exception
+      , Just memOp <- ctrl.memOp =
+          Just LoadStoreJob {memOp, addr = bitCoerce aluResult, wdata = rs2Data}
+      | otherwise = Nothing
 
     commit = valid && not loadStoreResp.stall
 

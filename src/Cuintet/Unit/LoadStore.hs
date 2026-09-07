@@ -13,14 +13,13 @@ module Cuintet.Unit.LoadStore (
 ) where
 
 import Clash.Prelude
-import Cuintet.CoreCtrl (InstCtrl (..), isMemOp)
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), LaneOffset, LoadShape (..), MemDataBytes, MemOp (..), MemReq, MemResp, Sign (..), StoreLanes (..), Width (..), XLen, aligned, bitOffset, laneMask, laneOffset)
 import Cuintet.Util (orNothing)
 import Data.Maybe (isJust, isNothing)
 
 -- | One memory access for the unit to carry out.
 data LoadStoreJob = LoadStoreJob
-  { ctrl :: InstCtrl -- TODO: to be memOp
+  { memOp :: MemOp
   , addr :: Addr
   -- ^ The access address computed by the ALU.
   , wdata :: BitVector XLen
@@ -69,7 +68,7 @@ loadStoreStep :: LoadStoreState -> LoadStoreReq -> (LoadStoreState, LoadStoreRes
 loadStoreStep state LoadStoreReq {job, memResp} = (memUnitState, memUnitResp)
   where
     memUnitState = case state of
-      Idle | Just LoadStoreJob {..} <- job, Just memOp <- ctrl.memOp -> WaitReady addr (busAccess memOp addr wdata)
+      Idle | Just LoadStoreJob {..} <- job -> WaitReady addr (busAccess memOp addr wdata)
       WaitReady addr acc | memResp.ready -> WaitValid addr acc
       WaitValid _ _ | isJust memResp.rdata -> Idle
       _ -> state
@@ -78,11 +77,10 @@ loadStoreStep state LoadStoreReq {job, memResp} = (memUnitState, memUnitResp)
         { result = case state of
             WaitValid _ (BusLoad shape) -> loadResult shape <$> memResp.rdata
             _ -> Nothing
-        , stall = case (job, state) of
-            (Nothing, _) -> False
-            (Just LoadStoreJob {ctrl}, Idle) -> isMemOp ctrl
-            (Just _, WaitReady _ _) -> True
-            (Just _, WaitValid _ _) -> isNothing memResp.rdata
+        , stall = case state of
+            Idle -> isJust job
+            WaitReady _ _ -> True
+            WaitValid _ _ -> isNothing memResp.rdata
         , memReq = case state of
             WaitReady addr access -> Just $ busReq addr access
             _ -> Nothing
