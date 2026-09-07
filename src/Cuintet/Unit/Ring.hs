@@ -1,7 +1,8 @@
 module Cuintet.Unit.Ring (RingReq (..), RingResp (..), ring) where
 
 import Clash.Prelude
-import Cuintet.Upto (Upto (..), toMaybes)
+import Cuintet.Upto (Upto (..))
+import Cuintet.Upto qualified as Upto
 import Data.Maybe (fromMaybe)
 
 data RingReq nw nr dat = RingReq
@@ -52,5 +53,5 @@ ringUpdate RingState {..} RingReq {..}
   | flush = RingState {hd = 0, tl = 0, buf = deepErrorX "ring: flushed"}
   | otherwise = RingState {hd = hd + numConvert pop, tl = tl + numConvert wdata.len, buf = buf'}
   where
-    buf' = ifoldl write buf (toMaybes wdata)
+    buf' = ifoldl write buf (Upto.toMaybes wdata)
     write b i = maybe b (\e -> replace (tl + numConvert i) e b)

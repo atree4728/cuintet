@@ -26,7 +26,7 @@ memAccess loadStoreState MemAccessIn {..} = (loadStoreState', MemAccessOut {..})
   where
     (loadStoreState', loadStoreResp) = loadStoreStep loadStoreState LoadStoreReq {job, memResp = dResp}
 
-    job = mkJob =<< Upto.first entries
+    job = mkJob =<< Upto.head entries
     mkJob Executed {..}
       | isNothing exception
       , Just memOp <- ctrl.memOp =

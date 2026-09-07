@@ -35,7 +35,7 @@ data ExecuteOut = ExecuteOut
 execute :: MulDivState -> ExecuteIn -> (MulDivState, ExecuteOut)
 execute mulDivState ExecuteIn {..} = (mulDivState', ExecuteOut {..})
   where
-    (mulDivState', mulDivResp) = mulDivStep mulDivState MulDivReq {job = mkMulDivJob =<< Upto.first entries, wready = wready && not serializingInFlight}
+    (mulDivState', mulDivResp) = mulDivStep mulDivState MulDivReq {job = mkMulDivJob =<< Upto.head entries, wready = wready && not serializingInFlight}
 
     issued = entries.len > 0 && wready && not serializingInFlight && not mulDivResp.stall
 

@@ -89,34 +89,30 @@ coreT ::
   , RegResp
   , BtbResp
   , RingResp FetchBufBits IssueWidth Fetched
-  , FifoResp (Upto IssueWidth Decoded)
-  , FifoResp (Upto IssueWidth Executed)
-  , FifoResp (Upto IssueWidth Completed)
+  , FifoResp IssueWidth Decoded
+  , FifoResp IssueWidth Executed
+  , FifoResp IssueWidth Completed
   ) ->
   ( CoreState
   , ( CoreOut
     , RegReq
     , BtbReq
     , RingReq FetchWidth IssueWidth Fetched
-    , FifoReq (Upto IssueWidth Decoded)
-    , FifoReq (Upto IssueWidth Executed)
-    , FifoReq (Upto IssueWidth Completed)
+    , FifoReq IssueWidth Decoded
+    , FifoReq IssueWidth Executed
+    , FifoReq IssueWidth Completed
     )
   )
 coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, fetchedResp, decodedResp, executedResp, completedResp) =
   (state', (coreOut, regReq, btbReq, fetchedReq, decodedReq, executedReq, completedReq))
   where
-    exHeld = Upto.held decodedResp.rdata
-    maHeld = Upto.held executedResp.rdata
-    cmHeld = Upto.held completedResp.rdata
-
-    serializingInFlight = any serializing (Upto.first maHeld) || any serializing (Upto.first cmHeld)
+    serializingInFlight = any serializing (Upto.head executedResp.rdata) || any serializing (Upto.head completedResp.rdata)
 
     fetchIn = FetchIn {iResp, buf = fetchedResp, redirect, btbResp}
     decodeIn = DecodeIn {entries = fetchedResp.rdata, rsData = regResp.rsData, forwards, wready = decodedResp.wready, flush}
-    executeIn = ExecuteIn {entries = exHeld, wready = executedResp.wready, serializingInFlight}
-    memAccessIn = MemAccessIn {entries = maHeld, dResp}
-    commitIn = CommitIn {entries = cmHeld}
+    executeIn = ExecuteIn {entries = decodedResp.rdata, wready = executedResp.wready, serializingInFlight}
+    memAccessIn = MemAccessIn {entries = executedResp.rdata, dResp}
+    commitIn = CommitIn {entries = completedResp.rdata}
 
     (fetchState', ifOut) = fetch fetchState fetchIn
     idOut = decode decodeIn
@@ -127,8 +123,8 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, fetchedResp, decodedResp, 
     forwards = fromEx 1 :> fromEx 0 :> fromMa 1 :> fromMa 0 :> Nil
       where
         fromEx, fromMa :: Index IssueWidth -> Forwarding
-        exLanes = Upto.toMaybes exHeld
-        maLanes = Upto.toMaybes maHeld
+        exLanes = Upto.toMaybes decodedResp.rdata
+        maLanes = Upto.toMaybes executedResp.rdata
         fromEx i = forwarding (destReg =<< exLanes !! i) $ do
           entry <- exLanes !! i
           guard exOut.issued
@@ -148,15 +144,15 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, fetchedResp, decodedResp, 
     btbReq = BtbReq {lookupAddr = ifOut.btbLookup, prefetchAddr = ifOut.btbPrefetch, writes = exOut.btbWrites}
 
     fetchedReq = RingReq {wdata = ifOut.issue, pop = idOut.issue.len, flush}
-    decodedReq = FifoReq {wdata = orNothing (idOut.issue.len > 0) idOut.issue, rready = exOut.issued, flush}
-    executedReq = FifoReq {wdata = orNothing (exOut.issue.len > 0) exOut.issue, rready = maOut.issued, flush = False}
-    completedReq = FifoReq {wdata = orNothing (maOut.issue.len > 0) maOut.issue, rready = True, flush = False}
+    decodedReq = FifoReq {wdata = idOut.issue, rready = exOut.issued, flush}
+    executedReq = FifoReq {wdata = exOut.issue, rready = maOut.issued, flush = False}
+    completedReq = FifoReq {wdata = maOut.issue, rready = True, flush = False}
 
     coreOut = CoreOut {iReq = ifOut.iReq, dReq = maOut.dReq, retired = cmOut.retired, led = cmOut.led, coreTrace}
     coreTrace =
       CoreTrace
         { fetchStart = if iResp.ready && not flush then (.addr) <$> ifOut.iReq else Nothing
-        , ifIssue = if flush then Upto.none else ifOut.issue
+        , ifIssue = if flush then Upto.empty else ifOut.issue
         , idIssue = idOut.issue.len
         , exIssue = exOut.issue.len
         , maIssue = maOut.issue.len

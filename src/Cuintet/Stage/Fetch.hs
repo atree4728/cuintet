@@ -38,7 +38,7 @@ initFetchState =
   FetchState
     { next = resetVector
     , fetching = Nothing
-    , staged = Upto.none
+    , staged = Upto.empty
     , restart = Nothing
     }
 
@@ -101,11 +101,11 @@ fetch FetchState {..} FetchIn {..} =
       orNothing (isTaken hint) target
 
     pushed = buf.free >= numConvert staged.len
-    issue = if pushed then staged else Upto.none
+    issue = if pushed then staged else Upto.empty
 
     staged'
-      | isJust redirect = Upto.none
+      | isJust redirect = Upto.empty
       | Just entry <- fetched = entry
-      | pushed = Upto.none
+      | pushed = Upto.empty
       | otherwise = staged
 {-# OPAQUE fetch #-}

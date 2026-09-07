@@ -6,7 +6,7 @@ import Cuintet.CoreCtrl (InstCtrl (..))
 import Cuintet.Eei (Addr, IssueWidth, SystemOp (..), XLen)
 import Cuintet.Pipeline (Completed (..), Retire (..), destReg)
 import Cuintet.Unit.Csr (AccessSpec (..), CsrFile (..), CsrReq (..), CsrResp (..), TrapSpec (..), csrStep)
-import Cuintet.Upto (Upto (..), toMaybes)
+import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
 import Data.Maybe (fromMaybe)
 
@@ -22,12 +22,12 @@ data CommitOut = CommitOut
 commit :: CsrFile -> CommitIn -> (CsrFile, CommitOut)
 commit csrFile CommitIn {..} = (csrFile', CommitOut {retired, redirect, led = csrFile.led})
   where
-    (csrFile', csrResp) = csrStep csrFile (mkCsrReq =<< Upto.first entries)
+    (csrFile', csrResp) = csrStep csrFile (mkCsrReq =<< Upto.head entries)
 
     readValue = case csrResp of Just (ReadValue v) -> Just v; _ -> Nothing
     redirect = case csrResp of Just (Redirect v) -> Just v; _ -> Nothing
 
-    retired = zipWith (\v e -> mkRetire v <$> e) (readValue :> Nothing :> Nil) (toMaybes entries)
+    retired = zipWith (\v e -> mkRetire v <$> e) (readValue :> Nothing :> Nil) (Upto.toMaybes entries)
 {-# OPAQUE commit #-}
 
 mkCsrReq :: Completed -> Maybe CsrReq
