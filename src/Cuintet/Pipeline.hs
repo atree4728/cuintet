@@ -1,5 +1,5 @@
 -- | The payloads that cross the stage boundaries, one record per FIFO.
-module Cuintet.Pipeline (IfIdBits, IfId (..), IdEx (..), ExMa (..), MaCm (..), Retire (..), srcRegs, destReg, serializing, hasResult, srcAddrs) where
+module Cuintet.Pipeline (FetchBufBits, Fetched (..), Decoded (..), Executed (..), Completed (..), Retire (..), srcRegs, destReg, serializing, hasResult, srcAddrs) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), isCsrRead, isLoad)
@@ -9,16 +9,16 @@ import Cuintet.Util (orNothing)
 import Data.Maybe (isJust, isNothing)
 import GHC.Records (HasField)
 
-type IfIdBits = 3
+type FetchBufBits = 3
 
-data IfId = IfId
+data Fetched = Fetched
   { pc :: Addr
   , instBits :: Inst
   , prediction :: Maybe Prediction
   }
   deriving (Generic, NFDataX)
 
-data IdEx = IdEx
+data Decoded = Decoded
   { pc :: Addr
   , instBits :: Inst
   , prediction :: Maybe Prediction
@@ -33,7 +33,7 @@ data IdEx = IdEx
   }
   deriving (Generic, NFDataX)
 
-data ExMa = ExMa
+data Executed = Executed
   { pc :: Addr
   , instBits :: Inst
   , ctrl :: InstCtrl
@@ -47,7 +47,7 @@ data ExMa = ExMa
   }
   deriving (Generic, NFDataX)
 
-data MaCm = MaCm
+data Completed = Completed
   { pc :: Addr
   , instBits :: Inst
   , ctrl :: InstCtrl
@@ -56,7 +56,7 @@ data MaCm = MaCm
   , rdAddr :: RegAddr
   , exception :: Maybe (TrapCause, BitVector XLen)
   , wbData :: BitVector XLen
-  , completed :: Maybe MemReq
+  , mem :: Maybe MemReq
   }
   deriving (Generic, NFDataX)
 
@@ -73,7 +73,7 @@ data Retire = Retire
 srcRegs :: Inst -> (RegAddr, RegAddr)
 srcRegs instBits = (unpack $ slice d19 d15 instBits, unpack $ slice d24 d20 instBits)
 
-srcAddrs :: Maybe IfId -> Vec 2 RegAddr
+srcAddrs :: Maybe Fetched -> Vec 2 RegAddr
 srcAddrs entry = rs1Addr :> rs2Addr :> Nil
   where
     (rs1Addr, rs2Addr) = maybe (0, 0) (srcRegs . (.instBits)) entry

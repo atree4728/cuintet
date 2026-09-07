@@ -4,13 +4,13 @@ module Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit) where
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..))
 import Cuintet.Eei (Addr, IssueWidth, SystemOp (..), XLen)
-import Cuintet.Pipeline (MaCm (..), Retire (..), destReg)
+import Cuintet.Pipeline (Completed (..), Retire (..), destReg)
 import Cuintet.Unit.Csr (AccessSpec (..), CsrFile (..), CsrReq (..), CsrResp (..), TrapSpec (..), csrStep)
 import Cuintet.Upto (Upto (..), toMaybes)
 import Cuintet.Upto qualified as Upto
 import Data.Maybe (fromMaybe)
 
-newtype CommitIn = CommitIn {entries :: Upto IssueWidth MaCm}
+newtype CommitIn = CommitIn {entries :: Upto IssueWidth Completed}
 
 data CommitOut = CommitOut
   { retired :: Vec IssueWidth (Maybe Retire)
@@ -30,20 +30,20 @@ commit csrFile CommitIn {..} = (csrFile', CommitOut {retired, redirect, led = cs
     retired = zipWith (\v e -> mkRetire v <$> e) (readValue :> Nothing :> Nil) (toMaybes entries)
 {-# OPAQUE commit #-}
 
-mkCsrReq :: MaCm -> Maybe CsrReq
-mkCsrReq MaCm {..}
+mkCsrReq :: Completed -> Maybe CsrReq
+mkCsrReq Completed {..}
   | Just (cause, value) <- exception = Just $ TrapEnter TrapSpec {epc = pc, ..}
   | Just (SysCsr (src, op, csrAddr)) <- ctrl.systemOp = Just $ CsrAccess AccessSpec {csrAddr, op, src, rs1Addr, rs1Data}
   | Just SysMret <- ctrl.systemOp = Just TrapReturn
   | otherwise = Nothing
 
 -- | The retire log of one lane. The CSR read value, which only lane 0 can carry, arrives too late for @wbData@.
-mkRetire :: Maybe (BitVector XLen) -> MaCm -> Retire
-mkRetire csrValue entry@MaCm {..} =
+mkRetire :: Maybe (BitVector XLen) -> Completed -> Retire
+mkRetire csrValue entry@Completed {..} =
   Retire
     { pc
     , instBits
     , rd = (,fromMaybe wbData csrValue) <$> destReg entry
-    , mem = completed
+    , mem
     , trap = fst <$> exception
     }

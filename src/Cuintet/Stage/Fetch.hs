@@ -1,9 +1,9 @@
--- | IF: runs ahead of the rest on its own, filling the IF-ID buffer.
+-- | IF: runs ahead of the rest on its own, filling the fetch buffer.
 module Cuintet.Stage.Fetch (FetchState (..), initFetchState, FetchIn (..), FetchOut (..), fetch) where
 
 import Clash.Prelude
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), FetchWidth, IssueWidth, MemReq, MemResp, instSlice, resetVector)
-import Cuintet.Pipeline (IfId (..), IfIdBits)
+import Cuintet.Pipeline (FetchBufBits, Fetched (..))
 import Cuintet.Unit.Btb (BtbResp (..), Prediction (..), bankOf, isTaken)
 import Cuintet.Unit.Ring (RingResp (..))
 import Cuintet.Upto (Upto (..))
@@ -25,8 +25,8 @@ data FetchState = FetchState
   -- ^ The address to fetch next; the predicted successor of @fetching@, if any.
   , fetching :: Maybe Fetching
   -- ^ The fetch whose response has not come back yet.
-  , staged :: Upto FetchWidth IfId
-  -- ^ Fetched instructions waiting for room in the IF-ID buffer.
+  , staged :: Upto FetchWidth Fetched
+  -- ^ Fetched instructions waiting for room in the fetch buffer.
   , restart :: Maybe Addr
   -- ^ Where a resolved redirect sends IF, taken one clock later so that it stays out of @next@'s cone.
   }
@@ -45,16 +45,16 @@ initFetchState =
 data FetchIn = FetchIn
   { iResp :: MemResp
   -- ^ Response to a fetch request issued on an earlier clock.
-  , buf :: RingResp IfIdBits IssueWidth IfId
-  -- ^ The IF-ID buffer, for the room it has.
+  , buf :: RingResp FetchBufBits IssueWidth Fetched
+  -- ^ The fetch buffer, for the room it has.
   , redirect :: Maybe Addr
   -- ^ Where to restart, once MA has resolved control flow.
   , btbResp :: BtbResp
   }
 
 data FetchOut = FetchOut
-  { issue :: Upto FetchWidth IfId
-  -- ^ What the IF-ID buffer takes this clock.
+  { issue :: Upto FetchWidth Fetched
+  -- ^ What the fetch buffer takes this clock.
   , iReq :: Maybe MemReq
   -- ^ Instruction fetch request.
   , btbLookup :: Addr
@@ -94,7 +94,7 @@ fetch FetchState {..} FetchIn {..} =
       where
         insts = instSlice pc busWord
         cut = maybe maxBound (\i -> numConvert i + 1) (findIndex (isJust . takenTarget) predictions)
-        entry i instBits prediction = IfId {pc = pc + 4 * numConvert i, instBits, prediction}
+        entry i instBits prediction = Fetched {pc = pc + 4 * numConvert i, instBits, prediction}
 
     takenTarget p = do
       Prediction {target, hint} <- p

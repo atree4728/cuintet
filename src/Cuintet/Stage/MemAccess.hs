@@ -3,19 +3,19 @@ module Cuintet.Stage.MemAccess (memAccess, MemAccessIn (..), MemAccessOut (..)) 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), isLoad)
 import Cuintet.Eei (IssueWidth, MemReq, MemResp, XLen)
-import Cuintet.Pipeline (ExMa (..), MaCm (..))
+import Cuintet.Pipeline (Completed (..), Executed (..))
 import Cuintet.Unit.LoadStore (LoadStoreJob (..), LoadStoreReq (..), LoadStoreResp (..), LoadStoreState (..), loadStoreStep)
 import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
 import Data.Maybe (fromMaybe, isNothing)
 
 data MemAccessIn = MemAccessIn
-  { entries :: Upto IssueWidth ExMa
+  { entries :: Upto IssueWidth Executed
   , dResp :: MemResp
   }
 
 data MemAccessOut = MemAccessOut
-  { issue :: Upto IssueWidth MaCm
+  { issue :: Upto IssueWidth Completed
   , issued :: Bool
   , dReq :: Maybe MemReq
   }
@@ -27,7 +27,7 @@ memAccess loadStoreState MemAccessIn {..} = (loadStoreState', MemAccessOut {..})
     (loadStoreState', loadStoreResp) = loadStoreStep loadStoreState LoadStoreReq {job, memResp = dResp}
 
     job = mkJob =<< Upto.first entries
-    mkJob ExMa {..}
+    mkJob Executed {..}
       | isNothing exception
       , Just memOp <- ctrl.memOp =
           Just LoadStoreJob {memOp, addr = bitCoerce aluResult, wdata = rs2Data}
@@ -43,13 +43,13 @@ memAccess loadStoreState MemAccessIn {..} = (loadStoreState', MemAccessOut {..})
         :> Nil
 {-# OPAQUE memAccess #-}
 
-memAccessLane :: Maybe (BitVector XLen) -> Maybe MemReq -> ExMa -> MaCm
-memAccessLane result completed ExMa {..} =
-  MaCm
+memAccessLane :: Maybe (BitVector XLen) -> Maybe MemReq -> Executed -> Completed
+memAccessLane result completed Executed {..} =
+  Completed
     { wbData =
         if isLoad ctrl
           then fromMaybe (deepErrorX "memAccess: load committed without data") result
           else wbData
-    , completed
+    , mem = completed
     , ..
     }

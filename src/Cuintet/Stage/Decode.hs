@@ -6,31 +6,31 @@ import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), isJalr, usesRs1, usesRs2)
 import Cuintet.Eei (AluOp, Inst, IssueWidth, MemOp (..), Opcode (..), System12 (..), SystemOp (..), XLen, parseBranchOp, parseCsr, parseLoad, parseStore, pattern BREAKPOINT, pattern ENVIRONMENT_CALL_FROM_M_MODE, pattern ILLEGAL_INSTRUCTION)
 import Cuintet.Forwarding (Forwarding, bypass)
-import Cuintet.Pipeline (IdEx (..), IfId (..), destReg, serializing, srcRegs)
+import Cuintet.Pipeline (Decoded (..), Fetched (..), destReg, serializing, srcRegs)
 import Cuintet.Upto (Upto (..))
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 
 data DecodeIn = DecodeIn
-  { entries :: Upto IssueWidth IfId
-  -- ^ The instruction at the head of the IF-ID FIFO.
+  { entries :: Upto IssueWidth Fetched
+  -- ^ The instruction at the head of the fetch buffer.
   , rsData :: Vec (2 * IssueWidth) (BitVector XLen)
   , forwards :: Vec (2 * IssueWidth) Forwarding
   -- ^ What each stage downstream will write back but cannot forward yet.
   , wready :: Bool
-  -- ^ Whether the ID-EX FIFO can accept a write.
+  -- ^ Whether the 'Decoded' FIFO can accept a write.
   , flush :: Bool
   -- ^ Whether MA is redirecting IF this clock.
   }
 
 -- | The instruction handed to EX, absent on a clock ID does not issue.
-newtype DecodeOut = DecodeOut {issue :: Upto IssueWidth IdEx}
+newtype DecodeOut = DecodeOut {issue :: Upto IssueWidth Decoded}
 
 -- | One clock of ID.
 decode :: DecodeIn -> DecodeOut
 decode DecodeIn {..} = DecodeOut {issue}
   where
-    ((idEx0, ready0), (idEx1, ready1)) = vecToTuple $ zipWith (decodeLane forwards) entries.elems (unconcat d2 rsData)
+    ((decoded0, ready0), (decoded1, ready1)) = vecToTuple $ zipWith (decodeLane forwards) entries.elems (unconcat d2 rsData)
 
     issued0 = entries.len >= 1 && ready0 && wready && not flush
     issued1 =
@@ -38,27 +38,27 @@ decode DecodeIn {..} = DecodeOut {issue}
         && entries.len
         >= 2
         && ready1
-        && not (serializing idEx0)
-        && not (serializing idEx1)
-        && fitsLane1 idEx1.ctrl
+        && not (serializing decoded0)
+        && not (serializing decoded1)
+        && fitsLane1 decoded1.ctrl
         && not hasRAW
-    hasRAW = maybe False readRd0 (destReg idEx0)
+    hasRAW = maybe False readRd0 (destReg decoded0)
       where
-        readRd0 rd = usesRs1 idEx1.ctrl && idEx1.rs1Addr == rd || usesRs2 idEx1.ctrl && idEx1.rs2Addr == rd
+        readRd0 rd = usesRs1 decoded1.ctrl && decoded1.rs1Addr == rd || usesRs2 decoded1.ctrl && decoded1.rs2Addr == rd
 
     len
       | issued1 = 2
       | issued0 = 1
       | otherwise = 0
 
-    issue = Upto {len, elems = idEx0 :> idEx1 :> Nil}
+    issue = Upto {len, elems = decoded0 :> decoded1 :> Nil}
 {-# OPAQUE decode #-}
 
 fitsLane1 :: InstCtrl -> Bool
 fitsLane1 ctrl = isNothing ctrl.memOp && isNothing ctrl.mulDivOp && isNothing ctrl.systemOp && not (isJalr ctrl)
 
-decodeLane :: Vec (2 * IssueWidth) Forwarding -> IfId -> Vec 2 (BitVector XLen) -> (IdEx, Bool)
-decodeLane forwards IfId {..} rsData = (IdEx {..}, isJust operands)
+decodeLane :: Vec (2 * IssueWidth) Forwarding -> Fetched -> Vec 2 (BitVector XLen) -> (Decoded, Bool)
+decodeLane forwards Fetched {..} rsData = (Decoded {..}, isJust operands)
   where
     decoded = instDecode instBits
     (ctrl, imm) = fromMaybe (trapCtrl, 0) decoded

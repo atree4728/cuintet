@@ -6,7 +6,7 @@ import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
 import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..))
 import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), IssueWidth, XLen, misalignedCause, pattern INSTRUCTION_ADDRESS_MISALIGNED)
-import Cuintet.Pipeline (ExMa (..), IdEx (..), serializing)
+import Cuintet.Pipeline (Decoded (..), Executed (..), serializing)
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
 import Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState, mkMulDivJob, mulDivStep)
 import Cuintet.Upto (Upto (..))
@@ -15,13 +15,13 @@ import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 
 data ExecuteIn = ExecuteIn
-  { entries :: Upto IssueWidth IdEx
+  { entries :: Upto IssueWidth Decoded
   , wready :: Bool
   , serializingInFlight :: Bool
   }
 
 data ExecuteOut = ExecuteOut
-  { issue :: Upto IssueWidth ExMa
+  { issue :: Upto IssueWidth Executed
   -- ^ The group handed to MA, lane 1 dropped when it turned out to be down the wrong path.
   , issued :: Bool
   -- ^ Whether the group leaves EX this clock, which 'redirect' must not feed into.
@@ -39,17 +39,17 @@ execute mulDivState ExecuteIn {..} = (mulDivState', ExecuteOut {..})
 
     issued = entries.len > 0 && wready && not serializingInFlight && not mulDivResp.stall
 
-    ((exMa0, redirect0, btbWrite0), (exMa1, redirect1, btbWrite1)) =
+    ((executed0, redirect0, btbWrite0), (executed1, redirect1, btbWrite1)) =
       vecToTuple $ zipWith executeLane (mulDivResp.result :> Nothing :> Nil) entries.elems
 
-    squash1 = isJust redirect0 || serializing exMa0
+    squash1 = isJust redirect0 || serializing executed0
 
     len
       | not issued = 0
       | entries.len == 2 && not squash1 = 2
       | otherwise = 1
 
-    issue = Upto {len, elems = exMa0 :> exMa1 :> Nil}
+    issue = Upto {len, elems = executed0 :> executed1 :> Nil}
     wbData = (.wbData) <$> issue.elems
 
     redirect
@@ -60,10 +60,10 @@ execute mulDivState ExecuteIn {..} = (mulDivState', ExecuteOut {..})
     btbWrites = (guard issued >> btbWrite0) :> (guard (issued && entries.len == 2) >> btbWrite1) :> Nil
 {-# OPAQUE execute #-}
 
-executeLane :: Maybe (BitVector XLen) -> IdEx -> (ExMa, Maybe Addr, Maybe BtbWrite)
-executeLane mulDivResult IdEx {..} = (exMa, redirect, btbWrite)
+executeLane :: Maybe (BitVector XLen) -> Decoded -> (Executed, Maybe Addr, Maybe BtbWrite)
+executeLane mulDivResult Decoded {..} = (executed, redirect, btbWrite)
   where
-    exMa = ExMa {exception = exception', ..}
+    executed = Executed {exception = exception', ..}
 
     (op1, op2) = operands ctrl imm rs1Data rs2Data pc
     aluResult = alu ctrl op1 op2
@@ -93,7 +93,7 @@ executeLane mulDivResult IdEx {..} = (exMa, redirect, btbWrite)
     exception' = exception <|> targetException <|> accessException
 
     -- a trap or an mret redirects from Cm instead
-    redirect = orNothing (not (serializing exMa) && nextPc /= predicted pc prediction) nextPc
+    redirect = orNothing (not (serializing executed) && nextPc /= predicted pc prediction) nextPc
 
     btbWrite = guard (isNothing exception') >> train pc prediction (orNothing (nextPc /= pc + 4) nextPc)
 

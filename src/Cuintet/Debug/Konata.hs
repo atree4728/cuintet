@@ -7,7 +7,7 @@ import Clash.Prelude (natToNum)
 import Cuintet.Core (CoreTrace (..))
 import Cuintet.Debug.Show (hex, retireLines)
 import Cuintet.Eei (Addr, FetchWidth, Inst)
-import Cuintet.Pipeline (IfId (..), Retire (..))
+import Cuintet.Pipeline (Fetched (..), Retire (..))
 import Cuintet.Unit.Btb (bankOf)
 import Cuintet.Upto qualified as Upto
 import Data.Foldable (toList)
@@ -25,7 +25,7 @@ data Inflight = Inflight
 data Stage = IF | ID | EX | MA | Cm
   deriving (Eq, Show)
 
--- | Where everything in flight is. IF holds one list per fetch, since a fetch enters the IF-ID buffer whole.
+-- | Where everything in flight is. IF holds one list per fetch, since a fetch enters the fetch buffer whole.
 data Model = Model
   { nextId :: Int
   , commits :: Int
@@ -46,7 +46,7 @@ fetchGroup firstId addr =
   | i <- [0 .. natToNum @FetchWidth - 1 - fromIntegral (bankOf addr)]
   ]
 
--- | What the oldest fetch hands the IF-ID buffer this clock, and the rest of it, cut off by a predicted-taken branch.
+-- | What the oldest fetch hands the fetch buffer this clock, and the rest of it, cut off by a predicted-taken branch.
 handedOver :: Model -> CoreTrace -> ([Inflight], [Inflight])
 handedOver Model {ifQ} CoreTrace {ifIssue}
   | null entries = ([], [])

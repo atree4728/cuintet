@@ -3,7 +3,7 @@ module Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState (..), m
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..))
 import Cuintet.Eei (DivOp (..), MulDivOp (..), MulOp (..), Sign (..), XLen)
-import Cuintet.Pipeline (IdEx (..))
+import Cuintet.Pipeline (Decoded (..))
 import Cuintet.Unit.MulDiv.Div (DivOperands (..), DivResult (..), DivState, divInit, divResult, divStep)
 import Cuintet.Unit.MulDiv.Mul (MulOperands (..), MulResult (..), MulState, mulInit, mulResult, mulStep)
 import Data.Function (applyWhen)
@@ -17,8 +17,8 @@ data MulDivJob = MulDivJob
   }
   deriving (Generic, NFDataX)
 
-mkMulDivJob :: IdEx -> Maybe MulDivJob
-mkMulDivJob IdEx {..}
+mkMulDivJob :: Decoded -> Maybe MulDivJob
+mkMulDivJob Decoded {..}
   | Just mulDivOp <- ctrl.mulDivOp = Just MulDivJob {mulDivOp, isOp32 = ctrl.isOp32, op1 = rs1Data, op2 = rs2Data}
   | otherwise = Nothing
 

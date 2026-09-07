@@ -1,13 +1,7 @@
-module Cuintet.Forwarding (Bypass (..), Forwarding (..), bypass, forwarding) where
+module Cuintet.Forwarding (Forwarding (..), bypass, forwarding) where
 
 import Clash.Prelude
 import Cuintet.Eei (RegAddr, XLen)
-
-data Bypass = Bypass
-  { rd :: RegAddr
-  , value :: Maybe (BitVector XLen)
-  }
-  deriving (Generic, NFDataX)
 
 data Forwarding
   = Idle
