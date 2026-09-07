@@ -56,4 +56,4 @@ runImage budget = P.foldl' step initial . upToEcall . traceImage budget
     step :: Run -> CoreTrace -> Run
     step run tr = P.foldl' commit run {cycles = run.cycles + 1} (catMaybes (toList tr.retired))
       where
-        commit r retire = run {retired = r.retired + 1, regs = writeBack r.regs retire, halted = isEcall retire}
+        commit r retire = r {retired = r.retired + 1, regs = writeBack r.regs retire, halted = isEcall retire}
