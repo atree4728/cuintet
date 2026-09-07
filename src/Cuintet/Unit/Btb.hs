@@ -2,7 +2,7 @@ module Cuintet.Unit.Btb (BtbReq (..), BtbResp (..), BtbWrite (..), Prediction (.
 
 import Clash.Prelude
 import Control.Monad (guard)
-import Cuintet.Eei (Addr, FetchWidth)
+import Cuintet.Eei (Addr, FetchWidth, IssueWidth)
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust)
 
@@ -55,7 +55,7 @@ data BtbWrite = BtbWrite
 data BtbReq = BtbReq
   { lookupAddr :: Addr
   , prefetchAddr :: Addr
-  , write :: Maybe BtbWrite
+  , writes :: Vec IssueWidth (Maybe BtbWrite)
   }
   deriving (Generic, NFDataX)
 
@@ -87,12 +87,13 @@ btb req = BtbResp <$> (lookupPair <$> armed <*> ((.lookupAddr) <$> req) <*> bund
       blockRamPow2
         (repeat Nothing)
         (idxOf . (.prefetchAddr) <$> req)
-        (toWrite i . (.write) <$> req)
+        (toWrite i . (.writes) <$> req)
 
-    toWrite i w = do
-      BtbWrite {..} <- w
-      guard (bankOf pc == i)
+    toWrite i ws = do
+      BtbWrite {..} <- fold (<|>) (inBank i <$> ws)
       pure (idxOf pc, Just (mkBtbEntry pc target hint))
+      where
+        inBank j w = do bw <- w; guard (bankOf bw.pc == j); pure bw
 
     lookupPair ready base = imap (\i e -> hit ready (base .&. complement 0b111 + 4 * numConvert i) e)
     hit ready pc e

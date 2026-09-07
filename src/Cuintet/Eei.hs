@@ -435,4 +435,4 @@ misalignedCause memOp addr = orNothing (not $ aligned width $ laneOffset addr) c
       Store w -> (w, STORE_AMO_ADDRESS_MISALIGNED)
 
 -- | # of superscalar ways
-type IssueWidth = 1
+type IssueWidth = 2

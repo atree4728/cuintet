@@ -2,8 +2,9 @@
 module Cuintet.Core (CoreIn (..), CoreOut (..), CoreTrace (..), core) where
 
 import Clash.Prelude
+import Control.Monad (guard)
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), FetchWidth, IssueWidth, MemReq, MemResp, XLen)
-import Cuintet.Forwarding (forwarding)
+import Cuintet.Forwarding (Forwarding, forwarding)
 import Cuintet.Pipeline (ExMa (..), IdEx (..), IfId (..), IfIdBits, MaCm (..), Retire (..), destReg, hasResult, serializing, srcAddrs)
 import Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit)
 import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
@@ -19,6 +20,7 @@ import Cuintet.Unit.MulDiv (MulDivState)
 import Cuintet.Unit.MulDiv qualified as M
 import Cuintet.Unit.RegFile (RegReq (..), RegResp (..), regFile)
 import Cuintet.Unit.Ring (RingReq (..), RingResp (..), ring)
+import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
 import Cuintet.Util (orNothing)
 import Data.Maybe (isJust)
@@ -56,10 +58,10 @@ initState = CoreState {fetchState = initFetchState, mulDivState = M.Idle, loadSt
 data CoreTrace = CoreTrace
   { fetchStart :: Maybe Addr
   , fetchDone :: Bool
-  , ifIssue :: Maybe IfId
-  , idIssue :: Bool
-  , exIssue :: Bool
-  , maIssue :: Bool
+  , ifIssue :: Upto FetchWidth IfId
+  , idIssue :: Index (IssueWidth + 1)
+  , exIssue :: Index (IssueWidth + 1)
+  , maIssue :: Index (IssueWidth + 1)
   , retired :: Vec IssueWidth (Maybe Retire)
   , flush :: Bool
   }
@@ -84,20 +86,38 @@ core coreIn = coreOut
 -- | One clock of every stage.
 coreT ::
   CoreState ->
-  (CoreIn, RegResp, BtbResp, RingResp IfIdBits IssueWidth IfId, FifoResp IdEx, FifoResp ExMa, FifoResp MaCm) ->
-  (CoreState, (CoreOut, RegReq, BtbReq, RingReq FetchWidth IssueWidth IfId, FifoReq IdEx, FifoReq ExMa, FifoReq MaCm))
+  ( CoreIn
+  , RegResp
+  , BtbResp
+  , RingResp IfIdBits IssueWidth IfId
+  , FifoResp (Upto IssueWidth IdEx)
+  , FifoResp (Upto IssueWidth ExMa)
+  , FifoResp (Upto IssueWidth MaCm)
+  ) ->
+  ( CoreState
+  , ( CoreOut
+    , RegReq
+    , BtbReq
+    , RingReq FetchWidth IssueWidth IfId
+    , FifoReq (Upto IssueWidth IdEx)
+    , FifoReq (Upto IssueWidth ExMa)
+    , FifoReq (Upto IssueWidth MaCm)
+    )
+  )
 coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, ifIdResp, idExResp, exMaResp, maCmResp) =
   (state', (coreOut, regReq, btbReq, ifIdReq, idExReq, exMaReq, maCmReq))
   where
-    serializingInFlight = maybe False serializing exMaResp.rdata || maybe False serializing maCmResp.rdata
+    exHeld = Upto.held idExResp.rdata
+    maHeld = Upto.held exMaResp.rdata
+    cmHeld = Upto.held maCmResp.rdata
 
-    ifIdEntry = Upto.first ifIdResp.rdata
+    serializingInFlight = any serializing (Upto.first maHeld) || any serializing (Upto.first cmHeld)
 
     fetchIn = FetchIn {iResp, buf = ifIdResp, redirect, btbResp}
-    decodeIn = DecodeIn {entry = ifIdEntry, rsData = takeI regResp.rsData, forwards, wready = idExResp.wready, flush}
-    executeIn = ExecuteIn {entry = idExResp.rdata, wready = exMaResp.wready, serializingInFlight}
-    memAccessIn = MemAccessIn {entry = exMaResp.rdata, dResp}
-    commitIn = CommitIn {entry = maCmResp.rdata}
+    decodeIn = DecodeIn {entries = ifIdResp.rdata, rsData = regResp.rsData, forwards, wready = idExResp.wready, flush}
+    executeIn = ExecuteIn {entries = exHeld, wready = exMaResp.wready, serializingInFlight}
+    memAccessIn = MemAccessIn {entries = maHeld, dResp}
+    commitIn = CommitIn {entries = cmHeld}
 
     (fetchState', ifOut) = fetch fetchState fetchIn
     idOut = decode decodeIn
@@ -105,35 +125,43 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, ifIdResp, idExResp, exMaRe
     (loadStoreState', maOut) = memAccess loadStoreState memAccessIn
     (csrFile', cmOut) = commit csrFile commitIn
 
-    forwards = forwarding (destReg =<< idExResp.rdata) fromEx :> forwarding (destReg =<< exMaResp.rdata) fromMa :> Nil
+    forwards = fromEx 1 :> fromEx 0 :> fromMa 1 :> fromMa 0 :> Nil
       where
-        fromEx = do
-          entry <- idExResp.rdata
-          out <- exOut.issue
-          orNothing (hasResult entry) out.wbData
-        fromMa = do
-          entry <- exMaResp.rdata
+        fromEx, fromMa :: Index IssueWidth -> Forwarding
+        exLanes = Upto.toMaybes exHeld
+        maLanes = Upto.toMaybes maHeld
+        fromEx i = forwarding (destReg =<< exLanes !! i) $ do
+          entry <- exLanes !! i
+          guard exOut.issued
+          orNothing (hasResult entry) (exOut.wbData !! i)
+        fromMa i = forwarding (destReg =<< maLanes !! i) $ do
+          entry <- maLanes !! i
           orNothing (hasResult entry) entry.wbData
+
     redirect = cmOut.redirect <|> exOut.redirect
     flush = isJust redirect
 
-    regReq = RegReq {rsAddrs = srcAddrs ifIdEntry ++ srcAddrs Nothing, writes = cmOut.write :> Nothing :> Nil}
-    btbReq = BtbReq {lookupAddr = ifOut.btbLookup, prefetchAddr = ifOut.btbPrefetch, write = exOut.btbWrite}
+    regReq =
+      RegReq
+        { rsAddrs = concatMap srcAddrs (Upto.toMaybes ifIdResp.rdata)
+        , writes = (>>= (.rd)) <$> cmOut.retired
+        }
+    btbReq = BtbReq {lookupAddr = ifOut.btbLookup, prefetchAddr = ifOut.btbPrefetch, writes = exOut.btbWrites}
 
-    ifIdReq = RingReq {wdata = ifOut.issue, pop = if isJust idOut.issue then 1 else 0, flush}
-    idExReq = FifoReq {wdata = idOut.issue, rready = isJust exOut.issue, flush}
-    exMaReq = FifoReq {wdata = exOut.issue, rready = isJust maOut.issue, flush = False}
-    maCmReq = FifoReq {wdata = maOut.issue, rready = True, flush = False}
+    ifIdReq = RingReq {wdata = ifOut.issue, pop = idOut.issue.len, flush}
+    idExReq = FifoReq {wdata = orNothing (idOut.issue.len > 0) idOut.issue, rready = exOut.issued, flush}
+    exMaReq = FifoReq {wdata = orNothing (exOut.issue.len > 0) exOut.issue, rready = maOut.issued, flush = False}
+    maCmReq = FifoReq {wdata = orNothing (maOut.issue.len > 0) maOut.issue, rready = True, flush = False}
 
     coreOut = CoreOut {iReq = ifOut.iReq, dReq = maOut.dReq, retired = cmOut.retired, led = cmOut.led, coreTrace}
     coreTrace =
       CoreTrace
         { fetchStart = if iResp.ready && not flush then (.addr) <$> ifOut.iReq else Nothing
         , fetchDone = isJust fetchState.fetching && isJust iResp.rdata && not flush
-        , ifIssue = if flush then Nothing else Upto.first ifOut.issue
-        , idIssue = isJust idOut.issue
-        , exIssue = isJust exOut.issue
-        , maIssue = isJust maOut.issue
+        , ifIssue = if flush then Upto.none else ifOut.issue
+        , idIssue = idOut.issue.len
+        , exIssue = exOut.issue.len
+        , maIssue = maOut.issue.len
         , retired = cmOut.retired
         , flush
         }

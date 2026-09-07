@@ -3,18 +3,19 @@ module Cuintet.Stage.Decode (decode, DecodeIn (..), DecodeOut (..), immI, immS, 
 
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
-import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), usesRs1, usesRs2)
-import Cuintet.Eei (AluOp, Inst, MemOp (..), Opcode (..), System12 (..), SystemOp (..), XLen, parseBranchOp, parseCsr, parseLoad, parseStore, pattern BREAKPOINT, pattern ENVIRONMENT_CALL_FROM_M_MODE, pattern ILLEGAL_INSTRUCTION)
+import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), isJalr, usesRs1, usesRs2)
+import Cuintet.Eei (AluOp, Inst, IssueWidth, MemOp (..), Opcode (..), System12 (..), SystemOp (..), XLen, parseBranchOp, parseCsr, parseLoad, parseStore, pattern BREAKPOINT, pattern ENVIRONMENT_CALL_FROM_M_MODE, pattern ILLEGAL_INSTRUCTION)
 import Cuintet.Forwarding (Forwarding, bypass)
-import Cuintet.Pipeline (IdEx (..), IfId (..), srcRegs)
+import Cuintet.Pipeline (IdEx (..), IfId (..), destReg, serializing, srcRegs)
+import Cuintet.Upto (Upto (..))
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 
 data DecodeIn = DecodeIn
-  { entry :: Maybe IfId
+  { entries :: Upto IssueWidth IfId
   -- ^ The instruction at the head of the IF-ID FIFO.
-  , rsData :: Vec 2 (BitVector XLen)
-  , forwards :: Vec 2 Forwarding
+  , rsData :: Vec (2 * IssueWidth) (BitVector XLen)
+  , forwards :: Vec (2 * IssueWidth) Forwarding
   -- ^ What each stage downstream will write back but cannot forward yet.
   , wready :: Bool
   -- ^ Whether the ID-EX FIFO can accept a write.
@@ -23,13 +24,42 @@ data DecodeIn = DecodeIn
   }
 
 -- | The instruction handed to EX, absent on a clock ID does not issue.
-newtype DecodeOut = DecodeOut {issue :: Maybe IdEx}
+newtype DecodeOut = DecodeOut {issue :: Upto IssueWidth IdEx}
 
 -- | One clock of ID.
 decode :: DecodeIn -> DecodeOut
-decode DecodeIn {..} = DecodeOut {issue = orNothing issued idEx}
+decode DecodeIn {..} = DecodeOut {issue}
   where
-    IfId {..} = fromMaybe (deepErrorX "decode: IF-ID FIFO is empty") entry
+    ((idEx0, ready0), (idEx1, ready1)) = vecToTuple $ zipWith (decodeLane forwards) entries.elems (unconcat d2 rsData)
+
+    issued0 = entries.len >= 1 && ready0 && wready && not flush
+    issued1 =
+      issued0
+        && entries.len
+        >= 2
+        && ready1
+        && not (serializing idEx0)
+        && not (serializing idEx1)
+        && fitsLane1 idEx1.ctrl
+        && not hasRAW
+    hasRAW = maybe False readRd0 (destReg idEx0)
+      where
+        readRd0 rd = usesRs1 idEx1.ctrl && idEx1.rs1Addr == rd || usesRs2 idEx1.ctrl && idEx1.rs2Addr == rd
+
+    len
+      | issued1 = 2
+      | issued0 = 1
+      | otherwise = 0
+
+    issue = Upto {len, elems = idEx0 :> idEx1 :> Nil}
+{-# OPAQUE decode #-}
+
+fitsLane1 :: InstCtrl -> Bool
+fitsLane1 ctrl = isNothing ctrl.memOp && isNothing ctrl.mulDivOp && isNothing ctrl.systemOp && not (isJalr ctrl)
+
+decodeLane :: Vec (2 * IssueWidth) Forwarding -> IfId -> Vec 2 (BitVector XLen) -> (IdEx, Bool)
+decodeLane forwards IfId {..} rsData = (IdEx {..}, isJust operands)
+  where
     decoded = instDecode instBits
     (ctrl, imm) = fromMaybe (trapCtrl, 0) decoded
     (rs1Addr, rs2Addr) = srcRegs instBits
@@ -41,16 +71,11 @@ decode DecodeIn {..} = DecodeOut {issue = orNothing issued idEx}
 
     (rs1Data, rs2Data) = fromMaybe (rs1Read, rs2Read) operands
 
-    issued = isJust entry && isJust operands && wready && not flush
-
     exception
       | isNothing decoded = Just (ILLEGAL_INSTRUCTION, zeroExtend instBits)
       | Just SysEcall <- ctrl.systemOp = Just (ENVIRONMENT_CALL_FROM_M_MODE, 0)
       | Just SysEbreak <- ctrl.systemOp = Just (BREAKPOINT, pack pc)
       | otherwise = Nothing
-
-    idEx = IdEx {..}
-{-# OPAQUE decode #-}
 
 immI, immS, immB, immU, immJ :: Inst -> BitVector XLen
 immI instBits = signExtend $ slice d31 d20 instBits

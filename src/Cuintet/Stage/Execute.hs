@@ -2,46 +2,75 @@
 module Cuintet.Stage.Execute (execute, ExecuteIn (..), ExecuteOut (..)) where
 
 import Clash.Prelude
+import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
 import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), isBranchOp)
-import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), SystemOp (..), XLen, misalignedCause, pattern INSTRUCTION_ADDRESS_MISALIGNED)
-import Cuintet.Pipeline (ExMa (..), IdEx (..))
+import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), IssueWidth, XLen, misalignedCause, pattern INSTRUCTION_ADDRESS_MISALIGNED)
+import Cuintet.Pipeline (ExMa (..), IdEx (..), serializing)
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
 import Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState, mkMulDivJob, mulDivStep)
+import Cuintet.Upto (Upto (..))
+import Cuintet.Upto qualified as Upto
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 
 data ExecuteIn = ExecuteIn
-  { entry :: Maybe IdEx
-  -- ^ The instruction at the head of the ID-EX FIFO.
+  { entries :: Upto IssueWidth IdEx
   , wready :: Bool
-  -- ^ Whether the EX-MA FIFO can accept a write.
   , serializingInFlight :: Bool
   }
 
 data ExecuteOut = ExecuteOut
-  { issue :: Maybe ExMa
-  -- ^ The instruction handed to MA.
+  { issue :: Upto IssueWidth ExMa
+  -- ^ The group handed to MA, lane 1 dropped when it turned out to be down the wrong path.
+  , issued :: Bool
+  -- ^ Whether the group leaves EX this clock, which 'redirect' must not feed into.
+  , wbData :: Vec IssueWidth (BitVector XLen)
+  -- ^ For the broadcast, so before the squash.
   , redirect :: Maybe Addr
-  , btbWrite :: Maybe BtbWrite
+  , btbWrites :: Vec IssueWidth (Maybe BtbWrite)
   }
 
 -- | One clock of EX. A multiply or divide sits here for several of them; it leaves on the one the unit produces its result.
 execute :: MulDivState -> ExecuteIn -> (MulDivState, ExecuteOut)
-execute mulDivState ExecuteIn {..} = (mulDivState', exOut)
+execute mulDivState ExecuteIn {..} = (mulDivState', ExecuteOut {..})
   where
-    (mulDivState', mulDivResp) = mulDivStep mulDivState MulDivReq {job = mkMulDivJob =<< entry, wready = wready && not serializingInFlight}
+    (mulDivState', mulDivResp) = mulDivStep mulDivState MulDivReq {job = mkMulDivJob =<< Upto.first entries, wready = wready && not serializingInFlight}
 
-    issued = isJust entry && wready && not serializingInFlight && not mulDivResp.stall
-    IdEx {..} = fromMaybe (deepErrorX "execute: ID-EX FIFO is empty") entry
-    exOut = ExecuteOut {issue = orNothing issued ExMa {exception = exception', ..}, ..}
+    issued = entries.len > 0 && wready && not serializingInFlight && not mulDivResp.stall
+
+    ((exMa0, redirect0, btbWrite0), (exMa1, redirect1, btbWrite1)) =
+      vecToTuple $ zipWith executeLane (mulDivResp.result :> Nothing :> Nil) entries.elems
+
+    squash1 = isJust redirect0 || serializing exMa0
+
+    len
+      | not issued = 0
+      | entries.len == 2 && not squash1 = 2
+      | otherwise = 1
+
+    issue = Upto {len, elems = exMa0 :> exMa1 :> Nil}
+    wbData = (.wbData) <$> issue.elems
+
+    redirect
+      | len == 2 = redirect0 <|> redirect1
+      | len == 1 = redirect0
+      | otherwise = Nothing
+
+    btbWrites = (guard (len >= 1) >> btbWrite0) :> (guard (len == 2) >> btbWrite1) :> Nil
+{-# OPAQUE execute #-}
+
+executeLane :: Maybe (BitVector XLen) -> IdEx -> (ExMa, Maybe Addr, Maybe BtbWrite)
+executeLane mulDivResult IdEx {..} = (exMa, redirect, btbWrite)
+  where
+    exMa = ExMa {exception = exception', ..}
 
     (op1, op2) = operands ctrl imm rs1Data rs2Data pc
     aluResult = alu ctrl op1 op2
     branchTaken = maybe False (\cond -> branchUnit cond op1 op2) ctrl.branchOp
 
     wbData
-      | isJust ctrl.mulDivOp = fromMaybe (deepErrorX "execute: muldiv committed without a result") mulDivResp.result
+      | isJust ctrl.mulDivOp = fromMaybe (deepErrorX "execute: muldiv committed without a result") mulDivResult
       | ctrl.isLui = imm
       | ctrl.isJump = bitCoerce (pc + 4)
       | otherwise = aluResult
@@ -63,12 +92,10 @@ execute mulDivState ExecuteIn {..} = (mulDivState', exOut)
 
     exception' = exception <|> targetException <|> accessException
 
-    isSerial = isJust exception' || ctrl.systemOp == Just SysMret
+    -- a trap or an mret redirects from Cm instead
+    redirect = orNothing (not (serializing exMa) && nextPc /= predicted pc prediction) nextPc
 
-    redirect = orNothing (issued && not isSerial && nextPc /= predicted pc prediction) nextPc
-
-    btbWrite = guard (issued && isNothing exception') >> train pc prediction (orNothing (nextPc /= pc + 4) nextPc)
-{-# OPAQUE execute #-}
+    btbWrite = guard (isNothing exception') >> train pc prediction (orNothing (nextPc /= pc + 4) nextPc)
 
 -- | Extract the two operands according to the instruction form.
 operands ::

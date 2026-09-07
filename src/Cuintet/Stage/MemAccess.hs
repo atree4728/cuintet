@@ -1,54 +1,55 @@
--- | MA: the memory access, the CSR access, and the redirect that resolves control flow.
 module Cuintet.Stage.MemAccess (memAccess, MemAccessIn (..), MemAccessOut (..)) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), isLoad)
-import Cuintet.Eei (MemReq, MemResp)
+import Cuintet.Eei (IssueWidth, MemReq, MemResp, XLen)
 import Cuintet.Pipeline (ExMa (..), MaCm (..))
 import Cuintet.Unit.LoadStore (LoadStoreJob (..), LoadStoreReq (..), LoadStoreResp (..), LoadStoreState (..), loadStoreStep)
-import Cuintet.Util (orNothing)
-import Data.Maybe (fromMaybe, isJust, isNothing)
+import Cuintet.Upto (Upto (..))
+import Cuintet.Upto qualified as Upto
+import Data.Maybe (fromMaybe, isNothing)
 
 data MemAccessIn = MemAccessIn
-  { entry :: Maybe ExMa
-  -- ^ The instruction at the head of the EX-MA FIFO.
+  { entries :: Upto IssueWidth ExMa
   , dResp :: MemResp
-  -- ^ Response to a load\/store request issued on an earlier clock.
   }
 
 data MemAccessOut = MemAccessOut
-  { issue :: Maybe MaCm
-  -- ^ The instruction handed to WB, present only on the clock it commits.
+  { issue :: Upto IssueWidth MaCm
+  , issued :: Bool
   , dReq :: Maybe MemReq
-  -- ^ Load\/store request, driven from 'LoadStoreState' and never from @dResp@.
   }
 
--- | One clock of MA.
+-- | One clock of MA. The group stalls as a whole; no lane is ever dropped here.
 memAccess :: LoadStoreState -> MemAccessIn -> (LoadStoreState, MemAccessOut)
-memAccess loadStoreState MemAccessIn {..} =
-  (loadStoreState', MemAccessOut {issue = orNothing commit maWb, dReq = loadStoreResp.memReq})
+memAccess loadStoreState MemAccessIn {..} = (loadStoreState', MemAccessOut {..})
   where
-    valid = isJust entry
-    ExMa {..} = fromMaybe (deepErrorX "memAccess: EX-MA FIFO is empty") entry
-
     (loadStoreState', loadStoreResp) = loadStoreStep loadStoreState LoadStoreReq {job, memResp = dResp}
 
-    job
-      | valid
-      , isNothing exception
+    job = mkJob =<< Upto.first entries
+    mkJob ExMa {..}
+      | isNothing exception
       , Just memOp <- ctrl.memOp =
           Just LoadStoreJob {memOp, addr = bitCoerce aluResult, wdata = rs2Data}
       | otherwise = Nothing
 
-    commit = valid && not loadStoreResp.stall
+    issued = entries.len > 0 && not loadStoreResp.stall
+    dReq = loadStoreResp.memReq
 
-    maWb =
-      MaCm
-        { wbData =
-            if isLoad ctrl
-              then fromMaybe (deepErrorX "memAccess: load committed without data") loadStoreResp.result
-              else wbData
-        , completed = loadStoreResp.completed
-        , ..
-        }
+    issue = Upto {len = if issued then entries.len else 0, elems}
+    elems =
+      memAccessLane loadStoreResp.result loadStoreResp.completed (entries.elems !! (0 :: Index IssueWidth))
+        :> memAccessLane Nothing Nothing (entries.elems !! (1 :: Index IssueWidth))
+        :> Nil
 {-# OPAQUE memAccess #-}
+
+memAccessLane :: Maybe (BitVector XLen) -> Maybe MemReq -> ExMa -> MaCm
+memAccessLane result completed ExMa {..} =
+  MaCm
+    { wbData =
+        if isLoad ctrl
+          then fromMaybe (deepErrorX "memAccess: load committed without data") result
+          else wbData
+    , completed
+    , ..
+    }

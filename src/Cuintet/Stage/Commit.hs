@@ -3,47 +3,47 @@ module Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..))
-import Cuintet.Eei (Addr, IssueWidth, RegAddr, SystemOp (..), XLen)
+import Cuintet.Eei (Addr, IssueWidth, SystemOp (..), XLen)
 import Cuintet.Pipeline (MaCm (..), Retire (..), destReg)
 import Cuintet.Unit.Csr (AccessSpec (..), CsrFile (..), CsrReq (..), CsrResp (..), TrapSpec (..), csrStep)
-import Cuintet.Util (orNothing)
-import Data.Maybe (fromMaybe, isJust)
+import Cuintet.Upto (Upto (..), toMaybes)
+import Cuintet.Upto qualified as Upto
+import Data.Maybe (fromMaybe)
 
-newtype CommitIn = CommitIn {entry :: Maybe MaCm}
+newtype CommitIn = CommitIn {entries :: Upto IssueWidth MaCm}
 
 data CommitOut = CommitOut
   { retired :: Vec IssueWidth (Maybe Retire)
   , redirect :: Maybe Addr
-  , write :: Maybe (RegAddr, BitVector XLen)
   , led :: BitVector XLen
   }
 
+-- | One clock of Cm. A trap is always lane 0's, since EX cancels the younger lanes of a group that traps.
 commit :: CsrFile -> CommitIn -> (CsrFile, CommitOut)
-commit csrFile CommitIn {..} = (csrFile', commitOut)
+commit csrFile CommitIn {..} = (csrFile', CommitOut {retired, redirect, led = csrFile.led})
   where
-    MaCm {..} = fromMaybe (deepErrorX "commit: MA-Cm FIFO is empty") entry
-    commitOut = CommitOut {retired = retired :> Nil, redirect, write = retired >>= (.rd), led = csrFile.led}
+    (csrFile', csrResp) = csrStep csrFile (mkCsrReq =<< Upto.first entries)
 
-    valid = isJust entry
-    (csrFile', csrResp) = csrStep csrFile csrReq
-    csrReq
-      | not valid = Nothing
-      | Just (cause, value) <- exception = Just $ TrapEnter TrapSpec {epc = pc, ..}
-      | Just (SysCsr (src, op, csrAddr)) <- ctrl.systemOp =
-          Just $ CsrAccess AccessSpec {csrAddr, op, src, rs1Addr, rs1Data}
-      | Just SysMret <- ctrl.systemOp = Just TrapReturn
-      | otherwise = Nothing
-
-    wbData' = case csrResp of Just (ReadValue v) -> v; _ -> wbData
+    readValue = case csrResp of Just (ReadValue v) -> Just v; _ -> Nothing
     redirect = case csrResp of Just (Redirect v) -> Just v; _ -> Nothing
 
-    retired =
-      orNothing valid
-        $ Retire
-          { pc
-          , instBits
-          , rd = (,wbData') <$> (destReg =<< entry)
-          , mem = completed
-          , trap = fst <$> exception
-          }
+    retired = zipWith (\v e -> mkRetire v <$> e) (readValue :> Nothing :> Nil) (toMaybes entries)
 {-# OPAQUE commit #-}
+
+mkCsrReq :: MaCm -> Maybe CsrReq
+mkCsrReq MaCm {..}
+  | Just (cause, value) <- exception = Just $ TrapEnter TrapSpec {epc = pc, ..}
+  | Just (SysCsr (src, op, csrAddr)) <- ctrl.systemOp = Just $ CsrAccess AccessSpec {csrAddr, op, src, rs1Addr, rs1Data}
+  | Just SysMret <- ctrl.systemOp = Just TrapReturn
+  | otherwise = Nothing
+
+-- | The retire log of one lane. The CSR read value, which only lane 0 can carry, arrives too late for @wbData@.
+mkRetire :: Maybe (BitVector XLen) -> MaCm -> Retire
+mkRetire csrValue entry@MaCm {..} =
+  Retire
+    { pc
+    , instBits
+    , rd = (,fromMaybe wbData csrValue) <$> destReg entry
+    , mem = completed
+    , trap = fst <$> exception
+    }

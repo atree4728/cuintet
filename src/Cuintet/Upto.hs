@@ -1,7 +1,8 @@
-module Cuintet.Upto (Upto (..), none, toMaybes, first) where
+module Cuintet.Upto (Upto (..), none, toMaybes, first, held) where
 
 import Clash.Prelude hiding (toList)
 import Cuintet.Util (orNothing)
+import Data.Maybe (fromMaybe)
 
 data Upto n a = Upto
   { len :: Index (n + 1)
@@ -17,3 +18,6 @@ toMaybes Upto {..} = imap (\i e -> orNothing (numConvert i < len) e) elems
 
 first :: (KnownNat n) => Upto (n + 1) a -> Maybe a
 first Upto {..} = orNothing (len > 0) (head elems)
+
+held :: (KnownNat n, NFDataX a) => Maybe (Upto n a) -> Upto n a
+held = fromMaybe none

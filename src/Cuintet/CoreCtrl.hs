@@ -9,6 +9,7 @@ module Cuintet.CoreCtrl (
   isCsrRead,
   usesRs1,
   usesRs2,
+  isJalr,
 ) where
 
 import Clash.Prelude
@@ -74,6 +75,9 @@ isBranchOp InstCtrl {branchOp} = isJust branchOp
 isCsrRead :: InstCtrl -> Bool
 isCsrRead InstCtrl {systemOp = Just (SysCsr _)} = True
 isCsrRead _ = False
+
+isJalr :: InstCtrl -> Bool
+isJalr InstCtrl {isJump, format} = isJump && format == IType
 
 -- | Whether the instruction form actually reads that source register.
 usesRs1, usesRs2 :: InstCtrl -> Bool
