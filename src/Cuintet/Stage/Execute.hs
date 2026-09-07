@@ -4,7 +4,7 @@ module Cuintet.Stage.Execute (execute, ExecuteIn (..), ExecuteOut (..)) where
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
-import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), isBranchOp)
+import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..))
 import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), IssueWidth, XLen, misalignedCause, pattern INSTRUCTION_ADDRESS_MISALIGNED)
 import Cuintet.Pipeline (ExMa (..), IdEx (..), serializing)
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
@@ -77,7 +77,7 @@ executeLane mulDivResult IdEx {..} = (exMa, redirect, btbWrite)
 
     nextPc
       | ctrl.isJump = unpack (aluResult .&. complement 1)
-      | isBranchOp ctrl && branchTaken = pc + numConvert imm
+      | branchTaken = pc + numConvert imm
       | otherwise = pc + 4
 
     targetException =

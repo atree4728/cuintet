@@ -1,11 +1,7 @@
 module Cuintet.CoreCtrl (
   InstFormat (..),
   InstCtrl (..),
-  formatCode,
-  isMemOp,
   isLoad,
-  isStore,
-  isBranchOp,
   isCsrRead,
   usesRs1,
   usesRs2,
@@ -14,7 +10,6 @@ module Cuintet.CoreCtrl (
 
 import Clash.Prelude
 import Cuintet.Eei (AluOp, BranchOp, MemOp (..), MulDivOp, SystemOp (..))
-import Data.Maybe (isJust)
 
 -- | RISC-V instruction format.
 data InstFormat
@@ -25,14 +20,6 @@ data InstFormat
   | UType
   | JType
   deriving (Generic, NFDataX, Eq)
-
-formatCode :: InstFormat -> BitVector 6
-formatCode RType = 0b000001
-formatCode IType = 0b000010
-formatCode SType = 0b000100
-formatCode BType = 0b001000
-formatCode UType = 0b010000
-formatCode JType = 0b100000
 
 -- | Control flags of instruction.
 data InstCtrl = InstCtrl
@@ -58,19 +45,9 @@ data InstCtrl = InstCtrl
   }
   deriving (Generic, NFDataX)
 
-isMemOp :: InstCtrl -> Bool
-isMemOp InstCtrl {memOp} = isJust memOp
-
 isLoad :: InstCtrl -> Bool
 isLoad InstCtrl {memOp = Just (Load _ _)} = True
 isLoad _ = False
-
-isStore :: InstCtrl -> Bool
-isStore InstCtrl {memOp = Just (Store _)} = True
-isStore _ = False
-
-isBranchOp :: InstCtrl -> Bool
-isBranchOp InstCtrl {branchOp} = isJust branchOp
 
 isCsrRead :: InstCtrl -> Bool
 isCsrRead InstCtrl {systemOp = Just (SysCsr _)} = True
