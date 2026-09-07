@@ -6,7 +6,7 @@ import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
 import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..))
 import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), IssueWidth, XLen, misalignedCause, pattern INSTRUCTION_ADDRESS_MISALIGNED)
-import Cuintet.Pipeline (Decoded (..), Executed (..), serializing)
+import Cuintet.Pipeline (Executed (..), Ready (..), serializing)
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
 import Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState, mkMulDivJob, mulDivStep)
 import Cuintet.Upto (Upto (..))
@@ -15,7 +15,7 @@ import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 
 data ExecuteIn = ExecuteIn
-  { entries :: Upto IssueWidth Decoded
+  { entries :: Upto IssueWidth Ready
   , wready :: Bool
   , serializingInFlight :: Bool
   }
@@ -60,8 +60,8 @@ execute mulDivState ExecuteIn {..} = (mulDivState', ExecuteOut {..})
     btbWrites = (guard issued >> btbWrite0) :> (guard (issued && entries.len == 2) >> btbWrite1) :> Nil
 {-# OPAQUE execute #-}
 
-executeLane :: Maybe (BitVector XLen) -> Decoded -> (Executed, Maybe Addr, Maybe BtbWrite)
-executeLane mulDivResult Decoded {..} = (executed, redirect, btbWrite)
+executeLane :: Maybe (BitVector XLen) -> Ready -> (Executed, Maybe Addr, Maybe BtbWrite)
+executeLane mulDivResult Ready {..} = (executed, redirect, btbWrite)
   where
     executed = Executed {exception = exception', ..}
 

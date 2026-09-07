@@ -82,6 +82,7 @@ library
     Cuintet.Stage.Execute
     Cuintet.Stage.Fetch
     Cuintet.Stage.MemAccess
+    Cuintet.Stage.RegRead
     Cuintet.Top.TangNano9k
     Cuintet.Top.Timing
     Cuintet.Unit.Btb

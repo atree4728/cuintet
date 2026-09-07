@@ -5,22 +5,15 @@ import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), isJalr, usesRs1, usesRs2)
 import Cuintet.Eei (AluOp, Inst, IssueWidth, MemOp (..), Opcode (..), System12 (..), SystemOp (..), XLen, parseBranchOp, parseCsr, parseLoad, parseStore, pattern BREAKPOINT, pattern ENVIRONMENT_CALL_FROM_M_MODE, pattern ILLEGAL_INSTRUCTION)
-import Cuintet.Forwarding (Forwarding, bypass)
 import Cuintet.Pipeline (Decoded (..), Fetched (..), destReg, serializing, srcRegs)
 import Cuintet.Upto (Upto (..))
 import Cuintet.Util (orNothing)
-import Data.Maybe (fromMaybe, isJust, isNothing)
+import Data.Maybe (fromMaybe, isNothing)
 
 data DecodeIn = DecodeIn
   { entries :: Upto IssueWidth Fetched
-  -- ^ The instruction at the head of the fetch buffer.
-  , rsData :: Vec (2 * IssueWidth) (BitVector XLen)
-  , forwards :: Vec (2 * IssueWidth) Forwarding
-  -- ^ What each stage downstream will write back but cannot forward yet.
   , wready :: Bool
-  -- ^ Whether the 'Decoded' FIFO can accept a write.
-  , flush :: Bool
-  -- ^ Whether MA is redirecting IF this clock.
+  , stall :: Bool
   }
 
 -- | The instruction handed to EX, absent on a clock ID does not issue.
@@ -30,14 +23,13 @@ newtype DecodeOut = DecodeOut {issue :: Upto IssueWidth Decoded}
 decode :: DecodeIn -> DecodeOut
 decode DecodeIn {..} = DecodeOut {issue}
   where
-    ((decoded0, ready0), (decoded1, ready1)) = vecToTuple $ zipWith (decodeLane forwards) entries.elems (unconcat d2 rsData)
+    (decoded0, decoded1) = vecToTuple $ decodeLane <$> entries.elems
 
-    issued0 = entries.len >= 1 && ready0 && wready && not flush
+    issued0 = entries.len >= 1 && wready && not stall
     issued1 =
       issued0
         && entries.len
         >= 2
-        && ready1
         && not (serializing decoded0)
         && not (serializing decoded1)
         && fitsLane1 decoded1.ctrl
@@ -57,19 +49,13 @@ decode DecodeIn {..} = DecodeOut {issue}
 fitsLane1 :: InstCtrl -> Bool
 fitsLane1 ctrl = isNothing ctrl.memOp && isNothing ctrl.mulDivOp && isNothing ctrl.systemOp && not (isJalr ctrl)
 
-decodeLane :: Vec (2 * IssueWidth) Forwarding -> Fetched -> Vec 2 (BitVector XLen) -> (Decoded, Bool)
-decodeLane forwards Fetched {..} rsData = (Decoded {..}, isJust operands)
+decodeLane :: Fetched -> Decoded
+decodeLane Fetched {..} = Decoded {..}
   where
     decoded = instDecode instBits
     (ctrl, imm) = fromMaybe (trapCtrl, 0) decoded
     (rs1Addr, rs2Addr) = srcRegs instBits
     rdAddr = unpack $ slice d11 d7 instBits
-    (rs1Read, rs2Read) = vecToTuple rsData
-
-    operands = (,) <$> resolve (usesRs1 ctrl) rs1Addr rs1Read <*> resolve (usesRs2 ctrl) rs2Addr rs2Read
-    resolve uses rs regRead = if uses then bypass forwards rs regRead else Just regRead
-
-    (rs1Data, rs2Data) = fromMaybe (rs1Read, rs2Read) operands
 
     exception
       | isNothing decoded = Just (ILLEGAL_INSTRUCTION, zeroExtend instBits)

@@ -22,7 +22,7 @@ data Inflight = Inflight
   , instBits :: Maybe Inst
   }
 
-data Stage = IF | ID | EX | MA | Cm
+data Stage = IF | ID | RR | EX | MA | Cm
   deriving (Eq, Show)
 
 -- | Where everything in flight is. IF holds one list per fetch, since a fetch enters the fetch buffer whole.
@@ -31,13 +31,14 @@ data Model = Model
   , commits :: Int
   , ifQ :: [[Inflight]]
   , idQ :: [Inflight]
+  , rrQ :: [Inflight]
   , exQ :: [Inflight]
   , maQ :: [Inflight]
   , cmQ :: [Inflight]
   }
 
 initModel :: Model
-initModel = Model {nextId = 0, commits = 0, ifQ = [], idQ = [], exQ = [], maQ = [], cmQ = []}
+initModel = Model {nextId = 0, commits = 0, ifQ = [], idQ = [], rrQ = [], exQ = [], maQ = [], cmQ = []}
 
 -- | The instructions a fetch brings back: the slots of the bus word from its address up, as 'Cuintet.Eei.instSlice' cuts them.
 fetchGroup :: Int -> Addr -> [Inflight]
@@ -68,7 +69,7 @@ move push src pop cur
 modelStep :: Model -> CoreTrace -> Model
 modelStep model@Model {..} trace@CoreTrace {..} = applyWhen flush flushed moved
   where
-    flushed x = x {ifQ = [], idQ = [], exQ = []}
+    flushed x = x {ifQ = [], idQ = [], rrQ = [], exQ = []}
 
     retires = length (catMaybes (toList retired))
     entered = fst (handedOver model trace)
@@ -80,7 +81,8 @@ modelStep model@Model {..} trace@CoreTrace {..} = applyWhen flush flushed moved
         , commits = commits + retires
         , ifQ = (if null entered then ifQ else drop 1 ifQ) <> started
         , idQ = drop (count idIssue) idQ <> entered
-        , exQ = move (count idIssue) idQ (count exIssue) exQ
+        , rrQ = move (count idIssue) idQ (count rrIssue) rrQ
+        , exQ = move (count rrIssue) rrQ (count exIssue) exQ
         , maQ = move (count exIssue) exQ (count maIssue) maQ
         , cmQ = move (count maIssue) maQ retires cmQ
         }
@@ -89,7 +91,7 @@ count :: (Integral a) => a -> Int
 count = fromIntegral
 
 stages :: Model -> [(Inflight, Stage)]
-stages Model {..} = concat [slot IF (concat ifQ), slot ID idQ, slot EX exQ, slot MA maQ, slot Cm cmQ]
+stages Model {..} = concat [slot IF (concat ifQ), slot ID idQ, slot RR rrQ, slot EX exQ, slot MA maQ, slot Cm cmQ]
   where
     slot s is = [(i, s) | i <- is]
 
@@ -118,7 +120,7 @@ clockLines trace@CoreTrace {..} was cur@Model {..} = concatMap entering (stages 
     lost = snd (handedOver cur trace) <> squashed <> flushedOut
       where
         squashed = if flush || count exIssue > 0 then drop (count exIssue) exQ else []
-        flushedOut = if flush then idQ <> concat ifQ else []
+        flushedOut = if flush then rrQ <> idQ <> concat ifQ else []
 
     lostLines i = [printf "L\t%d\t0\t%s" i.instId (label i.pc i.instBits), printf "R\t%d\t%d\t1" i.instId i.instId]
 

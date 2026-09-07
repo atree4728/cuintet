@@ -5,12 +5,13 @@ import Clash.Prelude
 import Control.Monad (guard)
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), FetchWidth, IssueWidth, MemReq, MemResp, XLen)
 import Cuintet.Forwarding (Forwarding, forwarding)
-import Cuintet.Pipeline (Completed (..), Decoded (..), Executed (..), FetchBufBits, Fetched (..), Retire (..), destReg, hasResult, serializing, srcAddrs)
+import Cuintet.Pipeline (Completed (..), Decoded (..), Executed (..), FetchBufBits, Fetched (..), Ready (..), Retire (..), destReg, hasResult, serializing, srcAddrs)
 import Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit)
 import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
 import Cuintet.Stage.Execute (ExecuteIn (..), ExecuteOut (..), execute)
 import Cuintet.Stage.Fetch (FetchIn (..), FetchOut (..), FetchState (..), fetch, initFetchState)
 import Cuintet.Stage.MemAccess (MemAccessIn (..), MemAccessOut (..), memAccess)
+import Cuintet.Stage.RegRead (RegReadIn (..), RegReadOut (..), regRead)
 import Cuintet.Unit.Btb (BtbReq (..), BtbResp, btb)
 import Cuintet.Unit.Csr (CsrFile, initCsrFile)
 import Cuintet.Unit.Fifo (FifoReq (..), FifoResp (..), fifo)
@@ -59,6 +60,7 @@ data CoreTrace = CoreTrace
   { fetchStart :: Maybe Addr
   , ifIssue :: Upto FetchWidth Fetched
   , idIssue :: Index (IssueWidth + 1)
+  , rrIssue :: Index (IssueWidth + 1)
   , exIssue :: Index (IssueWidth + 1)
   , maIssue :: Index (IssueWidth + 1)
   , retired :: Vec IssueWidth (Maybe Retire)
@@ -73,12 +75,13 @@ core ::
   Signal dom CoreOut
 core coreIn = coreOut
   where
-    (coreOut, regReq, btbReq, fetchedReq, decodedReq, executedReq, completedReq) =
-      mealyB coreT initState (coreIn, regResp, btbResp, fetchedResp, decodedResp, executedResp, completedResp)
+    (coreOut, regReq, btbReq, fetchedReq, decodedReq, readyReq, executedReq, completedReq) =
+      mealyB coreT initState (coreIn, regResp, btbResp, fetchedResp, decodedResp, readyResp, executedResp, completedResp)
     btbResp = btb btbReq
     regResp = regFile regReq
     fetchedResp = ring (SNat @FetchBufBits) fetchedReq
     decodedResp = fifo decodedReq
+    readyResp = fifo readyReq
     executedResp = fifo executedReq
     completedResp = fifo completedReq
 
@@ -90,6 +93,7 @@ coreT ::
   , BtbResp
   , RingResp FetchBufBits IssueWidth Fetched
   , FifoResp IssueWidth Decoded
+  , FifoResp IssueWidth Ready
   , FifoResp IssueWidth Executed
   , FifoResp IssueWidth Completed
   ) ->
@@ -99,23 +103,26 @@ coreT ::
     , BtbReq
     , RingReq FetchWidth IssueWidth Fetched
     , FifoReq IssueWidth Decoded
+    , FifoReq IssueWidth Ready
     , FifoReq IssueWidth Executed
     , FifoReq IssueWidth Completed
     )
   )
-coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, fetchedResp, decodedResp, executedResp, completedResp) =
-  (state', (coreOut, regReq, btbReq, fetchedReq, decodedReq, executedReq, completedReq))
+coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, fetchedResp, decodedResp, readyResp, executedResp, completedResp) =
+  (state', (coreOut, regReq, btbReq, fetchedReq, decodedReq, readyReq, executedReq, completedReq))
   where
     serializingInFlight = any serializing (Upto.head executedResp.rdata) || any serializing (Upto.head completedResp.rdata)
 
     fetchIn = FetchIn {iResp, buf = fetchedResp, redirect, btbResp}
-    decodeIn = DecodeIn {entries = fetchedResp.rdata, rsData = regResp.rsData, forwards, wready = decodedResp.wready, flush}
-    executeIn = ExecuteIn {entries = decodedResp.rdata, wready = executedResp.wready, serializingInFlight}
+    decodeIn = DecodeIn {entries = fetchedResp.rdata, wready = decodedResp.wready, stall = flush}
+    regReadIn = RegReadIn {entries = decodedResp.rdata, rsData = regResp.rsData, forwards, wready = readyResp.wready}
+    executeIn = ExecuteIn {entries = readyResp.rdata, wready = executedResp.wready, serializingInFlight}
     memAccessIn = MemAccessIn {entries = executedResp.rdata, dResp}
     commitIn = CommitIn {entries = completedResp.rdata}
 
     (fetchState', ifOut) = fetch fetchState fetchIn
     idOut = decode decodeIn
+    rrOut = regRead regReadIn
     (mulDivState', exOut) = execute mulDivState executeIn
     (loadStoreState', maOut) = memAccess loadStoreState memAccessIn
     (csrFile', cmOut) = commit csrFile commitIn
@@ -123,7 +130,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, fetchedResp, decodedResp, 
     forwards = fromEx 1 :> fromEx 0 :> fromMa 1 :> fromMa 0 :> Nil
       where
         fromEx, fromMa :: Index IssueWidth -> Forwarding
-        exLanes = Upto.toMaybes decodedResp.rdata
+        exLanes = Upto.toMaybes readyResp.rdata
         maLanes = Upto.toMaybes executedResp.rdata
         fromEx i = forwarding (destReg =<< exLanes !! i) $ do
           entry <- exLanes !! i
@@ -138,13 +145,14 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, fetchedResp, decodedResp, 
 
     regReq =
       RegReq
-        { rsAddrs = concatMap srcAddrs (Upto.toMaybes fetchedResp.rdata)
+        { rsAddrs = concatMap srcAddrs (Upto.toMaybes decodedResp.rdata)
         , writes = (>>= (.rd)) <$> cmOut.retired
         }
     btbReq = BtbReq {lookupAddr = ifOut.btbLookup, prefetchAddr = ifOut.btbPrefetch, writes = exOut.btbWrites}
 
     fetchedReq = RingReq {wdata = ifOut.issue, pop = idOut.issue.len, flush}
-    decodedReq = FifoReq {wdata = idOut.issue, rready = exOut.issued, flush}
+    decodedReq = FifoReq {wdata = idOut.issue, rready = rrOut.issue.len > 0, flush}
+    readyReq = FifoReq {wdata = rrOut.issue, rready = exOut.issued, flush}
     executedReq = FifoReq {wdata = exOut.issue, rready = maOut.issued, flush = False}
     completedReq = FifoReq {wdata = maOut.issue, rready = True, flush = False}
 
@@ -154,6 +162,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, fetchedResp, decodedResp, 
         { fetchStart = if iResp.ready && not flush then (.addr) <$> ifOut.iReq else Nothing
         , ifIssue = if flush then Upto.empty else ifOut.issue
         , idIssue = idOut.issue.len
+        , rrIssue = rrOut.issue.len
         , exIssue = exOut.issue.len
         , maIssue = maOut.issue.len
         , retired = cmOut.retired
