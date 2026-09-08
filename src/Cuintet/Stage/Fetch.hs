@@ -9,7 +9,7 @@ import Cuintet.Unit.Ring (RingResp (..))
 import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
 import Cuintet.Util (orNothing)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 
 -- | A fetch in flight: the address, and what the BTB said about it at the time.
 data Fetching = Fetching
@@ -69,8 +69,8 @@ fetch FetchState {..} FetchIn {..} =
   )
   where
     room = buf.free >= numConvert staged.len + natToNum @FetchWidth
-    iReq = orNothing room BusReq {addr = next, wdata = Nothing}
-    accepted = room && iResp.ready
+    iReq = orNothing (room && isNothing restart) BusReq {addr = next, wdata = Nothing}
+    accepted = isJust iReq && iResp.ready
 
     next'
       | Just target <- restart = target
@@ -78,7 +78,7 @@ fetch FetchState {..} FetchIn {..} =
       | otherwise = next
 
     fetching'
-      | isJust redirect || isJust restart = Nothing
+      | isJust redirect = Nothing
       | accepted = Just Fetching {pc = next, predictions = aligned}
       | otherwise = fetching
 

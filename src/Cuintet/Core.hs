@@ -168,7 +168,8 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, fetchedResp, decodedResp, 
     coreOut = CoreOut {iReq = ifOut.iReq, dReq = maOut.dReq, retired = cmOut.retired, led = cmOut.led, coreTrace}
     coreTrace =
       CoreTrace
-        { fetchStart = if iResp.ready && not flush then (.addr) <$> ifOut.iReq else Nothing
+        { -- the fetch made on the redirect clock is dropped, so it starts nothing
+          fetchStart = if iResp.ready && not flush then (.addr) <$> ifOut.iReq else Nothing
         , ifIssue = if flush then Upto.empty else ifOut.issue
         , idIssue = idOut.issue.len
         , rnIssue = rnOut.issue.len

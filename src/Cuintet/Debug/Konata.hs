@@ -83,7 +83,7 @@ modelStep model@Model {..} trace@CoreTrace {..} = applyWhen flush flushed moved
         , ifQ = (if null entered then ifQ else drop 1 ifQ) <> started
         , idQ = drop (count idIssue) idQ <> entered
         , rnQ = move (count idIssue) idQ (count rnIssue) rnQ
-        , rrQ = move (count idIssue) idQ (count rrIssue) rrQ
+        , rrQ = move (count rnIssue) rnQ (count rrIssue) rrQ
         , exQ = move (count rrIssue) rrQ (count exIssue) exQ
         , maQ = move (count exIssue) exQ (count maIssue) maQ
         , cmQ = move (count maIssue) maQ retires cmQ
@@ -93,7 +93,7 @@ count :: (Integral a) => a -> Int
 count = fromIntegral
 
 stages :: Model -> [(Inflight, Stage)]
-stages Model {..} = concat [slot IF (concat ifQ), slot ID idQ, slot RR rrQ, slot EX exQ, slot MA maQ, slot Cm cmQ]
+stages Model {..} = concat [slot IF (concat ifQ), slot ID idQ, slot RN rnQ, slot RR rrQ, slot EX exQ, slot MA maQ, slot Cm cmQ]
   where
     slot s is = [(i, s) | i <- is]
 
@@ -122,7 +122,7 @@ clockLines trace@CoreTrace {..} was cur@Model {..} = concatMap entering (stages 
     lost = snd (handedOver cur trace) <> squashed <> flushedOut
       where
         squashed = if flush || count exIssue > 0 then drop (count exIssue) exQ else []
-        flushedOut = if flush then rrQ <> idQ <> concat ifQ else []
+        flushedOut = if flush then rrQ <> rnQ <> idQ <> concat ifQ else []
 
     lostLines i = [printf "L\t%d\t0\t%s" i.instId (label i.pc i.instBits), printf "R\t%d\t%d\t1" i.instId i.instId]
 
