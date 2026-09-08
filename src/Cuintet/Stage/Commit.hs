@@ -16,12 +16,11 @@ data CommitOut = CommitOut
   { retired :: Vec IssueWidth (Maybe Retire)
   , renamed :: Vec IssueWidth (Maybe Mapping)
   , redirect :: Maybe Addr
-  , led :: BitVector XLen
   }
 
 -- | One clock of Cm. A trap is always lane 0's, since EX cancels the younger lanes of a group that traps.
 commit :: CsrFile -> CommitIn -> (CsrFile, CommitOut)
-commit csrFile CommitIn {..} = (csrFile', CommitOut {retired, renamed, redirect, led = csrFile.led})
+commit csrFile CommitIn {..} = (csrFile', CommitOut {retired, renamed, redirect})
   where
     (csrFile', csrResp) = csrStep csrFile (mkCsrReq =<< Upto.head entries)
 

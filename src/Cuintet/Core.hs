@@ -14,7 +14,7 @@ import Cuintet.Stage.MemAccess (MemAccessIn (..), MemAccessOut (..), memAccess)
 import Cuintet.Stage.RegRead (RegReadIn (..), RegReadOut (..), regRead)
 import Cuintet.Stage.Rename (RenameIn (..), RenameOut (..), RenameState, initRenameState, rename)
 import Cuintet.Unit.Btb (BtbReq (..), BtbResp, btb)
-import Cuintet.Unit.Csr (CsrFile, initCsrFile)
+import Cuintet.Unit.Csr (CsrFile (led), initCsrFile)
 import Cuintet.Unit.Fifo (FifoReq (..), FifoResp (..), fifo)
 import Cuintet.Unit.LoadStore (LoadStoreState)
 import Cuintet.Unit.LoadStore qualified as L
@@ -165,7 +165,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, fetchedResp, decodedResp, 
     executedReq = FifoReq {wdata = exOut.issue, rready = maOut.issued, flush = False}
     completedReq = FifoReq {wdata = maOut.issue, rready = True, flush = False}
 
-    coreOut = CoreOut {iReq = ifOut.iReq, dReq = maOut.dReq, retired = cmOut.retired, led = cmOut.led, coreTrace}
+    coreOut = CoreOut {iReq = ifOut.iReq, dReq = maOut.dReq, retired = cmOut.retired, led = csrFile.led, coreTrace}
     coreTrace =
       CoreTrace
         { -- the fetch made on the redirect clock is dropped, so it starts nothing
