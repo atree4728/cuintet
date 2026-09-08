@@ -12,7 +12,7 @@ import Cuintet.Stage.Execute (ExecuteIn (..), ExecuteOut (..), execute)
 import Cuintet.Stage.Fetch (FetchIn (..), FetchOut (..), FetchState (..), fetch, initFetchState)
 import Cuintet.Stage.MemAccess (MemAccessIn (..), MemAccessOut (..), memAccess)
 import Cuintet.Stage.RegRead (RegReadIn (..), RegReadOut (..), regRead)
-import Cuintet.Stage.Rename (RenameIn (..), RenameOut (..), rename)
+import Cuintet.Stage.Rename (RenameIn (..), RenameOut (..), RenameState, initRenameState, rename)
 import Cuintet.Unit.Btb (BtbReq (..), BtbResp, btb)
 import Cuintet.Unit.Csr (CsrFile, initCsrFile)
 import Cuintet.Unit.Fifo (FifoReq (..), FifoResp (..), fifo)
@@ -48,6 +48,7 @@ data CoreOut = CoreOut
 -- | The core's state.
 data CoreState = CoreState
   { fetchState :: FetchState
+  , renameState :: RenameState
   , mulDivState :: MulDivState
   , loadStoreState :: LoadStoreState
   , csrFile :: CsrFile
@@ -55,7 +56,7 @@ data CoreState = CoreState
   deriving (Generic, NFDataX)
 
 initState :: CoreState
-initState = CoreState {fetchState = initFetchState, mulDivState = M.Idle, loadStoreState = L.Idle, csrFile = initCsrFile}
+initState = CoreState {fetchState = initFetchState, renameState = initRenameState, mulDivState = M.Idle, loadStoreState = L.Idle, csrFile = initCsrFile}
 
 data CoreTrace = CoreTrace
   { fetchStart :: Maybe Addr
@@ -120,7 +121,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, fetchedResp, decodedResp, 
 
     fetchIn = FetchIn {iResp, buf = fetchedResp, redirect, btbResp}
     decodeIn = DecodeIn {entries = fetchedResp.rdata, wready = decodedResp.wready, stall = flush}
-    renameIn = RenameIn {entries = decodedResp.rdata, flush, wready = renamedResp.wready}
+    renameIn = RenameIn {entries = decodedResp.rdata, committed = cmOut.renamed, flush, drained = executedResp.rdata.len == 0 && completedResp.rdata.len == 0, wready = renamedResp.wready}
     regReadIn = RegReadIn {entries = renamedResp.rdata, rsData = regResp.rsData, forwards, wready = readyResp.wready}
     executeIn = ExecuteIn {entries = readyResp.rdata, wready = executedResp.wready, serializingInFlight}
     memAccessIn = MemAccessIn {entries = executedResp.rdata, dResp}
@@ -128,7 +129,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, fetchedResp, decodedResp, 
 
     (fetchState', ifOut) = fetch fetchState fetchIn
     idOut = decode decodeIn
-    rnOut = rename renameIn
+    (renameState', rnOut) = rename renameState renameIn
     rrOut = regRead regReadIn
     (mulDivState', exOut) = execute mulDivState executeIn
     (loadStoreState', maOut) = memAccess loadStoreState memAccessIn
@@ -178,4 +179,4 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, fetchedResp, decodedResp, 
         , flush
         }
 
-    state' = CoreState {fetchState = fetchState', mulDivState = mulDivState', loadStoreState = loadStoreState', csrFile = csrFile'}
+    state' = CoreState {fetchState = fetchState', renameState = renameState', mulDivState = mulDivState', loadStoreState = loadStoreState', csrFile = csrFile'}

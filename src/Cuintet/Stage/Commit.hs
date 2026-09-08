@@ -4,7 +4,7 @@ module Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit) where
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..))
 import Cuintet.Eei (Addr, IssueWidth, SystemOp (..), XLen)
-import Cuintet.Pipeline (Completed (..), Retire (..), rdOf)
+import Cuintet.Pipeline (Completed (..), Mapping (..), Retire (..), rdOf)
 import Cuintet.Unit.Csr (AccessSpec (..), CsrFile (..), CsrReq (..), CsrResp (..), TrapSpec (..), csrStep)
 import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
@@ -14,18 +14,21 @@ newtype CommitIn = CommitIn {entries :: Upto IssueWidth Completed}
 
 data CommitOut = CommitOut
   { retired :: Vec IssueWidth (Maybe Retire)
+  , renamed :: Vec IssueWidth (Maybe Mapping)
   , redirect :: Maybe Addr
   , led :: BitVector XLen
   }
 
 -- | One clock of Cm. A trap is always lane 0's, since EX cancels the younger lanes of a group that traps.
 commit :: CsrFile -> CommitIn -> (CsrFile, CommitOut)
-commit csrFile CommitIn {..} = (csrFile', CommitOut {retired, redirect, led = csrFile.led})
+commit csrFile CommitIn {..} = (csrFile', CommitOut {retired, renamed, redirect, led = csrFile.led})
   where
     (csrFile', csrResp) = csrStep csrFile (mkCsrReq =<< Upto.head entries)
 
     readValue = case csrResp of Just (ReadValue v) -> Just v; _ -> Nothing
     redirect = case csrResp of Just (Redirect v) -> Just v; _ -> Nothing
+
+    renamed = (mkMapping =<<) <$> Upto.toMaybes entries
 
     retired = zipWith (\v e -> mkRetire v <$> e) (readValue :> Nothing :> Nil) (Upto.toMaybes entries)
 {-# OPAQUE commit #-}
@@ -37,7 +40,9 @@ mkCsrReq Completed {..}
   | Just SysMret <- ctrl.systemOp = Just TrapReturn
   | otherwise = Nothing
 
--- | The retire log of one lane. The CSR read value, which only lane 0 can carry, arrives too late for @wbData@.
+mkMapping :: Completed -> Maybe Mapping
+mkMapping entry@Completed {..} = Mapping {rdAddr, pdAddr, oldPdAddr} <$ rdOf entry
+
 mkRetire :: Maybe (BitVector XLen) -> Completed -> Retire
 mkRetire csrValue entry@Completed {..} =
   Retire
