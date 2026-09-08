@@ -1,5 +1,5 @@
 -- | The payloads that cross the stage boundaries, one record per FIFO.
-module Cuintet.Pipeline (FetchBufBits, Fetched (..), Decoded (..), Renamed (..), Ready (..), Executed (..), Completed (..), Retire (..), srcRegs, destReg, serializing, hasResult, srcAddrs) where
+module Cuintet.Pipeline (FetchBufBits, Fetched (..), Decoded (..), Renamed (..), Ready (..), Executed (..), Completed (..), Retire (..), rdOf, serializing, hasResult) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), isCsrRead, isLoad)
@@ -94,21 +94,13 @@ data Retire = Retire
   }
   deriving (Generic, NFDataX, Eq)
 
--- | The @rs1@ and @rs2@ fields, shared by ID and the register file read.
-srcRegs :: Inst -> (RegAddr, RegAddr)
-srcRegs instBits = (unpack $ slice d19 d15 instBits, unpack $ slice d24 d20 instBits)
-
-srcAddrs :: Maybe Renamed -> Vec 2 RegAddr
-srcAddrs = maybe (repeat 0) (\d -> d.rs1Addr :> d.rs2Addr :> Nil)
-
--- | The register this instruction writes
-destReg ::
+rdOf ::
   ( HasField "exception" stage (Maybe (TrapCause, BitVector XLen))
   , HasField "ctrl" stage InstCtrl
   , HasField "rdAddr" stage RegAddr
   ) =>
   stage -> Maybe RegAddr
-destReg stage = orNothing (isNothing stage.exception && stage.ctrl.rwbEn && stage.rdAddr /= 0) stage.rdAddr
+rdOf stage = orNothing (isNothing stage.exception && stage.ctrl.rwbEn && stage.rdAddr /= 0) stage.rdAddr
 
 hasResult :: (HasField "ctrl" stage InstCtrl) => stage -> Bool
 hasResult stage = not (isLoad stage.ctrl || isCsrRead stage.ctrl)

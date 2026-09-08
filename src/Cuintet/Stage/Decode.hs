@@ -5,7 +5,7 @@ import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), isJalr, usesRs1, usesRs2)
 import Cuintet.Eei (AluOp, Inst, IssueWidth, MemOp (..), Opcode (..), System12 (..), SystemOp (..), XLen, parseBranchOp, parseCsr, parseLoad, parseStore, pattern BREAKPOINT, pattern ENVIRONMENT_CALL_FROM_M_MODE, pattern ILLEGAL_INSTRUCTION)
-import Cuintet.Pipeline (Decoded (..), Fetched (..), destReg, serializing, srcRegs)
+import Cuintet.Pipeline (Decoded (..), Fetched (..), rdOf, serializing)
 import Cuintet.Upto (Upto (..))
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isNothing)
@@ -34,7 +34,7 @@ decode DecodeIn {..} = DecodeOut {issue}
         && not (serializing decoded1)
         && fitsLane1 decoded1.ctrl
         && not hasRAW
-    hasRAW = maybe False readRd0 (destReg decoded0)
+    hasRAW = maybe False readRd0 (rdOf decoded0)
       where
         readRd0 rd = usesRs1 decoded1.ctrl && decoded1.rs1Addr == rd || usesRs2 decoded1.ctrl && decoded1.rs2Addr == rd
 
@@ -54,7 +54,8 @@ decodeLane Fetched {..} = Decoded {..}
   where
     decoded = instDecode instBits
     (ctrl, imm) = fromMaybe (trapCtrl, 0) decoded
-    (rs1Addr, rs2Addr) = srcRegs instBits
+    rs1Addr = unpack $ slice d19 d15 instBits
+    rs2Addr = unpack $ slice d24 d20 instBits
     rdAddr = unpack $ slice d11 d7 instBits
 
     exception

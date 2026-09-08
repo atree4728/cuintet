@@ -5,7 +5,7 @@ import Clash.Prelude
 import Control.Monad (guard)
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), FetchWidth, IssueWidth, MemReq, MemResp, XLen)
 import Cuintet.Forwarding (Forwarding, forwarding)
-import Cuintet.Pipeline (Completed (..), Decoded (..), Executed (..), FetchBufBits, Fetched (..), Ready (..), Renamed (..), Retire (..), destReg, hasResult, serializing, srcAddrs)
+import Cuintet.Pipeline (Completed (..), Decoded (..), Executed (..), FetchBufBits, Fetched (..), Ready (..), Renamed (..), Retire (..), hasResult, rdOf, serializing)
 import Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit)
 import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
 import Cuintet.Stage.Execute (ExecuteIn (..), ExecuteOut (..), execute)
@@ -139,11 +139,11 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, fetchedResp, decodedResp, 
         fromEx, fromMa :: Index IssueWidth -> Forwarding
         exLanes = Upto.toMaybes readyResp.rdata
         maLanes = Upto.toMaybes executedResp.rdata
-        fromEx i = forwarding (destReg =<< exLanes !! i) $ do
+        fromEx i = forwarding (rdOf =<< exLanes !! i) $ do
           entry <- exLanes !! i
           guard exOut.issued
           orNothing (hasResult entry) (exOut.wbData !! i)
-        fromMa i = forwarding (destReg =<< maLanes !! i) $ do
+        fromMa i = forwarding (rdOf =<< maLanes !! i) $ do
           entry <- maLanes !! i
           orNothing (hasResult entry) entry.wbData
 
@@ -152,7 +152,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, fetchedResp, decodedResp, 
 
     regReq =
       RegReq
-        { rsAddrs = concatMap srcAddrs (Upto.toMaybes renamedResp.rdata)
+        { rsAddrs = concatMap (maybe (repeat 0) (\d -> d.rs1Addr :> d.rs2Addr :> Nil)) (Upto.toMaybes renamedResp.rdata)
         , writes = (>>= (.rd)) <$> cmOut.retired
         }
     btbReq = BtbReq {lookupAddr = ifOut.btbLookup, prefetchAddr = ifOut.btbPrefetch, writes = exOut.btbWrites}

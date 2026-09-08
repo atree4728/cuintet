@@ -4,7 +4,7 @@ module Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit) where
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..))
 import Cuintet.Eei (Addr, IssueWidth, SystemOp (..), XLen)
-import Cuintet.Pipeline (Completed (..), Retire (..), destReg)
+import Cuintet.Pipeline (Completed (..), Retire (..), rdOf)
 import Cuintet.Unit.Csr (AccessSpec (..), CsrFile (..), CsrReq (..), CsrResp (..), TrapSpec (..), csrStep)
 import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
@@ -43,7 +43,7 @@ mkRetire csrValue entry@Completed {..} =
   Retire
     { pc
     , instBits
-    , rd = (,fromMaybe wbData csrValue) <$> destReg entry
+    , rd = (,fromMaybe wbData csrValue) <$> rdOf entry
     , mem
     , trap = fst <$> exception
     }
