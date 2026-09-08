@@ -1,9 +1,9 @@
 -- | The payloads that cross the stage boundaries, one record per FIFO.
-module Cuintet.Pipeline (FetchBufBits, Fetched (..), Decoded (..), Renamed (..), Ready (..), Executed (..), Completed (..), Retire (..), rdOf, serializing, hasResult) where
+module Cuintet.Pipeline (FetchBufBits, Fetched (..), Decoded (..), Renamed (..), Ready (..), Executed (..), Completed (..), Retire (..), rdOf, pdOf, serializing, hasResult) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), isCsrRead, isLoad)
-import Cuintet.Eei (Addr, Inst, MemReq, RegAddr, SystemOp (..), TrapCause, XLen)
+import Cuintet.Eei (Addr, Inst, MemReq, PRegAddr, RegAddr, SystemOp (..), TrapCause, XLen)
 import Cuintet.Unit.Btb (Prediction)
 import Cuintet.Util (orNothing)
 import Data.Maybe (isJust, isNothing)
@@ -41,6 +41,10 @@ data Renamed = Renamed
   , rs2Addr :: RegAddr
   , rdAddr :: RegAddr
   , exception :: Maybe (TrapCause, BitVector XLen)
+  , ps1Addr :: PRegAddr
+  , ps2Addr :: PRegAddr
+  , pdAddr :: PRegAddr
+  , oldPdAddr :: PRegAddr
   }
   deriving (Generic, NFDataX)
 
@@ -55,6 +59,8 @@ data Ready = Ready
   , rs1Data :: BitVector XLen
   , rs2Data :: BitVector XLen
   , exception :: Maybe (TrapCause, BitVector XLen)
+  , pdAddr :: PRegAddr
+  , oldPdAddr :: PRegAddr
   }
   deriving (Generic, NFDataX)
 
@@ -67,6 +73,8 @@ data Executed = Executed
   , rs2Data :: BitVector XLen
   , rdAddr :: RegAddr
   , exception :: Maybe (TrapCause, BitVector XLen)
+  , pdAddr :: PRegAddr
+  , oldPdAddr :: PRegAddr
   , aluResult :: BitVector XLen
   , wbData :: BitVector XLen
   }
@@ -80,6 +88,8 @@ data Completed = Completed
   , rs1Data :: BitVector XLen
   , rdAddr :: RegAddr
   , exception :: Maybe (TrapCause, BitVector XLen)
+  , pdAddr :: PRegAddr
+  , oldPdAddr :: PRegAddr
   , wbData :: BitVector XLen
   , mem :: Maybe MemReq
   }
@@ -101,6 +111,15 @@ rdOf ::
   ) =>
   stage -> Maybe RegAddr
 rdOf stage = orNothing (isNothing stage.exception && stage.ctrl.rwbEn && stage.rdAddr /= 0) stage.rdAddr
+
+pdOf ::
+  ( HasField "exception" stage (Maybe (TrapCause, BitVector XLen))
+  , HasField "ctrl" stage InstCtrl
+  , HasField "rdAddr" stage RegAddr
+  , HasField "pdAddr" stage PRegAddr
+  ) =>
+  stage -> Maybe PRegAddr
+pdOf stage = stage.pdAddr <$ rdOf stage
 
 hasResult :: (HasField "ctrl" stage InstCtrl) => stage -> Bool
 hasResult stage = not (isLoad stage.ctrl || isCsrRead stage.ctrl)

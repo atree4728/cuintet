@@ -18,6 +18,6 @@ rename RenameIn {..} = RenameOut {issue}
   where
     issued = entries.len > 0 && wready && not flush
 
-    issue = Upto {len = if issued then entries.len else 0, elems = renameLane <$> entries.elems}
-    renameLane Decoded {..} = Renamed {..}
+    issue = Upto {len = if issued then entries.len else 0, elems = pass <$> entries.elems}
+    pass Decoded {..} = Renamed {ps1Addr = zeroExtend rs1Addr, ps2Addr = zeroExtend rs2Addr, pdAddr = zeroExtend rdAddr, oldPdAddr = zeroExtend rdAddr, ..}
 {-# OPAQUE rename #-}

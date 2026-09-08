@@ -1,22 +1,22 @@
 module Cuintet.Forwarding (Forwarding (..), bypass, forwarding) where
 
 import Clash.Prelude
-import Cuintet.Eei (RegAddr, XLen)
+import Cuintet.Eei (PRegAddr, XLen)
 
 data Forwarding
   = Idle
-  | Pending RegAddr
-  | Ready RegAddr (BitVector XLen)
+  | Pending PRegAddr
+  | Ready PRegAddr (BitVector XLen)
   deriving (Generic, NFDataX)
 
-bypass :: Vec n Forwarding -> RegAddr -> BitVector XLen -> Maybe (BitVector XLen)
+bypass :: Vec n Forwarding -> PRegAddr -> BitVector XLen -> Maybe (BitVector XLen)
 bypass ws rs regRead = foldr pick (Just regRead) ws
   where
     pick (Pending rd) _ | rd == rs = Nothing
     pick (Ready rd v) _ | rd == rs = Just v
     pick _ acc = acc
 
-forwarding :: Maybe RegAddr -> Maybe (BitVector XLen) -> Forwarding
+forwarding :: Maybe PRegAddr -> Maybe (BitVector XLen) -> Forwarding
 forwarding rdM value = case rdM of
   Nothing -> Idle
   Just rd -> maybe (Pending rd) (Ready rd) value

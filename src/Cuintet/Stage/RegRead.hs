@@ -37,6 +37,6 @@ readLane :: Vec (2 * IssueWidth) Forwarding -> Renamed -> Vec 2 (BitVector XLen)
 readLane forwards Renamed {..} rsData = (Ready {rs1Data = rs1Data', rs2Data = rs2Data', ..}, isJust operands)
   where
     (rs1Read, rs2Read) = vecToTuple rsData
-    operands = (,) <$> resolve (usesRs1 ctrl) rs1Addr rs1Read <*> resolve (usesRs2 ctrl) rs2Addr rs2Read
+    operands = (,) <$> resolve (usesRs1 ctrl) ps1Addr rs1Read <*> resolve (usesRs2 ctrl) ps2Addr rs2Read
     resolve uses rs regRead' = if uses then bypass forwards rs regRead' else Just regRead'
     (rs1Data', rs2Data') = fromMaybe (rs1Read, rs2Read) operands
