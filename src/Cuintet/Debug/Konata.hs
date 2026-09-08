@@ -22,7 +22,7 @@ data Inflight = Inflight
   , instBits :: Maybe Inst
   }
 
-data Stage = IF | ID | RR | EX | MA | Cm
+data Stage = IF | ID | RN | RR | EX | MA | Cm
   deriving (Eq, Show)
 
 -- | Where everything in flight is. IF holds one list per fetch, since a fetch enters the fetch buffer whole.
@@ -31,6 +31,7 @@ data Model = Model
   , commits :: Int
   , ifQ :: [[Inflight]]
   , idQ :: [Inflight]
+  , rnQ :: [Inflight]
   , rrQ :: [Inflight]
   , exQ :: [Inflight]
   , maQ :: [Inflight]
@@ -38,7 +39,7 @@ data Model = Model
   }
 
 initModel :: Model
-initModel = Model {nextId = 0, commits = 0, ifQ = [], idQ = [], rrQ = [], exQ = [], maQ = [], cmQ = []}
+initModel = Model {nextId = 0, commits = 0, ifQ = [], idQ = [], rnQ = [], rrQ = [], exQ = [], maQ = [], cmQ = []}
 
 -- | The instructions a fetch brings back: the slots of the bus word from its address up, as 'Cuintet.Eei.instSlice' cuts them.
 fetchGroup :: Int -> Addr -> [Inflight]
@@ -69,7 +70,7 @@ move push src pop cur
 modelStep :: Model -> CoreTrace -> Model
 modelStep model@Model {..} trace@CoreTrace {..} = applyWhen flush flushed moved
   where
-    flushed x = x {ifQ = [], idQ = [], rrQ = [], exQ = []}
+    flushed x = x {ifQ = [], idQ = [], rnQ = [], rrQ = [], exQ = []}
 
     retires = length (catMaybes (toList retired))
     entered = fst (handedOver model trace)
@@ -81,6 +82,7 @@ modelStep model@Model {..} trace@CoreTrace {..} = applyWhen flush flushed moved
         , commits = commits + retires
         , ifQ = (if null entered then ifQ else drop 1 ifQ) <> started
         , idQ = drop (count idIssue) idQ <> entered
+        , rnQ = move (count idIssue) idQ (count rnIssue) rnQ
         , rrQ = move (count idIssue) idQ (count rrIssue) rrQ
         , exQ = move (count rrIssue) rrQ (count exIssue) exQ
         , maQ = move (count exIssue) exQ (count maIssue) maQ

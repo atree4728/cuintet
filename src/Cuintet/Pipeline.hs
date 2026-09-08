@@ -1,5 +1,5 @@
 -- | The payloads that cross the stage boundaries, one record per FIFO.
-module Cuintet.Pipeline (FetchBufBits, Fetched (..), Decoded (..), Ready (..), Executed (..), Completed (..), Retire (..), srcRegs, destReg, serializing, hasResult, srcAddrs) where
+module Cuintet.Pipeline (FetchBufBits, Fetched (..), Decoded (..), Renamed (..), Ready (..), Executed (..), Completed (..), Retire (..), srcRegs, destReg, serializing, hasResult, srcAddrs) where
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), isCsrRead, isLoad)
@@ -19,6 +19,19 @@ data Fetched = Fetched
   deriving (Generic, NFDataX)
 
 data Decoded = Decoded
+  { pc :: Addr
+  , instBits :: Inst
+  , prediction :: Maybe Prediction
+  , ctrl :: InstCtrl
+  , imm :: BitVector XLen
+  , rs1Addr :: RegAddr
+  , rs2Addr :: RegAddr
+  , rdAddr :: RegAddr
+  , exception :: Maybe (TrapCause, BitVector XLen)
+  }
+  deriving (Generic, NFDataX)
+
+data Renamed = Renamed
   { pc :: Addr
   , instBits :: Inst
   , prediction :: Maybe Prediction
@@ -85,7 +98,7 @@ data Retire = Retire
 srcRegs :: Inst -> (RegAddr, RegAddr)
 srcRegs instBits = (unpack $ slice d19 d15 instBits, unpack $ slice d24 d20 instBits)
 
-srcAddrs :: Maybe Decoded -> Vec 2 RegAddr
+srcAddrs :: Maybe Renamed -> Vec 2 RegAddr
 srcAddrs = maybe (repeat 0) (\d -> d.rs1Addr :> d.rs2Addr :> Nil)
 
 -- | The register this instruction writes
