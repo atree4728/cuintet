@@ -54,7 +54,6 @@ jobs:
 
       - name: Generate SystemVerilog
         run: |
-          cabal run clash -- Cuintet.Top.TangNano9k --systemverilog
           cabal run clash -- Cuintet.Top.Timing --systemverilog
 
       - name: Save cache
