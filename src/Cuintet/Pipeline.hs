@@ -34,47 +34,35 @@ data Decoded = Decoded
 
 data Renamed = Renamed
   { pc :: Addr
-  , instBits :: Inst
   , prediction :: Maybe Prediction
   , ctrl :: InstCtrl
   , imm :: BitVector XLen
-  , rs1Addr :: RegAddr
-  , rs2Addr :: RegAddr
-  , rdAddr :: RegAddr
   , exception :: Maybe (TrapCause, BitVector XLen)
   , ps1Addr :: PRegAddr
   , ps2Addr :: PRegAddr
-  , pdAddr :: PRegAddr
+  , pdAddr :: Maybe PRegAddr
   , robAddr :: RobAddr
   }
   deriving (Generic, NFDataX)
 
 data Ready = Ready
   { pc :: Addr
-  , instBits :: Inst
   , prediction :: Maybe Prediction
   , ctrl :: InstCtrl
   , imm :: BitVector XLen
-  , rs1Addr :: RegAddr
-  , rdAddr :: RegAddr
   , rs1Data :: BitVector XLen
   , rs2Data :: BitVector XLen
   , exception :: Maybe (TrapCause, BitVector XLen)
-  , pdAddr :: PRegAddr
+  , pdAddr :: Maybe PRegAddr
   , robAddr :: RobAddr
   }
   deriving (Generic, NFDataX)
 
 data Executed = Executed
-  { pc :: Addr
-  , instBits :: Inst
-  , ctrl :: InstCtrl
-  , rs1Addr :: RegAddr
-  , rs1Data :: BitVector XLen
+  { ctrl :: InstCtrl
   , rs2Data :: BitVector XLen
-  , rdAddr :: RegAddr
   , exception :: Maybe (TrapCause, BitVector XLen)
-  , pdAddr :: PRegAddr
+  , pdAddr :: Maybe PRegAddr
   , robAddr :: RobAddr
   , mispredicted :: Bool
   , aluResult :: BitVector XLen
@@ -108,12 +96,10 @@ rdOf stage = guard (isNothing stage.exception) *> validRdOf stage
 
 pdOf ::
   ( HasField "exception" stage (Maybe (TrapCause, BitVector XLen))
-  , HasField "ctrl" stage InstCtrl
-  , HasField "rdAddr" stage RegAddr
-  , HasField "pdAddr" stage PRegAddr
+  , HasField "pdAddr" stage (Maybe PRegAddr)
   ) =>
   stage -> Maybe PRegAddr
-pdOf stage = stage.pdAddr <$ rdOf stage
+pdOf stage = guard (isNothing stage.exception) *> stage.pdAddr
 
 hasResult :: (HasField "ctrl" stage InstCtrl) => stage -> Bool
 hasResult stage = not (isLoad stage.ctrl || isCsrRead stage.ctrl)

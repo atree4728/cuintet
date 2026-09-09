@@ -59,8 +59,11 @@ rename RenameState {..} RenameIn {..} = (state', RenameOut {..})
     rdAddr0 = validRdOf decoded0
     rdAddr1 = validRdOf decoded1
 
-    pdAddr0 = freeList !! specHead
-    pdAddr1 = freeList !! (specHead + if isJust rdAddr0 then 1 else 0)
+    freePd0 = freeList !! specHead
+    freePd1 = freeList !! (specHead + if isJust rdAddr0 then 1 else 0)
+
+    pdAddr0 = freePd0 <$ rdAddr0
+    pdAddr1 = freePd1 <$ rdAddr1
 
     robAddr0 = nextRobAddr
     robAddr1 = nextRobAddr + 1
@@ -80,9 +83,9 @@ rename RenameState {..} RenameIn {..} = (state', RenameOut {..})
         ps1Addr = specRmt !! rs1Addr
         ps2Addr = specRmt !! rs2Addr
 
-    allocates = Upto {len, elems = robStatic decoded0 rdAddr0 pdAddr0 :> robStatic decoded1 rdAddr1 pdAddr1 :> Nil}
+    allocates = Upto {len, elems = robStatic decoded0 rdAddr0 freePd0 :> robStatic decoded1 rdAddr1 freePd1 :> Nil}
 
-    taken = (if issue.len >= 1 then (,pdAddr0) <$> rdAddr0 else Nothing) :> (if issue.len >= 2 then (,pdAddr1) <$> rdAddr1 else Nothing) :> Nil
+    taken = (if issue.len >= 1 then (,freePd0) <$> rdAddr0 else Nothing) :> (if issue.len >= 2 then (,freePd1) <$> rdAddr1 else Nothing) :> Nil
     takenCnt = sum $ bool 0 1 . isJust <$> taken
     specHead' = specHead + takenCnt
 
