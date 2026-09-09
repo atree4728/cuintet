@@ -42,6 +42,8 @@ module Cuintet.Eei (
   RegFile,
   RegAddr,
   PRegAddr,
+  NRegs,
+  NPRegs,
   TrapCause (..),
   pattern INSTRUCTION_ADDRESS_MISALIGNED,
   pattern ILLEGAL_INSTRUCTION,
@@ -87,6 +89,10 @@ type RegFile = Vec 32 (BitVector XLen)
 type RegAddr = Unsigned 5
 
 type PRegAddr = Unsigned 6
+
+type NRegs = 2 ^ BitSize RegAddr
+
+type NPRegs = 2 ^ BitSize PRegAddr
 
 -- | Whether a narrower-than-register load fills the high bits with its sign or zero.
 data Sign = Signed | Unsigned

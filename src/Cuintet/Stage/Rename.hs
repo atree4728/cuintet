@@ -2,9 +2,8 @@ module Cuintet.Stage.Rename (RenameState (..), initRenameState, RenameIn (..), R
 
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
-import Cuintet.Eei (IssueWidth, PRegAddr)
+import Cuintet.Eei (IssueWidth, NRegs, PRegAddr)
 import Cuintet.Pipeline (Decoded (..), Mapping (..), Renamed (..), validRdOf)
-import Cuintet.Unit.RegFile (NRegs)
 import Cuintet.Upto (Upto (..))
 import Data.Bool (bool)
 import Data.Maybe (isJust)

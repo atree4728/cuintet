@@ -151,11 +151,8 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, fetchedResp, decodedResp, 
     redirect = cmOut.redirect <|> exOut.redirect
     flush = isJust redirect
 
-    regReq =
-      RegReq
-        { rsAddrs = concatMap (maybe (repeat 0) (\d -> d.rs1Addr :> d.rs2Addr :> Nil)) (Upto.toMaybes renamedResp.rdata)
-        , writes = (>>= (.rd)) <$> cmOut.retired
-        }
+    rsAddrs = concatMap (maybe (repeat 0) (\Renamed {..} -> ps1Addr :> ps2Addr :> Nil)) (Upto.toMaybes renamedResp.rdata)
+    regReq = RegReq {rsAddrs, writes = cmOut.writes}
     btbReq = BtbReq {lookupAddr = ifOut.btbLookup, prefetchAddr = ifOut.btbPrefetch, writes = exOut.btbWrites}
 
     fetchedReq = RingReq {wdata = ifOut.issue, pop = idOut.issue.len, flush}
@@ -168,8 +165,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, fetchedResp, decodedResp, 
     coreOut = CoreOut {iReq = ifOut.iReq, dReq = maOut.dReq, retired = cmOut.retired, led = csrFile.led, coreTrace}
     coreTrace =
       CoreTrace
-        { -- the fetch made on the redirect clock is dropped, so it starts nothing
-          fetchStart = if iResp.ready && not flush then (.addr) <$> ifOut.iReq else Nothing
+        { fetchStart = if iResp.ready && not flush then (.addr) <$> ifOut.iReq else Nothing
         , ifIssue = if flush then Upto.empty else ifOut.issue
         , idIssue = idOut.issue.len
         , rnIssue = rnOut.issue.len

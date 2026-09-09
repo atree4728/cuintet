@@ -1,18 +1,16 @@
-module Cuintet.Unit.RegFile (NRegs, ReadPorts, WritePorts, RegReq (..), RegResp (..), regFile) where
+module Cuintet.Unit.RegFile (ReadPorts, WritePorts, RegReq (..), RegResp (..), regFile) where
 
 import Clash.Prelude
-import Cuintet.Eei (RegAddr, XLen)
+import Cuintet.Eei (PRegAddr, XLen)
 import Cuintet.Unit.MultiRam (multiRam)
-
-type NRegs = 32
 
 type ReadPorts = 4
 
 type WritePorts = 2
 
 data RegReq = RegReq
-  { rsAddrs :: Vec ReadPorts RegAddr
-  , writes :: Vec WritePorts (Maybe (RegAddr, BitVector XLen))
+  { rsAddrs :: Vec ReadPorts PRegAddr
+  , writes :: Vec WritePorts (Maybe (PRegAddr, BitVector XLen))
   }
   deriving (Generic, NFDataX)
 
