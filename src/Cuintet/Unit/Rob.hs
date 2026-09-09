@@ -1,4 +1,4 @@
-module Cuintet.Unit.Rob (RobStatic (..), RobDone (..), RobEntry (..), Completed (..), squashes, committedMapping, RobReq (..), RobResp (..), rob) where
+module Cuintet.Unit.Rob (RobStatic (..), RobDone (..), RobEntry (..), Completed (..), squashes, usesCsrFile, committedMapping, RobReq (..), RobResp (..), rob) where
 
 import Clash.Prelude
 import Control.Monad (guard)
@@ -53,6 +53,11 @@ squashes :: RobEntry -> Bool
 squashes RobEntry {..} = any squashing done
   where
     squashing RobDone {..} = isJust exception || static.systemOp == Just SysMret || mispredicted
+
+usesCsrFile :: RobEntry -> Bool
+usesCsrFile RobEntry {..} = any using done
+  where
+    using RobDone {exception} = isJust exception || isJust static.systemOp
 
 committedMapping :: RobEntry -> Maybe Mapping
 committedMapping RobEntry {..} = do

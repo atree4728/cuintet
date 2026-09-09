@@ -5,7 +5,7 @@ import Clash.Prelude
 import Control.Monad (guard)
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), FetchWidth, IssueWidth, MemReq, MemResp, XLen)
 import Cuintet.Forwarding (Forwarding, forwarding)
-import Cuintet.Pipeline (Decoded (..), Executed (..), FetchBufBits, Fetched (..), Ready (..), Renamed (..), Retire (..), hasResult, pdOf, serializing)
+import Cuintet.Pipeline (Decoded (..), Executed (..), FetchBufBits, Fetched (..), Ready (..), Renamed (..), Retire (..), hasResult, pdOf)
 import Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit)
 import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
 import Cuintet.Stage.Execute (ExecuteIn (..), ExecuteOut (..), execute)
@@ -22,7 +22,7 @@ import Cuintet.Unit.MulDiv (MulDivState)
 import Cuintet.Unit.MulDiv qualified as M
 import Cuintet.Unit.RegFile (RegReq (..), RegResp (..), regFile)
 import Cuintet.Unit.Ring (RingReq (..), RingResp (..), ring)
-import Cuintet.Unit.Rob (RobReq (..), RobResp (..), rob, squashes)
+import Cuintet.Unit.Rob (RobReq (..), RobResp (..), rob, usesCsrFile)
 import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
 import Cuintet.Util (orNothing)
@@ -118,14 +118,12 @@ coreT ::
 coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, decodedResp, renamedResp, readyResp, executedResp) =
   (state', (coreOut, regReq, btbReq, robReq, fetchedReq, decodedReq, renamedReq, readyReq, executedReq))
   where
-    serializingInFlight = any serializing (Upto.head executedResp.rdata) || any squashes (Upto.head robResp.buffer.rdata)
-
     fetchIn = FetchIn {iResp, buf = fetchedResp, redirect, btbResp}
     decodeIn = DecodeIn {entries = fetchedResp.rdata, wready = decodedResp.wready, stall = flush}
     renameIn = RenameIn {entries = decodedResp.rdata, committed = cmOut.renamed, nextRobAddr = robResp.buffer.tl, robFree = robResp.buffer.free, flush, drained = robResp.buffer.rdata.len == 0, wready = renamedResp.wready}
     regReadIn = RegReadIn {entries = renamedResp.rdata, rsData = regResp.rsData, forwards, wready = readyResp.wready}
-    executeIn = ExecuteIn {entries = readyResp.rdata, wready = executedResp.wready, serializingInFlight}
-    memAccessIn = MemAccessIn {entries = executedResp.rdata, dResp}
+    executeIn = ExecuteIn {entries = readyResp.rdata, wready = executedResp.wready}
+    memAccessIn = MemAccessIn {entries = executedResp.rdata, dResp, commitUsesCsrFile = any usesCsrFile (Upto.head robResp.buffer.rdata)}
     commitIn = CommitIn {entries = robResp.buffer.rdata}
 
     (fetchState', ifOut) = fetch fetchState fetchIn
@@ -153,14 +151,14 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
     flush = isJust redirect
 
     rsAddrs = concatMap (maybe (repeat 0) (\Renamed {..} -> ps1Addr :> ps2Addr :> Nil)) (Upto.toMaybes renamedResp.rdata)
-    regReq = RegReq {rsAddrs, writes = cmOut.writes}
+    regReq = RegReq {rsAddrs, writes = maybe maOut.writes (\w -> Just w :> Nothing :> Nil) cmOut.write}
     btbReq = BtbReq {lookupAddr = ifOut.btbLookup, prefetchAddr = ifOut.btbPrefetch, writes = exOut.btbWrites}
 
     fetchedReq = RingReq {wdata = ifOut.issue, pop = idOut.issue.len, squash = flush}
     decodedReq = FifoReq {wdata = idOut.issue, rready = rnOut.issue.len > 0, flush}
     renamedReq = FifoReq {wdata = rnOut.issue, rready = rrOut.issue.len > 0, flush}
     readyReq = FifoReq {wdata = rrOut.issue, rready = exOut.issued, flush}
-    executedReq = FifoReq {wdata = exOut.issue, rready = maOut.issued, flush = False}
+    executedReq = FifoReq {wdata = exOut.issue, rready = maOut.issued, flush = isJust cmOut.redirect}
     robReq = RobReq {allocates = rnOut.allocates, completes = maOut.issue, pop = cmOut.pop, squash = cmOut.squash}
 
     coreOut = CoreOut {iReq = ifOut.iReq, dReq = maOut.dReq, retired = cmOut.retired, led = csrFile.led, coreTrace}

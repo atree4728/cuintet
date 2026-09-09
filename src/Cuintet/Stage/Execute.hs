@@ -17,7 +17,6 @@ import Data.Maybe (fromMaybe, isJust, isNothing)
 data ExecuteIn = ExecuteIn
   { entries :: Upto IssueWidth Ready
   , wready :: Bool
-  , serializingInFlight :: Bool
   }
 
 data ExecuteOut = ExecuteOut
@@ -35,9 +34,9 @@ data ExecuteOut = ExecuteOut
 execute :: MulDivState -> ExecuteIn -> (MulDivState, ExecuteOut)
 execute mulDivState ExecuteIn {..} = (mulDivState', ExecuteOut {..})
   where
-    (mulDivState', mulDivResp) = mulDivStep mulDivState MulDivReq {job = mkMulDivJob =<< Upto.head entries, wready = wready && not serializingInFlight}
+    (mulDivState', mulDivResp) = mulDivStep mulDivState MulDivReq {job = mkMulDivJob =<< Upto.head entries, wready}
 
-    issued = entries.len > 0 && wready && not serializingInFlight && not mulDivResp.stall
+    issued = entries.len > 0 && wready && not mulDivResp.stall
 
     ((executed0, redirect0, btbWrite0), (executed1, redirect1, btbWrite1)) =
       vecToTuple $ zipWith executeLane (mulDivResp.result :> Nothing :> Nil) entries.elems
