@@ -94,6 +94,7 @@ library
     Cuintet.Unit.MulDiv
     Cuintet.Unit.MulDiv.Div
     Cuintet.Unit.MulDiv.Mul
+    Cuintet.Unit.MultiRam
     Cuintet.Unit.Ram
     Cuintet.Unit.RegFile
     Cuintet.Unit.Ring

@@ -106,7 +106,7 @@ coreT ::
   , ( CoreOut
     , RegReq
     , BtbReq
-    , RingReq FetchWidth IssueWidth Fetched
+    , RingReq FetchBufBits FetchWidth IssueWidth Fetched
     , FifoReq IssueWidth Decoded
     , FifoReq IssueWidth Renamed
     , FifoReq IssueWidth Ready

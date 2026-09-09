@@ -1,11 +1,13 @@
+-- | A queue entered and left in order.
 module Cuintet.Unit.Ring (RingReq (..), RingResp (..), ring) where
 
 import Clash.Prelude
+import Cuintet.Unit.MultiRam (multiRam)
 import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
 import Data.Maybe (fromMaybe)
 
-data RingReq nw nr dat = RingReq
+data RingReq bits nw nr dat = RingReq
   { wdata :: Upto nw dat
   , pop :: Index (nr + 1)
   , flush :: Bool
@@ -14,44 +16,35 @@ data RingReq nw nr dat = RingReq
 
 data RingResp bits nr dat = RingResp
   { rdata :: Upto nr dat
+  , tl :: Unsigned bits
   , free :: Unsigned bits
   }
   deriving (Generic, NFDataX)
 
-data RingState bits dat = RingState
+data RingState bits = RingState
   { hd :: Unsigned bits
   , tl :: Unsigned bits
-  , buf :: Vec (2 ^ bits) dat
   }
   deriving (Generic, NFDataX)
 
 ring ::
   forall dom bits nw nr dat.
   (HiddenClockResetEnable dom, KnownNat bits, KnownNat nw, KnownNat nr, NFDataX dat, nw + 1 <= 2 ^ bits, nr + 1 <= 2 ^ bits) =>
-  SNat bits -> Signal dom (RingReq nw nr dat) -> Signal dom (RingResp bits nr dat)
-ring SNat = moore ringUpdate ringOutput initS
+  SNat bits -> Signal dom (RingReq bits nw nr dat) -> Signal dom (RingResp bits nr dat)
+ring SNat req = resp <$> s <*> multiRam (rdAddrs <$> s) writes
   where
-    initS :: RingState bits dat
-    initS = RingState {hd = 0, tl = 0, buf = deepErrorX "ring: uninitialized"}
+    (s, writes) = unbundle $ mealy step RingState {hd = 0, tl = 0} req
 
-ringOutput ::
-  forall bits nr dat.
-  (KnownNat bits, KnownNat nr, nr <= 2 ^ bits) =>
-  RingState bits dat -> RingResp bits nr dat
-ringOutput RingState {..} = RingResp {rdata = Upto {len, elems}, free}
-  where
-    used = tl - hd
-    elems = (\i -> buf !! (hd + numConvert i)) <$> indicesI @nr
-    len = fromMaybe maxBound (maybeNumConvert used)
-    free = maxBound - used
+    step cur@RingState {hd, tl} RingReq {..} = (RingState {hd = hd', tl = tl'}, (cur, ws))
+      where
+        hd' = hd + numConvert pop
+        (tl', ws)
+          | flush = (hd', repeat Nothing)
+          | otherwise = (tl + numConvert wdata.len, imap (\i -> fmap (tl + numConvert i,)) (Upto.toMaybes wdata))
 
-ringUpdate ::
-  forall bits nw nr dat.
-  (KnownNat bits, KnownNat nw, KnownNat nr, NFDataX dat, nw + 1 <= 2 ^ bits, nr + 1 <= 2 ^ bits) =>
-  RingState bits dat -> RingReq nw nr dat -> RingState bits dat
-ringUpdate RingState {..} RingReq {..}
-  | flush = RingState {hd = 0, tl = 0, buf = deepErrorX "ring: flushed"}
-  | otherwise = RingState {hd = hd + numConvert pop, tl = tl + numConvert wdata.len, buf = buf'}
-  where
-    buf' = ifoldl write buf (Upto.toMaybes wdata)
-    write b i = maybe b (\e -> replace (tl + numConvert i) e b)
+    rdAddrs RingState {hd} = (hd +) . numConvert <$> indicesI @nr
+
+    resp RingState {hd, tl} elems = RingResp {rdata = Upto {len, elems}, tl, free = maxBound - used}
+      where
+        used = tl - hd
+        len = fromMaybe maxBound (maybeNumConvert used)
