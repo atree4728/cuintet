@@ -125,7 +125,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
     renameIn = RenameIn {entries = decodedResp.rdata, committed = cmOut.renamed, nextRobAddr = robResp.buffer.tl, robFree = robResp.buffer.free, flush, drained = robResp.buffer.rdata.len == 0, wready = renamedResp.wready}
     regreadIn = RegReadIn {entries = renamedResp.rdata, rsData = regResp.rsData, forwards, wready = readyResp.wready}
     executeIn = ExecuteIn {entries = readyResp.rdata, wready = executedResp.wready, mulDivBusy = mulDivResp.busy}
-    writebackIn = WriteBackIn {entries = executedResp.rdata, loadStoreResp, csrWrite = cmOut.csrWrite, serializingInFlight, mulDivDone = mulDivResp.done}
+    writebackIn = WriteBackIn {entries = executedResp.rdata, loadStoreBusy = loadStoreResp.busy, loadStoreDone = loadStoreResp.done, mulDivDone = mulDivResp.done, csrWrite = cmOut.csrWrite, serializingInFlight}
     commitIn = CommitIn {entries = robResp.buffer.rdata}
 
     (fetchState', ifOut) = fetch fetchState fetchIn
@@ -138,19 +138,20 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
 
     (mulDivState', mulDivResp) =
       mulDivStep mulDivState MulDivReq {job = exOut.mulDivJob, granted = wbOut.mulDivGranted, squash = cmOut.squash}
-    (loadStoreState', loadStoreResp) = loadStoreStep loadStoreState LoadStoreReq {job = wbOut.loadStoreJob, memResp = dResp}
+    (loadStoreState', loadStoreResp) =
+      loadStoreStep loadStoreState LoadStoreReq {job = wbOut.loadStoreJob, memResp = dResp, granted = wbOut.loadStoreGranted, squash = cmOut.squash}
 
-    forwards = fromEx 1 :> fromEx 0 :> fromWb 1 :> fromWb 0 :> mulDivResp.forwarding :> F.Idle :> Nil
+    forwards = fromEx 1 :> fromEx 0 :> fromWb 1 :> fromWb 0 :> mulDivResp.forwarding :> loadStoreResp.forwarding :> Nil
       where
         fromEx, fromWb :: Index IssueWidth -> Forwarding
         exLanes = Upto.toMaybes readyResp.rdata
-        maLanes = Upto.toMaybes executedResp.rdata
+        wbLanes = Upto.toMaybes executedResp.rdata
         fromEx i = F.forwarding (pdOf =<< exLanes !! i) $ do
           entry <- exLanes !! i
           guard exOut.issued
           orNothing (hasResult entry) (exOut.wbData !! i)
-        fromWb i = F.forwarding (pdOf =<< maLanes !! i) $ do
-          entry <- maLanes !! i
+        fromWb i = F.forwarding (pdOf =<< wbLanes !! i) $ do
+          entry <- wbLanes !! i
           orNothing (hasResult entry) entry.wbData
 
     redirect = cmOut.redirect <|> exOut.redirect

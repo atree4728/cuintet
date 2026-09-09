@@ -1,5 +1,5 @@
 -- | The payloads that cross the stage boundaries, one record per FIFO.
-module Cuintet.Pipeline (FetchBufBits, Fetched (..), Decoded (..), Renamed (..), Ready (..), Executed (..), Retire (..), Completion (..), validRdOf, rdOf, pdOf, isSerializing, hasResult, regWrite, robWrite, usesMulDiv) where
+module Cuintet.Pipeline (FetchBufBits, Fetched (..), Decoded (..), Renamed (..), Ready (..), Executed (..), Retire (..), Completion (..), validRdOf, rdOf, pdOf, isSerializing, hasResult, regWrite, robWrite) where
 
 import Clash.Prelude
 import Control.Monad (guard)
@@ -114,9 +114,6 @@ hasResult stage = case unitOf stage.ctrl of
 
 isSerializing :: (HasField "exception" stage (Maybe a), HasField "ctrl" stage InstCtrl) => stage -> Bool
 isSerializing stage = isJust stage.exception || stage.ctrl.systemOp == Just SysMret
-
-usesMulDiv :: (HasField "exception" stage (Maybe a), HasField "ctrl" stage InstCtrl) => stage -> Bool
-usesMulDiv entry = isNothing entry.exception && unitOf entry.ctrl == MulDiv
 
 robWrite :: Completion -> Maybe (RobAddr, RobDone)
 robWrite = \case

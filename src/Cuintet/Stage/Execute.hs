@@ -4,9 +4,9 @@ module Cuintet.Stage.Execute (execute, ExecuteIn (..), ExecuteOut (..)) where
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
-import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), isCsrRead)
+import Cuintet.CoreCtrl (ExecUnit (..), InstCtrl (..), InstFormat (..), isCsrRead, unitOf)
 import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), IssueWidth, XLen, misalignedCause, pattern INSTRUCTION_ADDRESS_MISALIGNED)
-import Cuintet.Pipeline (Executed (..), Ready (..), isSerializing, usesMulDiv)
+import Cuintet.Pipeline (Executed (..), Ready (..), isSerializing)
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
 import Cuintet.Unit.MulDiv (MulDivJob (..))
 import Cuintet.Upto (Upto (..))
@@ -35,7 +35,7 @@ data ExecuteOut = ExecuteOut
 execute :: ExecuteIn -> ExecuteOut
 execute ExecuteIn {..} = ExecuteOut {..}
   where
-    needsMulDiv = maybe False usesMulDiv (Upto.head entries)
+    needsMulDiv = maybe False (\Ready {..} -> isNothing exception && unitOf ctrl == MulDiv) (Upto.head entries)
     issued = entries.len > 0 && wready && not (needsMulDiv && mulDivBusy)
 
     mulDivJob = guard issued *> (mkJob executed0.mispredicted =<< Upto.head entries)

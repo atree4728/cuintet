@@ -13,35 +13,43 @@ module Cuintet.Unit.LoadStore (
 ) where
 
 import Clash.Prelude
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), LaneOffset, LoadShape (..), MemDataBytes, MemOp (..), MemReq, MemResp, Sign (..), StoreLanes (..), Width (..), XLen, aligned, bitOffset, laneMask, laneOffset)
+import Cuintet.Eei (Addr, BusReq (..), BusResp (..), LaneOffset, LoadShape (..), MemDataBytes, MemOp (..), MemReq, MemResp, PRegAddr, RobAddr, Sign (..), StoreLanes (..), Width (..), XLen, aligned, bitOffset, laneMask, laneOffset)
+import Cuintet.Forwarding (Forwarding)
+import Cuintet.Forwarding qualified as F
+import Cuintet.Pipeline (Completion (..))
+import Cuintet.Unit.Rob (RobDone (..))
 import Cuintet.Util (orNothing)
-import Data.Maybe (isJust, isNothing)
 
--- | One memory access for the unit to carry out.
 data LoadStoreJob = LoadStoreJob
   { memOp :: MemOp
   , addr :: Addr
-  -- ^ The access address computed by the ALU.
   , wdata :: BitVector XLen
-  -- ^ Data to store.
+  , pdAddr :: Maybe PRegAddr
+  , robAddr :: RobAddr
+  , mispredicted :: Bool
   }
+  deriving (Generic, NFDataX)
+
+data LoadStoreState
+  = Idle
+  | WaitReady LoadStoreJob BusAccess
+  | WaitValid LoadStoreJob BusAccess
+  | Waiting Completion
   deriving (Generic, NFDataX)
 
 data LoadStoreReq = LoadStoreReq
   { job :: Maybe LoadStoreJob
   , memResp :: MemResp
+  , granted :: Bool
+  , squash :: Bool
   }
-  deriving (Generic, NFDataX)
 
 data LoadStoreResp = LoadStoreResp
-  { result :: Maybe (BitVector XLen)
-  -- ^ The value a completed load produced.
-  , stall :: Bool
-  -- ^ Whether the core must stall for an access in flight
+  { busy :: Bool
+  , done :: Maybe Completion
+  , forwarding :: Forwarding
   , memReq :: Maybe MemReq
-  , completed :: Maybe MemReq
   }
-  deriving (Generic, NFDataX)
 
 -- | An access as the bus needs it: the lanes to write, or the shape to give the word that comes back.
 data BusAccess
@@ -53,40 +61,32 @@ busReq :: Addr -> BusAccess -> MemReq
 busReq addr (BusStore wdata) = BusReq {addr, wdata = Just wdata}
 busReq addr (BusLoad _) = BusReq {addr, wdata = Nothing}
 
-data LoadStoreState
-  = -- | Wait for a new memory instruction; latch its request and move to 'WaitReady'.
-    Idle
-  | -- | Keep sending the request until the memory accepts it, then move to 'WaitValid', with @(addr, wdata)@
-    WaitReady Addr BusAccess
-  | -- | Wait until the access completes, then move back to 'Idle'.
-    WaitValid Addr BusAccess
-  deriving (Generic, NFDataX)
-
--- | One cycle of the load\/store unit.
 loadStoreStep :: LoadStoreState -> LoadStoreReq -> (LoadStoreState, LoadStoreResp)
-loadStoreStep state LoadStoreReq {job, memResp} = (memUnitState, memUnitResp)
+loadStoreStep state LoadStoreReq {job, memResp, granted, squash}
+  | squash = (Idle, nop)
+  | otherwise = case state of
+      Idle -> (maybe Idle (\j -> WaitReady j (busAccess j.memOp j.addr j.wdata)) job, nop)
+      WaitReady j acc ->
+        (if memResp.ready then WaitValid j acc else state, inflight j.pdAddr (Just (busReq j.addr acc)))
+      WaitValid j acc -> case memResp.rdata of
+        Nothing -> (state, inflight j.pdAddr Nothing)
+        Just w -> settle (completion j acc w)
+      Waiting c -> settle c
   where
-    memUnitState = case state of
-      Idle | Just LoadStoreJob {..} <- job -> WaitReady addr (busAccess memOp addr wdata)
-      WaitReady addr acc | memResp.ready -> WaitValid addr acc
-      WaitValid _ _ | isJust memResp.rdata -> Idle
-      _ -> state
-    memUnitResp =
-      LoadStoreResp
-        { result = case state of
-            WaitValid _ (BusLoad shape) -> loadResult shape <$> memResp.rdata
-            _ -> Nothing
-        , stall = case state of
-            Idle -> isJust job
-            WaitReady _ _ -> True
-            WaitValid _ _ -> isNothing memResp.rdata
-        , memReq = case state of
-            WaitReady addr access -> Just $ busReq addr access
-            _ -> Nothing
-        , completed = case state of
-            WaitValid addr access | isJust memResp.rdata -> Just (busReq addr access)
-            _ -> Nothing
-        }
+    nop = LoadStoreResp {busy = False, done = Nothing, forwarding = F.Idle, memReq = Nothing}
+    inflight pdAddr memReq = LoadStoreResp {busy = True, done = Nothing, forwarding = F.forwarding pdAddr Nothing, memReq}
+    settle c =
+      ( if granted then Idle else Waiting c
+      , LoadStoreResp {busy = True, done = Just c, forwarding = F.broadcast c, memReq = Nothing}
+      )
+
+completion :: LoadStoreJob -> BusAccess -> BitVector (MemDataBytes * 8) -> Completion
+completion LoadStoreJob {..} acc busWord =
+  Complete robAddr pdAddr RobDone {exception = Nothing, mispredicted, value, mem = Just (busReq addr acc)}
+  where
+    value = case acc of
+      BusLoad shape -> loadResult shape busWord
+      BusStore _ -> deepErrorX "loadStore: a store produces no result"
 
 -- | The decoded access put in the form the bus needs; the offset is the one part of it the address supplies.
 busAccess :: MemOp -> Addr -> BitVector (MemDataBytes * 8) -> BusAccess

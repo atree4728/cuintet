@@ -3,20 +3,22 @@ module Cuintet.Stage.WriteBack (writeback, WriteBackIn (..), WriteBackOut (..)) 
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
-import Cuintet.CoreCtrl (InstCtrl (..), isLoad)
+import Cuintet.CoreCtrl (ExecUnit (..), InstCtrl (..), unitOf)
 import Cuintet.Eei (IssueWidth, PRegAddr, XLen)
-import Cuintet.Pipeline (Completion (..), Executed (..), isSerializing, pdOf, usesMulDiv)
-import Cuintet.Unit.LoadStore (LoadStoreJob (..), LoadStoreResp (..))
+import Cuintet.Pipeline (Completion (..), Executed (..), isSerializing, pdOf)
+import Cuintet.Unit.LoadStore (LoadStoreJob (..))
 import Cuintet.Unit.RegFile (WritePorts)
 import Cuintet.Unit.Rob (RobDone (..))
 import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
-import Data.Maybe (fromMaybe, isJust, isNothing)
+import Data.Bool (bool)
+import Data.Maybe (isJust, isNothing)
 
 data WriteBackIn = WriteBackIn
   { entries :: Upto IssueWidth Executed
-  , loadStoreResp :: LoadStoreResp
   , mulDivDone :: Maybe Completion
+  , loadStoreBusy :: Bool
+  , loadStoreDone :: Maybe Completion
   , csrWrite :: Maybe (PRegAddr, BitVector XLen)
   , serializingInFlight :: Bool
   }
@@ -28,7 +30,14 @@ data WriteBackOut = WriteBackOut
   , completions :: Vec WritePorts (Maybe Completion)
   , loadStoreJob :: Maybe LoadStoreJob
   , mulDivGranted :: Bool
+  , loadStoreGranted :: Bool
   }
+
+dispatched :: Executed -> Bool
+dispatched entry =
+  isNothing entry.exception && case unitOf entry.ctrl of
+    Alu _ -> False
+    _ -> True
 
 writeback :: WriteBackIn -> WriteBackOut
 writeback WriteBackIn {..} = WriteBackOut {..}
@@ -36,35 +45,34 @@ writeback WriteBackIn {..} = WriteBackOut {..}
     (entry0, entry1) = vecToTuple entries.elems
 
     taken, wanted :: Unsigned 3
-    taken = (if isJust csrRequest then 1 else 0) + (if isJust mulDivDone then 1 else 0)
-    wanted =
-      (if entries.len >= 1 && not (usesMulDiv entry0) then 1 else 0)
-        + (if entries.len >= 2 then 1 else 0)
+    taken = sum $ bool 0 1 . isJust <$> (csrRequest :> loadStoreDone :> mulDivDone :> Nil)
+    wanted = bool 0 1 (entries.len >= 1 && not (dispatched entry0)) + bool 0 1 (entries.len >= 2)
 
-    issued = entries.len > 0 && not loadStoreResp.stall && not serializingInFlight && taken + wanted <= natToNum @WritePorts
+    memJob = do
+      entry@Executed {..} <- Upto.head entries
+      guard (isNothing exception)
+      memOp <- ctrl.memOp
+      pure LoadStoreJob {memOp, addr = bitCoerce aluResult, wdata = rs2Data, pdAddr = pdOf entry, robAddr, mispredicted}
+
+    memOk = case memJob of
+      Nothing -> True
+      Just _ -> not loadStoreBusy
+
+    issued = entries.len > 0 && memOk && not serializingInFlight && taken + wanted <= natToNum @WritePorts
+    loadStoreJob = guard issued *> memJob
     issue = if issued then entries.len else 0
     serializing = issued && any (maybe False isSerializing) (Upto.toMaybes entries)
 
-    loadStoreJob = do
-      guard (not serializingInFlight)
-      Executed {..} <- Upto.head entries
-      guard (isNothing exception)
-      memOp <- ctrl.memOp
-      pure LoadStoreJob {memOp, addr = bitCoerce aluResult, wdata = rs2Data}
-
-    completed entry@Executed {..} (result, mem) =
-      Complete robAddr (pdOf entry) RobDone {..}
-      where
-        value
-          | isLoad ctrl = fromMaybe (deepErrorX "writeback: load completed without data") result
-          | otherwise = wbData
+    completed entry@Executed {..} =
+      Complete entry.robAddr (pdOf entry) RobDone {exception, mispredicted, value = entry.wbData, mem = Nothing}
 
     csrRequest = uncurry CsrValue <$> csrWrite
-    lane0Request = guard (issued && entries.len >= 1 && not (usesMulDiv entry0)) *> Just (completed entry0 (loadStoreResp.result, loadStoreResp.completed))
-    lane1Request = guard (issued && entries.len >= 2) *> Just (completed entry1 (Nothing, Nothing))
+    lane0Request = guard (issued && entries.len >= 1 && not (dispatched entry0)) *> Just (completed entry0)
+    lane1Request = guard (issued && entries.len >= 2) *> Just (completed entry1)
 
-    (grants, completions) = arbitrate (csrRequest :> mulDivDone :> lane0Request :> lane1Request :> Nil)
-    mulDivGranted = grants !! (1 :: Index 4)
+    (grants, completions) = arbitrate (csrRequest :> loadStoreDone :> mulDivDone :> lane0Request :> lane1Request :> Nil)
+    loadStoreGranted = grants !! (1 :: Index 4)
+    mulDivGranted = grants !! (2 :: Index 5)
 {-# OPAQUE writeback #-}
 
 arbitrate ::
