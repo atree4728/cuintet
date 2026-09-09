@@ -1,9 +1,9 @@
 -- | The payloads that cross the stage boundaries, one record per FIFO.
-module Cuintet.Pipeline (FetchBufBits, Fetched (..), Decoded (..), Renamed (..), Ready (..), Executed (..), Retire (..), Completion (..), validRdOf, rdOf, pdOf, isSerializing, hasResult, regWrite, robWrite) where
+module Cuintet.Pipeline (FetchBufBits, Fetched (..), Decoded (..), Renamed (..), Ready (..), Executed (..), Retire (..), Completion (..), validRdOf, rdOf, pdOf, isSerializing, hasResult, regWrite, robWrite, usesMulDiv) where
 
 import Clash.Prelude
 import Control.Monad (guard)
-import Cuintet.CoreCtrl (InstCtrl (..), isCsrRead, isLoad)
+import Cuintet.CoreCtrl (ExecUnit (..), InstCtrl (..), isCsrRead, unitOf)
 import Cuintet.Eei (Addr, Inst, MemReq, PRegAddr, RegAddr, RobAddr, SystemOp (..), TrapCause, XLen)
 import Cuintet.Unit.Btb (Prediction)
 import Cuintet.Unit.Rob (RobDone (..))
@@ -108,10 +108,15 @@ pdOf ::
 pdOf stage = guard (isNothing stage.exception) *> stage.pdAddr
 
 hasResult :: (HasField "ctrl" stage InstCtrl) => stage -> Bool
-hasResult stage = not (isLoad stage.ctrl || isCsrRead stage.ctrl)
+hasResult stage = case unitOf stage.ctrl of
+  Alu _ -> not (isCsrRead stage.ctrl)
+  _ -> False
 
 isSerializing :: (HasField "exception" stage (Maybe a), HasField "ctrl" stage InstCtrl) => stage -> Bool
 isSerializing stage = isJust stage.exception || stage.ctrl.systemOp == Just SysMret
+
+usesMulDiv :: (HasField "exception" stage (Maybe a), HasField "ctrl" stage InstCtrl) => stage -> Bool
+usesMulDiv entry = isNothing entry.exception && unitOf entry.ctrl == MulDiv
 
 robWrite :: Completion -> Maybe (RobAddr, RobDone)
 robWrite = \case

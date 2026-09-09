@@ -6,18 +6,18 @@ import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
 import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), isCsrRead)
 import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), IssueWidth, XLen, misalignedCause, pattern INSTRUCTION_ADDRESS_MISALIGNED)
-import Cuintet.Pipeline (Executed (..), Ready (..), isSerializing)
+import Cuintet.Pipeline (Executed (..), Ready (..), isSerializing, usesMulDiv)
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
-import Cuintet.Unit.MulDiv (MulDivJob (..), MulDivResp (..))
+import Cuintet.Unit.MulDiv (MulDivJob (..))
 import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
 import Cuintet.Util (orNothing)
-import Data.Maybe (fromMaybe, isJust, isNothing)
+import Data.Maybe (isJust, isNothing)
 
 data ExecuteIn = ExecuteIn
   { entries :: Upto IssueWidth Ready
   , wready :: Bool
-  , mulDivResp :: MulDivResp
+  , mulDivBusy :: Bool
   }
 
 data ExecuteOut = ExecuteOut
@@ -35,15 +35,17 @@ data ExecuteOut = ExecuteOut
 execute :: ExecuteIn -> ExecuteOut
 execute ExecuteIn {..} = ExecuteOut {..}
   where
-    mulDivJob = mkJob =<< Upto.head entries
-    mkJob Ready {..}
-      | Just mulDivOp <- ctrl.mulDivOp = Just MulDivJob {mulDivOp, isOp32 = ctrl.isOp32, op1 = rs1Data, op2 = rs2Data}
+    needsMulDiv = maybe False usesMulDiv (Upto.head entries)
+    issued = entries.len > 0 && wready && not (needsMulDiv && mulDivBusy)
+
+    mulDivJob = guard issued *> (mkJob executed0.mispredicted =<< Upto.head entries)
+    mkJob mispredicted Ready {..}
+      | isNothing exception
+      , Just mulDivOp <- ctrl.mulDivOp =
+          Just MulDivJob {mulDivOp, isOp32 = ctrl.isOp32, op1 = rs1Data, op2 = rs2Data, pdAddr, robAddr, mispredicted}
       | otherwise = Nothing
 
-    issued = entries.len > 0 && wready && not mulDivResp.stall
-
-    ((executed0, redirect0, btbWrite0), (executed1, redirect1, btbWrite1)) =
-      vecToTuple $ zipWith executeLane (mulDivResp.result :> Nothing :> Nil) entries.elems
+    ((executed0, redirect0, btbWrite0), (executed1, redirect1, btbWrite1)) = vecToTuple $ executeLane <$> entries.elems
 
     squash1 = isJust redirect0 || isSerializing executed0
 
@@ -63,8 +65,8 @@ execute ExecuteIn {..} = ExecuteOut {..}
     btbWrites = (guard issued >> btbWrite0) :> (guard (issued && entries.len == 2) >> btbWrite1) :> Nil
 {-# OPAQUE execute #-}
 
-executeLane :: Maybe (BitVector XLen) -> Ready -> (Executed, Maybe Addr, Maybe BtbWrite)
-executeLane mulDivResult Ready {..} = (executed, redirect, btbWrite)
+executeLane :: Ready -> (Executed, Maybe Addr, Maybe BtbWrite)
+executeLane Ready {..} = (executed, redirect, btbWrite)
   where
     executed = Executed {exception = exception', mispredicted = isJust redirect, ..}
 
@@ -73,7 +75,6 @@ executeLane mulDivResult Ready {..} = (executed, redirect, btbWrite)
     branchTaken = maybe False (\cond -> branchUnit cond op1 op2) ctrl.branchOp
 
     wbData
-      | isJust ctrl.mulDivOp = fromMaybe (deepErrorX "execute: muldiv committed without a result") mulDivResult
       | isCsrRead ctrl = rs1Data
       | ctrl.isLui = imm
       | ctrl.isJump = bitCoerce (pc + 4)

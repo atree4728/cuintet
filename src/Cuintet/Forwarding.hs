@@ -1,7 +1,10 @@
-module Cuintet.Forwarding (Forwarding (..), bypass, forwarding) where
+module Cuintet.Forwarding (NForwards, Forwarding (..), bypass, forwarding, broadcast) where
 
 import Clash.Prelude
 import Cuintet.Eei (PRegAddr, XLen)
+import Cuintet.Pipeline (Completion, regWrite)
+
+type NForwards = 6 -- MulDiv, LSU, ALU * 2 for EX/WB
 
 data Forwarding
   = Idle
@@ -20,3 +23,6 @@ forwarding :: Maybe PRegAddr -> Maybe (BitVector XLen) -> Forwarding
 forwarding rdM value = case rdM of
   Nothing -> Idle
   Just rd -> maybe (Pending rd) (Ready rd) value
+
+broadcast :: Completion -> Forwarding
+broadcast = maybe Idle (uncurry Ready) . regWrite

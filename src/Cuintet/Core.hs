@@ -4,7 +4,8 @@ module Cuintet.Core (CoreIn (..), CoreOut (..), CoreTrace (..), core) where
 import Clash.Prelude
 import Control.Monad (guard)
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), FetchWidth, IssueWidth, MemReq, MemResp, XLen)
-import Cuintet.Forwarding (Forwarding, forwarding)
+import Cuintet.Forwarding (Forwarding)
+import Cuintet.Forwarding qualified as F
 import Cuintet.Pipeline (Decoded (..), Executed (..), FetchBufBits, Fetched (..), Ready (..), Renamed (..), Retire (..), hasResult, pdOf, regWrite, robWrite)
 import Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit)
 import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
@@ -123,8 +124,8 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
     decodeIn = DecodeIn {entries = fetchedResp.rdata, wready = decodedResp.wready, stall = flush}
     renameIn = RenameIn {entries = decodedResp.rdata, committed = cmOut.renamed, nextRobAddr = robResp.buffer.tl, robFree = robResp.buffer.free, flush, drained = robResp.buffer.rdata.len == 0, wready = renamedResp.wready}
     regreadIn = RegReadIn {entries = renamedResp.rdata, rsData = regResp.rsData, forwards, wready = readyResp.wready}
-    executeIn = ExecuteIn {entries = readyResp.rdata, wready = executedResp.wready, mulDivResp}
-    writebackIn = WriteBackIn {entries = executedResp.rdata, loadStoreResp, csrWrite = cmOut.csrWrite, serializingInFlight}
+    executeIn = ExecuteIn {entries = readyResp.rdata, wready = executedResp.wready, mulDivBusy = mulDivResp.busy}
+    writebackIn = WriteBackIn {entries = executedResp.rdata, loadStoreResp, csrWrite = cmOut.csrWrite, serializingInFlight, mulDivDone = mulDivResp.done}
     commitIn = CommitIn {entries = robResp.buffer.rdata}
 
     (fetchState', ifOut) = fetch fetchState fetchIn
@@ -135,19 +136,20 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
     wbOut = writeback writebackIn
     (csrFile', cmOut) = commit csrFile commitIn
 
-    (mulDivState', mulDivResp) = mulDivStep mulDivState MulDivReq {job = exOut.mulDivJob, wready = executedResp.wready}
+    (mulDivState', mulDivResp) =
+      mulDivStep mulDivState MulDivReq {job = exOut.mulDivJob, granted = wbOut.mulDivGranted, squash = cmOut.squash}
     (loadStoreState', loadStoreResp) = loadStoreStep loadStoreState LoadStoreReq {job = wbOut.loadStoreJob, memResp = dResp}
 
-    forwards = fromEx 1 :> fromEx 0 :> fromMa 1 :> fromMa 0 :> Nil
+    forwards = fromEx 1 :> fromEx 0 :> fromWb 1 :> fromWb 0 :> mulDivResp.forwarding :> F.Idle :> Nil
       where
-        fromEx, fromMa :: Index IssueWidth -> Forwarding
+        fromEx, fromWb :: Index IssueWidth -> Forwarding
         exLanes = Upto.toMaybes readyResp.rdata
         maLanes = Upto.toMaybes executedResp.rdata
-        fromEx i = forwarding (pdOf =<< exLanes !! i) $ do
+        fromEx i = F.forwarding (pdOf =<< exLanes !! i) $ do
           entry <- exLanes !! i
           guard exOut.issued
           orNothing (hasResult entry) (exOut.wbData !! i)
-        fromMa i = forwarding (pdOf =<< maLanes !! i) $ do
+        fromWb i = F.forwarding (pdOf =<< maLanes !! i) $ do
           entry <- maLanes !! i
           orNothing (hasResult entry) entry.wbData
 

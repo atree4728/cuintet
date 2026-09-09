@@ -1,41 +1,65 @@
 module Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState (..), MulDivJob (..), mulDivStep) where
 
 import Clash.Prelude
-import Cuintet.Eei (DivOp (..), MulDivOp (..), MulOp (..), Sign (..), XLen)
+import Cuintet.Eei (DivOp (..), MulDivOp (..), MulOp (..), PRegAddr, RobAddr, Sign (..), XLen)
+import Cuintet.Forwarding (Forwarding)
+import Cuintet.Forwarding qualified as F
+import Cuintet.Pipeline (Completion (..))
 import Cuintet.Unit.MulDiv.Div (DivOperands (..), DivResult (..), DivState, divInit, divResult, divStep)
 import Cuintet.Unit.MulDiv.Mul (MulOperands (..), MulResult (..), MulState, mulInit, mulResult, mulStep)
+import Cuintet.Unit.Rob (RobDone (..))
 import Data.Function (applyWhen)
-import Data.Maybe (isJust, isNothing)
 
 -- | One multiply or divide for the unit to carry out.
 data MulDivJob = MulDivJob
   { mulDivOp :: MulDivOp
   , isOp32 :: Bool
   , op1, op2 :: BitVector XLen
+  , pdAddr :: Maybe PRegAddr
+  , robAddr :: RobAddr
+  , mispredicted :: Bool
   }
   deriving (Generic, NFDataX)
 
 data MulDivReq = MulDivReq
   { job :: Maybe MulDivJob
-  , wready :: Bool
+  , granted :: Bool
+  , squash :: Bool
   }
 
 data MulDivResp = MulDivResp
-  { stall :: Bool
-  , result :: Maybe (BitVector XLen)
+  { busy :: Bool
+  , done :: Maybe Completion
+  , forwarding :: Forwarding
   }
 
-data MulDivState = Idle | Busy MulDivJob Phase
+data MulDivState = Idle | Busy MulDivJob Phase | Waiting Completion
   deriving (Generic, NFDataX)
 
 data Phase = Loaded | Multiplying MulState | Dividing DivState
   deriving (Generic, NFDataX)
 
+completion :: MulDivJob -> BitVector XLen -> Completion
+completion MulDivJob {robAddr, pdAddr, mispredicted} value =
+  Complete robAddr pdAddr RobDone {exception = Nothing, mispredicted, value, mem = Nothing}
+
 mulDivStep :: MulDivState -> MulDivReq -> (MulDivState, MulDivResp)
-mulDivStep _ MulDivReq {job = Nothing} = (Idle, MulDivResp {stall = False, result = Nothing})
-mulDivStep Idle MulDivReq {job = Just job} = (Busy job Loaded, MulDivResp {stall = True, result = Nothing})
-mulDivStep (Busy job phase) MulDivReq {wready} = (state', MulDivResp {stall = isNothing result, result})
+mulDivStep _ MulDivReq {squash = True} = (Idle, MulDivResp {busy = False, done = Nothing, forwarding = F.Idle})
+mulDivStep Idle MulDivReq {job} =
+  (maybe Idle (`Busy` Loaded) job, MulDivResp {busy = False, done = Nothing, forwarding = F.Idle})
+mulDivStep (Waiting c) MulDivReq {granted} =
+  (if granted then Idle else Waiting c, MulDivResp {busy = True, done = Just c, forwarding = F.broadcast c})
+mulDivStep (Busy job phase) MulDivReq {granted} = (state', MulDivResp {busy = True, done, forwarding})
   where
+    done = completion job <$> result
+    forwarding = F.forwarding job.pdAddr result
+
+    state' = case result of
+      Just v
+        | granted -> Idle
+        | otherwise -> Waiting (completion job v)
+      Nothing -> Busy job stepped
+
     (result, stepped) = case job.mulDivOp of
       Multiply op -> (finish <$> (mulResult =<< running), Multiplying next)
         where
@@ -66,10 +90,6 @@ mulDivStep (Busy job phase) MulDivReq {wready} = (state', MulDivResp {stall = is
                 | divisor.value == 0 = maxBound
                 | otherwise = applyWhen (dividend.negative /= divisor.negative) negate q
               remainder = applyWhen dividend.negative negate r
-
-    state'
-      | isJust result = if wready then Idle else Busy job phase
-      | otherwise = Busy job stepped
 {-# OPAQUE mulDivStep #-}
 
 mulOperands :: (Sign, Sign) -> MulDivJob -> MulOperands

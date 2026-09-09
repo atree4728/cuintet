@@ -5,7 +5,7 @@ import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
 import Cuintet.CoreCtrl (InstCtrl (..), isLoad)
 import Cuintet.Eei (IssueWidth, PRegAddr, XLen)
-import Cuintet.Pipeline (Completion (..), Executed (..), isSerializing, pdOf)
+import Cuintet.Pipeline (Completion (..), Executed (..), isSerializing, pdOf, usesMulDiv)
 import Cuintet.Unit.LoadStore (LoadStoreJob (..), LoadStoreResp (..))
 import Cuintet.Unit.RegFile (WritePorts)
 import Cuintet.Unit.Rob (RobDone (..))
@@ -16,6 +16,7 @@ import Data.Maybe (fromMaybe, isJust, isNothing)
 data WriteBackIn = WriteBackIn
   { entries :: Upto IssueWidth Executed
   , loadStoreResp :: LoadStoreResp
+  , mulDivDone :: Maybe Completion
   , csrWrite :: Maybe (PRegAddr, BitVector XLen)
   , serializingInFlight :: Bool
   }
@@ -26,6 +27,7 @@ data WriteBackOut = WriteBackOut
   , serializing :: Bool
   , completions :: Vec WritePorts (Maybe Completion)
   , loadStoreJob :: Maybe LoadStoreJob
+  , mulDivGranted :: Bool
   }
 
 writeback :: WriteBackIn -> WriteBackOut
@@ -34,11 +36,12 @@ writeback WriteBackIn {..} = WriteBackOut {..}
     (entry0, entry1) = vecToTuple entries.elems
 
     taken, wanted :: Unsigned 3
-    taken = if isJust csrRequest then 1 else 0
-    wanted = numConvert entries.len
-    lanesFit = taken + wanted <= natToNum @WritePorts
+    taken = (if isJust csrRequest then 1 else 0) + (if isJust mulDivDone then 1 else 0)
+    wanted =
+      (if entries.len >= 1 && not (usesMulDiv entry0) then 1 else 0)
+        + (if entries.len >= 2 then 1 else 0)
 
-    issued = entries.len > 0 && not loadStoreResp.stall && not serializingInFlight && lanesFit
+    issued = entries.len > 0 && not loadStoreResp.stall && not serializingInFlight && taken + wanted <= natToNum @WritePorts
     issue = if issued then entries.len else 0
     serializing = issued && any (maybe False isSerializing) (Upto.toMaybes entries)
 
@@ -57,10 +60,11 @@ writeback WriteBackIn {..} = WriteBackOut {..}
           | otherwise = wbData
 
     csrRequest = uncurry CsrValue <$> csrWrite
-    lane0Request = guard (issued && entries.len >= 1) *> Just (completed entry0 (loadStoreResp.result, loadStoreResp.completed))
+    lane0Request = guard (issued && entries.len >= 1 && not (usesMulDiv entry0)) *> Just (completed entry0 (loadStoreResp.result, loadStoreResp.completed))
     lane1Request = guard (issued && entries.len >= 2) *> Just (completed entry1 (Nothing, Nothing))
 
-    (_, completions) = arbitrate (csrRequest :> lane0Request :> lane1Request :> Nil)
+    (grants, completions) = arbitrate (csrRequest :> mulDivDone :> lane0Request :> lane1Request :> Nil)
+    mulDivGranted = grants !! (1 :: Index 4)
 {-# OPAQUE writeback #-}
 
 arbitrate ::
@@ -69,7 +73,6 @@ arbitrate ::
   Vec n (Maybe a) -> (Vec n Bool, Vec nw (Maybe a))
 arbitrate reqs = (grants, slots)
   where
-    -- grants = snd $ mapAccumL (\cnt req -> let cnt' = cnt + bool 0 1 (isJust req) in (cnt', cnt < natToNum @nw && isJust req)) 0 reqs
     ahead :: Vec n (Index (n + 1))
     ahead = init (scanl (\acc r -> if isJust r then acc + 1 else acc) 0 reqs)
     grants = zipWith (\r k -> isJust r && k < natToNum @nw) reqs ahead
