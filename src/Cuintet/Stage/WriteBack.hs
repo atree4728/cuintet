@@ -1,4 +1,4 @@
-module Cuintet.Stage.MemAccess (memAccess, MemAccessIn (..), MemAccessOut (..)) where
+module Cuintet.Stage.WriteBack (writeback, WriteBackIn (..), WriteBackOut (..)) where
 
 import Clash.Prelude
 import Control.Monad (guard)
@@ -11,13 +11,13 @@ import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
 import Data.Maybe (fromMaybe, isNothing)
 
-data MemAccessIn = MemAccessIn
+data WriteBackIn = WriteBackIn
   { entries :: Upto IssueWidth Executed
   , loadStoreResp :: LoadStoreResp
   , commitUsesCsrFile :: Bool
   }
 
-data MemAccessOut = MemAccessOut
+data WriteBackOut = WriteBackOut
   { issue :: Upto IssueWidth Completed
   , issued :: Bool
   , writes :: Vec IssueWidth (Maybe (PRegAddr, BitVector XLen))
@@ -25,9 +25,8 @@ data MemAccessOut = MemAccessOut
   , loadStoreJob :: Maybe LoadStoreJob
   }
 
--- | One clock of MA. The group stalls as a whole; no lane is ever dropped here.
-memAccess :: MemAccessIn -> MemAccessOut
-memAccess MemAccessIn {..} = MemAccessOut {..}
+writeback :: WriteBackIn -> WriteBackOut
+writeback WriteBackIn {..} = WriteBackOut {..}
   where
     loadStoreJob = guard (not commitUsesCsrFile) *> (mkJob =<< Upto.head entries)
     mkJob Executed {..}
@@ -43,11 +42,11 @@ memAccess MemAccessIn {..} = MemAccessOut {..}
         lanes = (loadStoreResp.result, loadStoreResp.completed) :> (Nothing, Nothing) :> Nil
         completeLane Executed {..} (result, mem) = Completed {robAddr, robDone}
           where
-            robDone = RobDone {value = if isLoad ctrl then fromMaybe (deepErrorX "memAccess: load completed without data") result else wbData, ..}
+            robDone = RobDone {value = if isLoad ctrl then fromMaybe (deepErrorX "writeback: load completed without data") result else wbData, ..}
 
     writes = zipWith mkWrite (Upto.toMaybes issue) entries.elems
     mkWrite completed entry = do
       Completed {robDone} <- completed
       pd <- pdOf entry
       pure (pd, robDone.value)
-{-# OPAQUE memAccess #-}
+{-# OPAQUE writeback #-}
