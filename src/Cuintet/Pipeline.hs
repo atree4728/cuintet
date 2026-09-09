@@ -1,10 +1,10 @@
 -- | The payloads that cross the stage boundaries, one record per FIFO.
-module Cuintet.Pipeline (FetchBufBits, Fetched (..), Decoded (..), Renamed (..), Ready (..), Executed (..), Completed (..), Retire (..), validRdOf, rdOf, pdOf, serializing, hasResult, Mapping (..)) where
+module Cuintet.Pipeline (FetchBufBits, Fetched (..), Decoded (..), Renamed (..), Ready (..), Executed (..), Retire (..), validRdOf, rdOf, pdOf, serializing, hasResult) where
 
 import Clash.Prelude
 import Control.Monad (guard)
 import Cuintet.CoreCtrl (InstCtrl (..), isCsrRead, isLoad)
-import Cuintet.Eei (Addr, Inst, MemReq, PRegAddr, RegAddr, SystemOp (..), TrapCause, XLen)
+import Cuintet.Eei (Addr, Inst, MemReq, PRegAddr, RegAddr, RobAddr, SystemOp (..), TrapCause, XLen)
 import Cuintet.Unit.Btb (Prediction)
 import Cuintet.Util (orNothing)
 import Data.Maybe (isJust, isNothing)
@@ -45,6 +45,7 @@ data Renamed = Renamed
   , ps1Addr :: PRegAddr
   , ps2Addr :: PRegAddr
   , pdAddr :: PRegAddr
+  , robAddr :: RobAddr
   }
   deriving (Generic, NFDataX)
 
@@ -60,6 +61,7 @@ data Ready = Ready
   , rs2Data :: BitVector XLen
   , exception :: Maybe (TrapCause, BitVector XLen)
   , pdAddr :: PRegAddr
+  , robAddr :: RobAddr
   }
   deriving (Generic, NFDataX)
 
@@ -73,22 +75,10 @@ data Executed = Executed
   , rdAddr :: RegAddr
   , exception :: Maybe (TrapCause, BitVector XLen)
   , pdAddr :: PRegAddr
+  , robAddr :: RobAddr
+  , mispredicted :: Bool
   , aluResult :: BitVector XLen
   , wbData :: BitVector XLen
-  }
-  deriving (Generic, NFDataX)
-
-data Completed = Completed
-  { pc :: Addr
-  , instBits :: Inst
-  , ctrl :: InstCtrl
-  , rs1Addr :: RegAddr
-  , rs1Data :: BitVector XLen
-  , rdAddr :: RegAddr
-  , exception :: Maybe (TrapCause, BitVector XLen)
-  , pdAddr :: PRegAddr
-  , wbData :: BitVector XLen
-  , mem :: Maybe MemReq
   }
   deriving (Generic, NFDataX)
 
@@ -130,9 +120,3 @@ hasResult stage = not (isLoad stage.ctrl || isCsrRead stage.ctrl)
 
 serializing :: (HasField "exception" stage (Maybe a), HasField "ctrl" stage InstCtrl) => stage -> Bool
 serializing stage = isJust stage.exception || stage.ctrl.systemOp == Just SysMret
-
-data Mapping = Mapping
-  { rdAddr :: RegAddr
-  , pdAddr :: PRegAddr
-  }
-  deriving (Generic, NFDataX)

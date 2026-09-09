@@ -2,9 +2,10 @@ module Cuintet.Stage.MemAccess (memAccess, MemAccessIn (..), MemAccessOut (..)) 
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..), isLoad)
-import Cuintet.Eei (IssueWidth, MemReq, MemResp, XLen)
-import Cuintet.Pipeline (Completed (..), Executed (..))
+import Cuintet.Eei (IssueWidth, MemReq, MemResp)
+import Cuintet.Pipeline (Executed (..))
 import Cuintet.Unit.LoadStore (LoadStoreJob (..), LoadStoreReq (..), LoadStoreResp (..), LoadStoreState (..), loadStoreStep)
+import Cuintet.Unit.Rob (Completed (..), RobDone (..))
 import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
 import Data.Maybe (fromMaybe, isNothing)
@@ -36,20 +37,10 @@ memAccess loadStoreState MemAccessIn {..} = (loadStoreState', MemAccessOut {..})
     issued = entries.len > 0 && not loadStoreResp.stall
     dReq = loadStoreResp.memReq
 
-    issue = Upto {len = if issued then entries.len else 0, elems}
-    elems =
-      memAccessLane loadStoreResp.result loadStoreResp.completed (entries.elems !! (0 :: Index IssueWidth))
-        :> memAccessLane Nothing Nothing (entries.elems !! (1 :: Index IssueWidth))
-        :> Nil
+    issue = Upto {len = if issued then entries.len else 0, elems = zipWith completeLane entries.elems lanes}
+      where
+        lanes = (loadStoreResp.result, loadStoreResp.completed) :> (Nothing, Nothing) :> Nil
+        completeLane Executed {..} (result, mem) = Completed {robAddr, robDone}
+          where
+            robDone = RobDone {value = if isLoad ctrl then fromMaybe (deepErrorX "memAccess: load completed without data") result else wbData, ..}
 {-# OPAQUE memAccess #-}
-
-memAccessLane :: Maybe (BitVector XLen) -> Maybe MemReq -> Executed -> Completed
-memAccessLane result completed Executed {..} =
-  Completed
-    { wbData =
-        if isLoad ctrl
-          then fromMaybe (deepErrorX "memAccess: load committed without data") result
-          else wbData
-    , mem = completed
-    , ..
-    }

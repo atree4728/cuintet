@@ -47,6 +47,7 @@ module Cuintet.Eei (
   NRegs,
   NPRegs,
   NRob,
+  Mapping (..),
   TrapCause (..),
   pattern INSTRUCTION_ADDRESS_MISALIGNED,
   pattern ILLEGAL_INSTRUCTION,
@@ -100,6 +101,14 @@ type NPRegs = 2 ^ BitSize PRegAddr
 type RobAddr = Unsigned 4
 
 type NRob = 2 ^ BitSize RobAddr
+
+-- | What renaming an instruction's destination register decided: Cm makes it architectural, and
+-- the physical register the architectural map table held until then goes back to the free list.
+data Mapping = Mapping
+  { rdAddr :: RegAddr
+  , pdAddr :: PRegAddr
+  }
+  deriving (Generic, NFDataX)
 
 -- | Whether a narrower-than-register load fills the high bits with its sign or zero.
 data Sign = Signed | Unsigned

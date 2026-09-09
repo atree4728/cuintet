@@ -10,12 +10,13 @@ import Data.Maybe (fromMaybe)
 data RingReq bits nw nr dat = RingReq
   { wdata :: Upto nw dat
   , pop :: Index (nr + 1)
-  , flush :: Bool
+  , squash :: Bool
   }
   deriving (Generic, NFDataX)
 
 data RingResp bits nr dat = RingResp
   { rdata :: Upto nr dat
+  , hd :: Unsigned bits
   , tl :: Unsigned bits
   , free :: Unsigned bits
   }
@@ -39,12 +40,12 @@ ring SNat req = resp <$> s <*> multiRam (rdAddrs <$> s) writes
       where
         hd' = hd + numConvert pop
         (tl', ws)
-          | flush = (hd', repeat Nothing)
+          | squash = (hd', repeat Nothing)
           | otherwise = (tl + numConvert wdata.len, imap (\i -> fmap (tl + numConvert i,)) (Upto.toMaybes wdata))
 
     rdAddrs RingState {hd} = (hd +) . numConvert <$> indicesI @nr
 
-    resp RingState {hd, tl} elems = RingResp {rdata = Upto {len, elems}, tl, free = maxBound - used}
+    resp RingState {hd, tl} elems = RingResp {rdata = Upto {len, elems}, hd, tl, free = maxBound - used}
       where
         used = tl - hd
         len = fromMaybe maxBound (maybeNumConvert used)

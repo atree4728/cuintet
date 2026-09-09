@@ -86,7 +86,7 @@ modelStep model@Model {..} trace@CoreTrace {..} = applyWhen flush flushed moved
         , rrQ = move (count rnIssue) rnQ (count rrIssue) rrQ
         , exQ = move (count rrIssue) rrQ (count exIssue) exQ
         , maQ = move (count exIssue) exQ (count maIssue) maQ
-        , cmQ = move (count maIssue) maQ retires cmQ
+        , cmQ = drop retires cmQ <> take (count maIssue) maQ
         }
 
 count :: (Integral a) => a -> Int

@@ -4,7 +4,7 @@ module Cuintet.Stage.Execute (execute, ExecuteIn (..), ExecuteOut (..)) where
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
-import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..))
+import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), isCsrRead)
 import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), IssueWidth, XLen, misalignedCause, pattern INSTRUCTION_ADDRESS_MISALIGNED)
 import Cuintet.Pipeline (Executed (..), Ready (..), serializing)
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
@@ -63,7 +63,7 @@ execute mulDivState ExecuteIn {..} = (mulDivState', ExecuteOut {..})
 executeLane :: Maybe (BitVector XLen) -> Ready -> (Executed, Maybe Addr, Maybe BtbWrite)
 executeLane mulDivResult Ready {..} = (executed, redirect, btbWrite)
   where
-    executed = Executed {exception = exception', ..}
+    executed = Executed {exception = exception', mispredicted = isJust redirect, ..}
 
     (op1, op2) = operands ctrl imm rs1Data rs2Data pc
     aluResult = alu ctrl op1 op2
@@ -71,6 +71,7 @@ executeLane mulDivResult Ready {..} = (executed, redirect, btbWrite)
 
     wbData
       | isJust ctrl.mulDivOp = fromMaybe (deepErrorX "execute: muldiv committed without a result") mulDivResult
+      | isCsrRead ctrl = rs1Data
       | ctrl.isLui = imm
       | ctrl.isJump = bitCoerce (pc + 4)
       | otherwise = aluResult
@@ -92,7 +93,6 @@ executeLane mulDivResult Ready {..} = (executed, redirect, btbWrite)
 
     exception' = exception <|> targetException <|> accessException
 
-    -- a trap or an mret redirects from Cm instead
     redirect = orNothing (not (serializing executed) && nextPc /= predicted pc prediction) nextPc
 
     btbWrite = guard (isNothing exception') >> train pc prediction (orNothing (nextPc /= pc + 4) nextPc)
