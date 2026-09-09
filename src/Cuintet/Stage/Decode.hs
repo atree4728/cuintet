@@ -3,7 +3,7 @@ module Cuintet.Stage.Decode (decode, DecodeIn (..), DecodeOut (..), immI, immS, 
 
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
-import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), isJalr, usesRs1, usesRs2)
+import Cuintet.CoreCtrl (ExecUnit (..), InstCtrl (..), InstFormat (..), isJalr, unitOf, usesRs1, usesRs2)
 import Cuintet.Eei (AluOp, Inst, IssueWidth, MemOp (..), Opcode (..), System12 (..), SystemOp (..), XLen, parseBranchOp, parseCsr, parseLoad, parseStore, pattern BREAKPOINT, pattern ENVIRONMENT_CALL_FROM_M_MODE, pattern ILLEGAL_INSTRUCTION)
 import Cuintet.Pipeline (Decoded (..), Fetched (..), rdOf, serializing)
 import Cuintet.Upto (Upto (..))
@@ -32,7 +32,7 @@ decode DecodeIn {..} = DecodeOut {issue}
         >= 2
         && not (serializing decoded0)
         && not (serializing decoded1)
-        && fitsLane1 decoded1.ctrl
+        && useSimpleAlu decoded1.ctrl
         && not hasRAW
     hasRAW = maybe False readRd0 (rdOf decoded0)
       where
@@ -46,8 +46,8 @@ decode DecodeIn {..} = DecodeOut {issue}
     issue = Upto {len, elems = decoded0 :> decoded1 :> Nil}
 {-# OPAQUE decode #-}
 
-fitsLane1 :: InstCtrl -> Bool
-fitsLane1 ctrl = isNothing ctrl.memOp && isNothing ctrl.mulDivOp && isNothing ctrl.systemOp && not (isJalr ctrl)
+useSimpleAlu :: InstCtrl -> Bool
+useSimpleAlu ctrl = unitOf ctrl == Alu maxBound && not (isJalr ctrl)
 
 decodeLane :: Fetched -> Decoded
 decodeLane Fetched {..} = Decoded {..}

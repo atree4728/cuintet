@@ -16,9 +16,9 @@ import Cuintet.Stage.Rename (RenameIn (..), RenameOut (..), RenameState, initRen
 import Cuintet.Unit.Btb (BtbReq (..), BtbResp, btb)
 import Cuintet.Unit.Csr (CsrFile (led), initCsrFile)
 import Cuintet.Unit.Fifo (FifoReq (..), FifoResp (..), fifo)
-import Cuintet.Unit.LoadStore (LoadStoreState)
+import Cuintet.Unit.LoadStore (LoadStoreReq (..), LoadStoreState, loadStoreStep)
 import Cuintet.Unit.LoadStore qualified as L
-import Cuintet.Unit.MulDiv (MulDivState)
+import Cuintet.Unit.MulDiv (MulDivReq (..), MulDivState, mulDivStep)
 import Cuintet.Unit.MulDiv qualified as M
 import Cuintet.Unit.RegFile (RegReq (..), RegResp (..), regFile)
 import Cuintet.Unit.Ring (RingReq (..), RingResp (..), ring)
@@ -122,17 +122,20 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
     decodeIn = DecodeIn {entries = fetchedResp.rdata, wready = decodedResp.wready, stall = flush}
     renameIn = RenameIn {entries = decodedResp.rdata, committed = cmOut.renamed, nextRobAddr = robResp.buffer.tl, robFree = robResp.buffer.free, flush, drained = robResp.buffer.rdata.len == 0, wready = renamedResp.wready}
     regReadIn = RegReadIn {entries = renamedResp.rdata, rsData = regResp.rsData, forwards, wready = readyResp.wready}
-    executeIn = ExecuteIn {entries = readyResp.rdata, wready = executedResp.wready}
-    memAccessIn = MemAccessIn {entries = executedResp.rdata, dResp, commitUsesCsrFile = any usesCsrFile (Upto.head robResp.buffer.rdata)}
+    executeIn = ExecuteIn {entries = readyResp.rdata, wready = executedResp.wready, mulDivResp}
+    memAccessIn = MemAccessIn {entries = executedResp.rdata, loadStoreResp, commitUsesCsrFile = any usesCsrFile (Upto.head robResp.buffer.rdata)}
     commitIn = CommitIn {entries = robResp.buffer.rdata}
 
     (fetchState', ifOut) = fetch fetchState fetchIn
     idOut = decode decodeIn
     (renameState', rnOut) = rename renameState renameIn
     rrOut = regRead regReadIn
-    (mulDivState', exOut) = execute mulDivState executeIn
-    (loadStoreState', maOut) = memAccess loadStoreState memAccessIn
+    exOut = execute executeIn
+    maOut = memAccess memAccessIn
     (csrFile', cmOut) = commit csrFile commitIn
+
+    (mulDivState', mulDivResp) = mulDivStep mulDivState MulDivReq {job = exOut.mulDivJob, wready = executedResp.wready}
+    (loadStoreState', loadStoreResp) = loadStoreStep loadStoreState LoadStoreReq {job = maOut.loadStoreJob, memResp = dResp}
 
     forwards = fromEx 1 :> fromEx 0 :> fromMa 1 :> fromMa 0 :> Nil
       where
@@ -161,7 +164,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
     executedReq = FifoReq {wdata = exOut.issue, rready = maOut.issued, flush = isJust cmOut.redirect}
     robReq = RobReq {allocates = rnOut.allocates, completes = maOut.issue, pop = cmOut.pop, squash = cmOut.squash}
 
-    coreOut = CoreOut {iReq = ifOut.iReq, dReq = maOut.dReq, retired = cmOut.retired, led = csrFile.led, coreTrace}
+    coreOut = CoreOut {iReq = ifOut.iReq, dReq = loadStoreResp.memReq, retired = cmOut.retired, led = csrFile.led, coreTrace}
     coreTrace =
       CoreTrace
         { fetchStart = if iResp.ready && not flush then (.addr) <$> ifOut.iReq else Nothing

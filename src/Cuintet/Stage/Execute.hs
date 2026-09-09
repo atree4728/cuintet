@@ -8,7 +8,7 @@ import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), isCsrRead)
 import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), IssueWidth, XLen, misalignedCause, pattern INSTRUCTION_ADDRESS_MISALIGNED)
 import Cuintet.Pipeline (Executed (..), Ready (..), serializing)
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
-import Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState, mkMulDivJob, mulDivStep)
+import Cuintet.Unit.MulDiv (MulDivJob (..), MulDivResp (..))
 import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
 import Cuintet.Util (orNothing)
@@ -17,6 +17,7 @@ import Data.Maybe (fromMaybe, isJust, isNothing)
 data ExecuteIn = ExecuteIn
   { entries :: Upto IssueWidth Ready
   , wready :: Bool
+  , mulDivResp :: MulDivResp
   }
 
 data ExecuteOut = ExecuteOut
@@ -28,13 +29,16 @@ data ExecuteOut = ExecuteOut
   -- ^ For the broadcast, so before the squash.
   , redirect :: Maybe Addr
   , btbWrites :: Vec IssueWidth (Maybe BtbWrite)
+  , mulDivJob :: Maybe MulDivJob
   }
 
--- | One clock of EX. A multiply or divide sits here for several of them; it leaves on the one the unit produces its result.
-execute :: MulDivState -> ExecuteIn -> (MulDivState, ExecuteOut)
-execute mulDivState ExecuteIn {..} = (mulDivState', ExecuteOut {..})
+execute :: ExecuteIn -> ExecuteOut
+execute ExecuteIn {..} = ExecuteOut {..}
   where
-    (mulDivState', mulDivResp) = mulDivStep mulDivState MulDivReq {job = mkMulDivJob =<< Upto.head entries, wready}
+    mulDivJob = mkJob =<< Upto.head entries
+    mkJob Ready {..}
+      | Just mulDivOp <- ctrl.mulDivOp = Just MulDivJob {mulDivOp, isOp32 = ctrl.isOp32, op1 = rs1Data, op2 = rs2Data}
+      | otherwise = Nothing
 
     issued = entries.len > 0 && wready && not mulDivResp.stall
 

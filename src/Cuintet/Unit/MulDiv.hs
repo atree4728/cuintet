@@ -1,9 +1,7 @@
-module Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState (..), mkMulDivJob, mulDivStep) where
+module Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState (..), MulDivJob (..), mulDivStep) where
 
 import Clash.Prelude
-import Cuintet.CoreCtrl (InstCtrl (..))
 import Cuintet.Eei (DivOp (..), MulDivOp (..), MulOp (..), Sign (..), XLen)
-import Cuintet.Pipeline (Ready (..))
 import Cuintet.Unit.MulDiv.Div (DivOperands (..), DivResult (..), DivState, divInit, divResult, divStep)
 import Cuintet.Unit.MulDiv.Mul (MulOperands (..), MulResult (..), MulState, mulInit, mulResult, mulStep)
 import Data.Function (applyWhen)
@@ -16,11 +14,6 @@ data MulDivJob = MulDivJob
   , op1, op2 :: BitVector XLen
   }
   deriving (Generic, NFDataX)
-
-mkMulDivJob :: Ready -> Maybe MulDivJob
-mkMulDivJob Ready {..}
-  | Just mulDivOp <- ctrl.mulDivOp = Just MulDivJob {mulDivOp, isOp32 = ctrl.isOp32, op1 = rs1Data, op2 = rs2Data}
-  | otherwise = Nothing
 
 data MulDivReq = MulDivReq
   { job :: Maybe MulDivJob

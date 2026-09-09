@@ -2,14 +2,18 @@ module Cuintet.CoreCtrl (
   InstFormat (..),
   InstCtrl (..),
   isLoad,
+  isStore,
   isCsrRead,
   usesRs1,
   usesRs2,
   isJalr,
+  ExecUnit (..),
+  unitOf,
 ) where
 
 import Clash.Prelude
 import Cuintet.Eei (AluOp, BranchOp, MemOp (..), MulDivOp, SystemOp (..))
+import Data.Maybe (isJust)
 
 -- | RISC-V instruction format.
 data InstFormat
@@ -49,6 +53,10 @@ isLoad :: InstCtrl -> Bool
 isLoad InstCtrl {memOp = Just (Load _ _)} = True
 isLoad _ = False
 
+isStore :: InstCtrl -> Bool
+isStore InstCtrl {memOp = Just (Store _)} = True
+isStore _ = False
+
 isCsrRead :: InstCtrl -> Bool
 isCsrRead InstCtrl {systemOp = Just (SysCsr _)} = True
 isCsrRead _ = False
@@ -67,3 +75,13 @@ usesRs2 InstCtrl {format} = case format of
   SType -> True
   BType -> True
   _ -> False
+
+data ExecUnit = Alu (Index 2) | MulDiv | LoadStore
+  deriving (Generic, NFDataX, Eq)
+
+unitOf :: InstCtrl -> ExecUnit
+unitOf ctrl
+  | isJust ctrl.memOp = LoadStore
+  | isJust ctrl.mulDivOp = MulDiv
+  | isJust ctrl.systemOp = Alu 0
+  | otherwise = Alu 1
