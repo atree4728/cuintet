@@ -1,9 +1,10 @@
-module Cuintet.Unit.Rob (RobStatic (..), RobDone (..), RobEntry (..), Completed (..), squashes, usesCsrFile, committedMapping, RobReq (..), RobResp (..), rob) where
+module Cuintet.Unit.Rob (RobStatic (..), RobDone (..), RobEntry (..), squashes, committedMapping, RobReq (..), RobResp (..), rob) where
 
 import Clash.Prelude
 import Control.Monad (guard)
 import Cuintet.Eei (Addr, Inst, IssueWidth, Mapping, MemReq, NRob, RobAddr, SystemOp (..), TrapCause, XLen)
 import Cuintet.Unit.MultiRam (multiRam)
+import Cuintet.Unit.RegFile (WritePorts)
 import Cuintet.Unit.Ring (RingReq (..), RingResp (..), ring)
 import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
@@ -32,15 +33,9 @@ data RobEntry = RobEntry
   }
   deriving (Generic, NFDataX)
 
-data Completed = Completed
-  { robAddr :: RobAddr
-  , robDone :: RobDone
-  }
-  deriving (Generic, NFDataX)
-
 data RobReq = RobReq
   { allocates :: Upto IssueWidth RobStatic
-  , completes :: Upto IssueWidth Completed
+  , completes :: Vec WritePorts (Maybe (RobAddr, RobDone))
   , pop :: Index (IssueWidth + 1)
   , squash :: Bool
   }
@@ -53,11 +48,6 @@ squashes :: RobEntry -> Bool
 squashes RobEntry {..} = any squashing done
   where
     squashing RobDone {..} = isJust exception || static.systemOp == Just SysMret || mispredicted
-
-usesCsrFile :: RobEntry -> Bool
-usesCsrFile RobEntry {..} = any using done
-  where
-    using RobDone {exception} = isJust exception || isJust static.systemOp
 
 committedMapping :: RobEntry -> Maybe Mapping
 committedMapping RobEntry {..} = do
@@ -74,14 +64,13 @@ rob req = mkResp <$> statics <*> dones
     mkRingReq RobReq {..} = RingReq {wdata = allocates, pop, squash}
 
     addrs = (\RingResp {hd} -> (hd +) . numConvert <$> indicesI @IssueWidth) <$> statics
-    dones = zipWith orNothing <$> valids <*> multiRam addrs (writes <$> req)
+    dones = zipWith orNothing <$> valids <*> multiRam addrs ((.completes) <$> req)
     valids = (\flags -> fmap (flags !!)) <$> completed <*> addrs
-    writes RobReq {completes} = fmap (\Completed {..} -> (robAddr, robDone)) <$> Upto.toMaybes completes
 
     completed = mealy step (repeat @NRob False) (bundle (statics, req))
     step flags (RingResp {tl}, RobReq {allocates, completes}) = (foldl assign flags (clears ++ sets), flags)
       where
         clears = imap (\i -> fmap (const (tl + numConvert i, False))) (Upto.toMaybes allocates)
-        sets = fmap (\Completed {robAddr} -> (robAddr, True)) <$> Upto.toMaybes completes
+        sets = fmap (\(robAddr, _) -> (robAddr, True)) <$> completes
         assign f = maybe f (\(addr, v) -> replace addr v f)
 {-# OPAQUE rob #-}

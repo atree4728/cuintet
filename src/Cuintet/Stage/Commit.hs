@@ -17,8 +17,7 @@ data CommitOut = CommitOut
   { retired :: Vec IssueWidth (Maybe Retire)
   , renamed :: Vec IssueWidth (Maybe Mapping)
   , redirect :: Maybe Addr
-  , write :: Maybe (PRegAddr, BitVector XLen)
-  -- ^ The CSR read value, written through the port MA leaves free while 'usesCsrFile' holds.
+  , csrWrite :: Maybe (PRegAddr, BitVector XLen)
   , pop :: Index (IssueWidth + 1)
   , squash :: Bool
   }
@@ -49,7 +48,7 @@ commit csrFile CommitIn {..} = (csrFile', CommitOut {..})
 
     retired = zipWith (\v e -> mkRetire v =<< e) (readValue :> Nothing :> Nil) (Upto.toMaybes commits)
 
-    write = do
+    csrWrite = do
       value <- readValue
       Mapping {pdAddr} <- committedMapping =<< Upto.head commits
       pure (pdAddr, value)

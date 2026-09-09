@@ -1,52 +1,77 @@
 module Cuintet.Stage.WriteBack (writeback, WriteBackIn (..), WriteBackOut (..)) where
 
 import Clash.Prelude
+import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
 import Cuintet.CoreCtrl (InstCtrl (..), isLoad)
 import Cuintet.Eei (IssueWidth, PRegAddr, XLen)
-import Cuintet.Pipeline (Executed (..), pdOf)
+import Cuintet.Pipeline (Completion (..), Executed (..), isSerializing, pdOf)
 import Cuintet.Unit.LoadStore (LoadStoreJob (..), LoadStoreResp (..))
-import Cuintet.Unit.Rob (Completed (..), RobDone (..))
+import Cuintet.Unit.RegFile (WritePorts)
+import Cuintet.Unit.Rob (RobDone (..))
 import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
-import Data.Maybe (fromMaybe, isNothing)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 
 data WriteBackIn = WriteBackIn
   { entries :: Upto IssueWidth Executed
   , loadStoreResp :: LoadStoreResp
-  , commitUsesCsrFile :: Bool
+  , csrWrite :: Maybe (PRegAddr, BitVector XLen)
+  , serializingInFlight :: Bool
   }
 
 data WriteBackOut = WriteBackOut
-  { issue :: Upto IssueWidth Completed
+  { issue :: Index (IssueWidth + 1)
   , issued :: Bool
-  , writes :: Vec IssueWidth (Maybe (PRegAddr, BitVector XLen))
-  -- ^ The register file write, now that a result is architectural once it is in the ROB.
+  , serializing :: Bool
+  , completions :: Vec WritePorts (Maybe Completion)
   , loadStoreJob :: Maybe LoadStoreJob
   }
 
 writeback :: WriteBackIn -> WriteBackOut
 writeback WriteBackIn {..} = WriteBackOut {..}
   where
-    loadStoreJob = guard (not commitUsesCsrFile) *> (mkJob =<< Upto.head entries)
-    mkJob Executed {..}
-      | isNothing exception
-      , Just memOp <- ctrl.memOp =
-          Just LoadStoreJob {memOp, addr = bitCoerce aluResult, wdata = rs2Data}
-      | otherwise = Nothing
+    (entry0, entry1) = vecToTuple entries.elems
 
-    issued = entries.len > 0 && not loadStoreResp.stall && not commitUsesCsrFile
+    taken, wanted :: Unsigned 3
+    taken = if isJust csrRequest then 1 else 0
+    wanted = numConvert entries.len
+    lanesFit = taken + wanted <= natToNum @WritePorts
 
-    issue = Upto {len = if issued then entries.len else 0, elems = zipWith completeLane entries.elems lanes}
+    issued = entries.len > 0 && not loadStoreResp.stall && not serializingInFlight && lanesFit
+    issue = if issued then entries.len else 0
+    serializing = issued && any (maybe False isSerializing) (Upto.toMaybes entries)
+
+    loadStoreJob = do
+      guard (not serializingInFlight)
+      Executed {..} <- Upto.head entries
+      guard (isNothing exception)
+      memOp <- ctrl.memOp
+      pure LoadStoreJob {memOp, addr = bitCoerce aluResult, wdata = rs2Data}
+
+    completed entry@Executed {..} (result, mem) =
+      Complete robAddr (pdOf entry) RobDone {..}
       where
-        lanes = (loadStoreResp.result, loadStoreResp.completed) :> (Nothing, Nothing) :> Nil
-        completeLane Executed {..} (result, mem) = Completed {robAddr, robDone}
-          where
-            robDone = RobDone {value = if isLoad ctrl then fromMaybe (deepErrorX "writeback: load completed without data") result else wbData, ..}
+        value
+          | isLoad ctrl = fromMaybe (deepErrorX "writeback: load completed without data") result
+          | otherwise = wbData
 
-    writes = zipWith mkWrite (Upto.toMaybes issue) entries.elems
-    mkWrite completed entry = do
-      Completed {robDone} <- completed
-      pd <- pdOf entry
-      pure (pd, robDone.value)
+    csrRequest = uncurry CsrValue <$> csrWrite
+    lane0Request = guard (issued && entries.len >= 1) *> Just (completed entry0 (loadStoreResp.result, loadStoreResp.completed))
+    lane1Request = guard (issued && entries.len >= 2) *> Just (completed entry1 (Nothing, Nothing))
+
+    (_, completions) = arbitrate (csrRequest :> lane0Request :> lane1Request :> Nil)
 {-# OPAQUE writeback #-}
+
+arbitrate ::
+  forall n nw a.
+  (KnownNat n, KnownNat nw, nw <= n + 1) =>
+  Vec n (Maybe a) -> (Vec n Bool, Vec nw (Maybe a))
+arbitrate reqs = (grants, slots)
+  where
+    -- grants = snd $ mapAccumL (\cnt req -> let cnt' = cnt + bool 0 1 (isJust req) in (cnt', cnt < natToNum @nw && isJust req)) 0 reqs
+    ahead :: Vec n (Index (n + 1))
+    ahead = init (scanl (\acc r -> if isJust r then acc + 1 else acc) 0 reqs)
+    grants = zipWith (\r k -> isJust r && k < natToNum @nw) reqs ahead
+    slots = imap (\j () -> pick (numConvert j)) (repeat @nw ())
+    pick j = foldl (<|>) Nothing (zipWith3 (\r k g -> if g && k == j then r else Nothing) reqs ahead grants)

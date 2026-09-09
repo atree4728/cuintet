@@ -5,7 +5,7 @@ import Clash.Prelude
 import Control.Monad (guard)
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), FetchWidth, IssueWidth, MemReq, MemResp, XLen)
 import Cuintet.Forwarding (Forwarding, forwarding)
-import Cuintet.Pipeline (Decoded (..), Executed (..), FetchBufBits, Fetched (..), Ready (..), Renamed (..), Retire (..), hasResult, pdOf)
+import Cuintet.Pipeline (Decoded (..), Executed (..), FetchBufBits, Fetched (..), Ready (..), Renamed (..), Retire (..), hasResult, pdOf, regWrite, robWrite)
 import Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit)
 import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
 import Cuintet.Stage.Execute (ExecuteIn (..), ExecuteOut (..), execute)
@@ -22,7 +22,7 @@ import Cuintet.Unit.MulDiv (MulDivReq (..), MulDivState, mulDivStep)
 import Cuintet.Unit.MulDiv qualified as M
 import Cuintet.Unit.RegFile (RegReq (..), RegResp (..), regFile)
 import Cuintet.Unit.Ring (RingReq (..), RingResp (..), ring)
-import Cuintet.Unit.Rob (RobReq (..), RobResp (..), rob, usesCsrFile)
+import Cuintet.Unit.Rob (RobReq (..), RobResp (..), rob)
 import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
 import Cuintet.Util (orNothing)
@@ -53,11 +53,12 @@ data CoreState = CoreState
   , mulDivState :: MulDivState
   , loadStoreState :: LoadStoreState
   , csrFile :: CsrFile
+  , serializingInFlight :: Bool
   }
   deriving (Generic, NFDataX)
 
 initState :: CoreState
-initState = CoreState {fetchState = initFetchState, renameState = initRenameState, mulDivState = M.Idle, loadStoreState = L.Idle, csrFile = initCsrFile}
+initState = CoreState {fetchState = initFetchState, renameState = initRenameState, mulDivState = M.Idle, loadStoreState = L.Idle, csrFile = initCsrFile, serializingInFlight = False}
 
 data CoreTrace = CoreTrace
   { fetchStart :: Maybe Addr
@@ -123,7 +124,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
     renameIn = RenameIn {entries = decodedResp.rdata, committed = cmOut.renamed, nextRobAddr = robResp.buffer.tl, robFree = robResp.buffer.free, flush, drained = robResp.buffer.rdata.len == 0, wready = renamedResp.wready}
     regreadIn = RegReadIn {entries = renamedResp.rdata, rsData = regResp.rsData, forwards, wready = readyResp.wready}
     executeIn = ExecuteIn {entries = readyResp.rdata, wready = executedResp.wready, mulDivResp}
-    writebackIn = WriteBackIn {entries = executedResp.rdata, loadStoreResp, commitUsesCsrFile = any usesCsrFile (Upto.head robResp.buffer.rdata)}
+    writebackIn = WriteBackIn {entries = executedResp.rdata, loadStoreResp, csrWrite = cmOut.csrWrite, serializingInFlight}
     commitIn = CommitIn {entries = robResp.buffer.rdata}
 
     (fetchState', ifOut) = fetch fetchState fetchIn
@@ -152,9 +153,9 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
 
     redirect = cmOut.redirect <|> exOut.redirect
     flush = isJust redirect
-
+    serializingInFlight' = not cmOut.squash && (serializingInFlight || wbOut.serializing)
     rsAddrs = concatMap (maybe (repeat 0) (\Renamed {..} -> ps1Addr :> ps2Addr :> Nil)) (Upto.toMaybes renamedResp.rdata)
-    regReq = RegReq {rsAddrs, writes = maybe wbOut.writes (\w -> Just w :> Nothing :> Nil) cmOut.write}
+    regReq = RegReq {rsAddrs, writes = (regWrite =<<) <$> wbOut.completions}
     btbReq = BtbReq {lookupAddr = ifOut.btbLookup, prefetchAddr = ifOut.btbPrefetch, writes = exOut.btbWrites}
 
     fetchedReq = RingReq {wdata = ifOut.issue, pop = idOut.issue.len, squash = flush}
@@ -162,7 +163,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
     renamedReq = FifoReq {wdata = rnOut.issue, rready = rrOut.issue.len > 0, flush}
     readyReq = FifoReq {wdata = rrOut.issue, rready = exOut.issued, flush}
     executedReq = FifoReq {wdata = exOut.issue, rready = wbOut.issued, flush = isJust cmOut.redirect}
-    robReq = RobReq {allocates = rnOut.allocates, completes = wbOut.issue, pop = cmOut.pop, squash = cmOut.squash}
+    robReq = RobReq {allocates = rnOut.allocates, completes = (robWrite =<<) <$> wbOut.completions, pop = cmOut.pop, squash = cmOut.squash}
 
     coreOut = CoreOut {iReq = ifOut.iReq, dReq = loadStoreResp.memReq, retired = cmOut.retired, led = csrFile.led, coreTrace}
     coreTrace =
@@ -173,9 +174,9 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
         , rnIssue = rnOut.issue.len
         , rrIssue = rrOut.issue.len
         , exIssue = exOut.issue.len
-        , wbIssue = wbOut.issue.len
+        , wbIssue = wbOut.issue
         , retired = cmOut.retired
         , flush
         }
 
-    state' = CoreState {fetchState = fetchState', renameState = renameState', mulDivState = mulDivState', loadStoreState = loadStoreState', csrFile = csrFile'}
+    state' = CoreState {fetchState = fetchState', renameState = renameState', mulDivState = mulDivState', loadStoreState = loadStoreState', csrFile = csrFile', serializingInFlight = serializingInFlight'}

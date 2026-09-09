@@ -29,7 +29,6 @@ data LoadStoreJob = LoadStoreJob
 
 data LoadStoreReq = LoadStoreReq
   { job :: Maybe LoadStoreJob
-  -- ^ The access to carry out, if any.
   , memResp :: MemResp
   }
   deriving (Generic, NFDataX)

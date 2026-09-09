@@ -1,11 +1,12 @@
 -- | The payloads that cross the stage boundaries, one record per FIFO.
-module Cuintet.Pipeline (FetchBufBits, Fetched (..), Decoded (..), Renamed (..), Ready (..), Executed (..), Retire (..), validRdOf, rdOf, pdOf, serializing, hasResult) where
+module Cuintet.Pipeline (FetchBufBits, Fetched (..), Decoded (..), Renamed (..), Ready (..), Executed (..), Retire (..), Completion (..), validRdOf, rdOf, pdOf, isSerializing, hasResult, regWrite, robWrite) where
 
 import Clash.Prelude
 import Control.Monad (guard)
 import Cuintet.CoreCtrl (InstCtrl (..), isCsrRead, isLoad)
 import Cuintet.Eei (Addr, Inst, MemReq, PRegAddr, RegAddr, RobAddr, SystemOp (..), TrapCause, XLen)
 import Cuintet.Unit.Btb (Prediction)
+import Cuintet.Unit.Rob (RobDone (..))
 import Cuintet.Util (orNothing)
 import Data.Maybe (isJust, isNothing)
 import GHC.Records (HasField)
@@ -79,6 +80,11 @@ data Retire = Retire
   }
   deriving (Generic, NFDataX, Eq)
 
+data Completion
+  = Complete RobAddr (Maybe PRegAddr) RobDone
+  | CsrValue PRegAddr (BitVector XLen)
+  deriving (Generic, NFDataX)
+
 validRdOf ::
   ( HasField "ctrl" stage InstCtrl
   , HasField "rdAddr" stage RegAddr
@@ -104,5 +110,15 @@ pdOf stage = guard (isNothing stage.exception) *> stage.pdAddr
 hasResult :: (HasField "ctrl" stage InstCtrl) => stage -> Bool
 hasResult stage = not (isLoad stage.ctrl || isCsrRead stage.ctrl)
 
-serializing :: (HasField "exception" stage (Maybe a), HasField "ctrl" stage InstCtrl) => stage -> Bool
-serializing stage = isJust stage.exception || stage.ctrl.systemOp == Just SysMret
+isSerializing :: (HasField "exception" stage (Maybe a), HasField "ctrl" stage InstCtrl) => stage -> Bool
+isSerializing stage = isJust stage.exception || stage.ctrl.systemOp == Just SysMret
+
+robWrite :: Completion -> Maybe (RobAddr, RobDone)
+robWrite = \case
+  Complete robAddr _ done -> Just (robAddr, done)
+  CsrValue {} -> Nothing
+
+regWrite :: Completion -> Maybe (PRegAddr, BitVector XLen)
+regWrite = \case
+  Complete _ pdAddr done -> (,done.value) <$> pdAddr
+  CsrValue pdAddr value -> Just (pdAddr, value)

@@ -5,7 +5,7 @@ import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Cuintet.CoreCtrl (ExecUnit (..), InstCtrl (..), InstFormat (..), isJalr, unitOf, usesRs1, usesRs2)
 import Cuintet.Eei (AluOp, Inst, IssueWidth, MemOp (..), Opcode (..), System12 (..), SystemOp (..), XLen, parseBranchOp, parseCsr, parseLoad, parseStore, pattern BREAKPOINT, pattern ENVIRONMENT_CALL_FROM_M_MODE, pattern ILLEGAL_INSTRUCTION)
-import Cuintet.Pipeline (Decoded (..), Fetched (..), rdOf, serializing)
+import Cuintet.Pipeline (Decoded (..), Fetched (..), isSerializing, rdOf)
 import Cuintet.Upto (Upto (..))
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isNothing)
@@ -30,8 +30,8 @@ decode DecodeIn {..} = DecodeOut {issue}
       issued0
         && entries.len
         >= 2
-        && not (serializing decoded0)
-        && not (serializing decoded1)
+        && not (isSerializing decoded0)
+        && not (isSerializing decoded1)
         && useSimpleAlu decoded1.ctrl
         && not hasRAW
     hasRAW = maybe False readRd0 (rdOf decoded0)

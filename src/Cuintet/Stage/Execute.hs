@@ -6,7 +6,7 @@ import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
 import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), isCsrRead)
 import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), IssueWidth, XLen, misalignedCause, pattern INSTRUCTION_ADDRESS_MISALIGNED)
-import Cuintet.Pipeline (Executed (..), Ready (..), serializing)
+import Cuintet.Pipeline (Executed (..), Ready (..), isSerializing)
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
 import Cuintet.Unit.MulDiv (MulDivJob (..), MulDivResp (..))
 import Cuintet.Upto (Upto (..))
@@ -45,7 +45,7 @@ execute ExecuteIn {..} = ExecuteOut {..}
     ((executed0, redirect0, btbWrite0), (executed1, redirect1, btbWrite1)) =
       vecToTuple $ zipWith executeLane (mulDivResp.result :> Nothing :> Nil) entries.elems
 
-    squash1 = isJust redirect0 || serializing executed0
+    squash1 = isJust redirect0 || isSerializing executed0
 
     len
       | not issued = 0
@@ -96,7 +96,7 @@ executeLane mulDivResult Ready {..} = (executed, redirect, btbWrite)
 
     exception' = exception <|> targetException <|> accessException
 
-    redirect = orNothing (not (serializing executed) && nextPc /= predicted pc prediction) nextPc
+    redirect = orNothing (not (isSerializing executed) && nextPc /= predicted pc prediction) nextPc
 
     btbWrite = guard (isNothing exception') >> train pc prediction (orNothing (nextPc /= pc + 4) nextPc)
 
