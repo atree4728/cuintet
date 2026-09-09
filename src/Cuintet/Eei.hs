@@ -35,6 +35,7 @@ module Cuintet.Eei (
   parseCsrAddr,
   CsrOp (..),
   CsrSrc (..),
+  CsrSpec (..),
   parseCsr,
   System12 (System12, ECALL, EBREAK, MRET),
   SystemOp (..),
@@ -42,8 +43,10 @@ module Cuintet.Eei (
   RegFile,
   RegAddr,
   PRegAddr,
+  RobAddr,
   NRegs,
   NPRegs,
+  NRob,
   TrapCause (..),
   pattern INSTRUCTION_ADDRESS_MISALIGNED,
   pattern ILLEGAL_INSTRUCTION,
@@ -93,6 +96,10 @@ type PRegAddr = Unsigned 6
 type NRegs = 2 ^ BitSize RegAddr
 
 type NPRegs = 2 ^ BitSize PRegAddr
+
+type RobAddr = Unsigned 4
+
+type NRob = 2 ^ BitSize RobAddr
 
 -- | Whether a narrower-than-register load fills the high bits with its sign or zero.
 data Sign = Signed | Unsigned
@@ -374,30 +381,30 @@ data CsrOp
 
 deriveBitPack [t|CsrOp|]
 
--- | Where the operand of a CSR access comes from, derived from @funct3[2]@
-data CsrSrc = FromRs1 | FromUimm
+data CsrSrc = Rs1 | Uimm (BitVector 5)
   deriving (Generic, NFDataX, Eq, Show)
 
-{-# ANN
-  module
-  ( DataReprAnn
-      $(liftQ [t|CsrSrc|])
-      1
-      [ ConstrRepr 'FromRs1 0b1 0b0 []
-      , ConstrRepr 'FromUimm 0b1 0b1 []
-      ]
-  )
-  #-}
+data CsrSpec = CsrSpec
+  { csrAddr :: CsrAddr
+  , csrOp :: CsrOp
+  , csrSrc :: Maybe CsrSrc
+  }
+  deriving (Generic, NFDataX, Eq)
 
-deriveBitPack [t|CsrSrc|]
-
-parseCsr :: BitVector 3 -> BitVector 12 -> Maybe (CsrSrc, CsrOp, CsrAddr)
-parseCsr f3 f12 = do
+parseCsr :: BitVector 3 -> BitVector 12 -> BitVector 5 -> Maybe CsrSpec
+parseCsr f3 f12 rs1Addr = do
   guard $ slice d1 d0 f3 /= 0
-  let csrSrc = unpack (slice d2 d2 f3)
-  let csrOp = unpack (slice d1 d0 f3)
   csrAddr <- parseCsrAddr f12
-  pure (csrSrc, csrOp, csrAddr)
+  pure CsrSpec {..}
+  where
+    csrOp = unpack (slice d1 d0 f3)
+    src
+      | f3 `testBit` 2 = Uimm rs1Addr
+      | otherwise = Rs1
+    csrSrc = orNothing (writes csrOp rs1Addr) src
+    writes ReadSet 0 = False
+    writes ReadClear 0 = False
+    writes _ _ = True
 
 -- | The @funct12@ field of a @SYSTEM@ instruction whose @funct3@ is zero.
 newtype System12 = System12 (BitVector 12)
@@ -412,7 +419,7 @@ pattern MRET   = System12 0b001100000010
 
 -- | What a @SYSTEM@ instruction asks for.
 data SystemOp
-  = SysCsr (CsrSrc, CsrOp, CsrAddr)
+  = SysCsr CsrSpec
   | SysEcall
   | SysEbreak
   | SysMret

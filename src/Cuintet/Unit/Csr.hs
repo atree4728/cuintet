@@ -1,7 +1,6 @@
 module Cuintet.Unit.Csr (
   CsrAddr (..),
   CsrReq (..),
-  AccessSpec (..),
   TrapSpec (..),
   CsrResp (..),
   CsrFile (led),
@@ -10,8 +9,7 @@ module Cuintet.Unit.Csr (
 ) where
 
 import Clash.Prelude
-import Cuintet.Eei (Addr, CsrAddr (..), CsrOp (..), CsrSrc (..), RegAddr, TrapCause (..), XLen)
-import Cuintet.Util (orNothing)
+import Cuintet.Eei (Addr, CsrAddr (..), CsrOp (..), CsrSpec (..), CsrSrc (..), TrapCause (..), XLen)
 import Data.Maybe (fromMaybe)
 
 data CsrFile = CsrFile
@@ -26,15 +24,6 @@ data CsrFile = CsrFile
 
 deriveAutoReg ''CsrFile
 
-data AccessSpec = AccessSpec
-  { csrAddr :: CsrAddr
-  , op :: CsrOp
-  , src :: CsrSrc
-  , rs1Addr :: RegAddr
-  , rs1Data :: BitVector XLen
-  }
-  deriving (Generic, NFDataX)
-
 data TrapSpec = TrapSpec
   { epc :: Addr
   , value :: BitVector XLen
@@ -43,7 +32,7 @@ data TrapSpec = TrapSpec
   deriving (Generic, NFDataX)
 
 data CsrReq
-  = CsrAccess AccessSpec
+  = CsrAccess CsrSpec (BitVector XLen)
   | TrapEnter TrapSpec
   | TrapReturn
   deriving (Generic, NFDataX)
@@ -73,7 +62,7 @@ serve file (TrapEnter TrapSpec {..}) =
   , Redirect $ unpack file.mtvec
   )
 serve file TrapReturn = (file, Redirect $ unpack file.mepc)
-serve file (CsrAccess AccessSpec {..})
+serve file (CsrAccess CsrSpec {..} rs1Data)
   | MTVEC <- csrAddr =
       let old = unpack file.mtvec
        in (file {mtvec = aligned (written old)}, ReadValue old)
@@ -92,14 +81,9 @@ serve file (CsrAccess AccessSpec {..})
   | MIE <- csrAddr = (file, ReadValue 0)
   | MHARTID <- csrAddr = (file, ReadValue 0)
   where
-    written old = csrWrite op old wdata
-    wvalue = case src of
-      FromRs1 -> rs1Data
-      FromUimm -> zeroExtend $ pack rs1Addr
-    wdata = case op of
-      ReadWrite -> Just wvalue
-      -- For both CSRRS and CSRRC, if rs1=x0, then the instruction will not write to the CSR at all
-      _ -> orNothing (rs1Addr /= 0) wvalue
+    written old = csrWrite csrOp old (operand <$> csrSrc)
+    operand Rs1 = rs1Data
+    operand (Uimm v) = zeroExtend v
     trapCause value = TrapCause {interrupt = bitToBool (msb value), code = truncateB value}
 
 initCsrFile :: CsrFile

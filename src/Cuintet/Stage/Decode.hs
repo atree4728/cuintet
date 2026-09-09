@@ -171,7 +171,7 @@ parseOpImm32 instBits = case funct3 instBits of
 -- | What a @SYSTEM@ instruction asks of the execution environment.
 parseSystem :: Inst -> Maybe SystemOp
 parseSystem instBits
-  | funct3 instBits /= 0 = SysCsr <$> parseCsr (funct3 instBits) (funct12 instBits)
+  | funct3 instBits /= 0 = SysCsr <$> parseCsr (funct3 instBits) (funct12 instBits) (slice d19 d15 instBits)
   | not (noRegs instBits) = Nothing
   | ECALL <- System12 f12 = Just SysEcall
   | EBREAK <- System12 f12 = Just SysEbreak

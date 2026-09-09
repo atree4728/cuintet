@@ -5,7 +5,7 @@ import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..))
 import Cuintet.Eei (Addr, IssueWidth, PRegAddr, SystemOp (..), XLen)
 import Cuintet.Pipeline (Completed (..), Mapping (..), Retire (..), rdOf)
-import Cuintet.Unit.Csr (AccessSpec (..), CsrFile (..), CsrReq (..), CsrResp (..), TrapSpec (..), csrStep)
+import Cuintet.Unit.Csr (CsrFile (..), CsrReq (..), CsrResp (..), TrapSpec (..), csrStep)
 import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
 import Data.Maybe (fromMaybe)
@@ -38,7 +38,7 @@ commit csrFile CommitIn {..} = (csrFile', CommitOut {..})
 mkCsrReq :: Completed -> Maybe CsrReq
 mkCsrReq Completed {..}
   | Just (cause, value) <- exception = Just $ TrapEnter TrapSpec {epc = pc, ..}
-  | Just (SysCsr (src, op, csrAddr)) <- ctrl.systemOp = Just $ CsrAccess AccessSpec {csrAddr, op, src, rs1Addr, rs1Data}
+  | Just (SysCsr spec) <- ctrl.systemOp = Just $ CsrAccess spec rs1Data
   | Just SysMret <- ctrl.systemOp = Just TrapReturn
   | otherwise = Nothing
 
