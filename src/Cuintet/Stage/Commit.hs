@@ -43,7 +43,7 @@ mkCsrReq Completed {..}
   | otherwise = Nothing
 
 mkMapping :: Completed -> Maybe Mapping
-mkMapping entry@Completed {..} = Mapping {rdAddr, pdAddr, oldPdAddr} <$ rdOf entry
+mkMapping entry@Completed {..} = Mapping {..} <$ rdOf entry
 
 mkRetire :: Maybe (BitVector XLen) -> Completed -> Retire
 mkRetire csrValue entry@Completed {..} =

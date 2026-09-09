@@ -55,28 +55,22 @@ rename RenameState {..} RenameIn {..} = (state', RenameOut {issue})
     pdAddr0 = freeList !! specHead
     pdAddr1 = freeList !! (specHead + if isJust rdAddr0 then 1 else 0)
 
-    oldPdAddr0 = specRmt !! decoded0.rdAddr
-    oldPdAddr1
-      | rdAddr0 == Just decoded1.rdAddr = pdAddr0
-      | otherwise = specRmt !! decoded1.rdAddr
-
     issue =
       Upto
         { len = if issued then entries.len else 0
-        , elems = renamedLane decoded0 pdAddr0 oldPdAddr0 :> renamedLane decoded1 pdAddr1 oldPdAddr1 :> Nil
+        , elems = renamedLane decoded0 pdAddr0 :> renamedLane decoded1 pdAddr1 :> Nil
         }
-    renamedLane Decoded {..} pdAddr oldPdAddr = Renamed {ps1Addr = specRmt !! rs1Addr, ps2Addr = specRmt !! rs2Addr, ..}
+    renamedLane Decoded {..} pdAddr = Renamed {ps1Addr = specRmt !! rs1Addr, ps2Addr = specRmt !! rs2Addr, ..}
 
-    specRmtUpdate rmt = maybe rmt (\(rd, pd) -> replace rd pd rmt)
-    archRmtUpdate rmt = maybe rmt (\x -> replace x.rdAddr x.pdAddr rmt)
-    freePd (l, h) = maybe (l, h) (\x -> (replace h x.oldPdAddr l, h + 1))
-
+    specRmtUpdate rmt = maybe rmt $ \(rd, pd) -> replace rd pd rmt
     taken = (if issue.len >= 1 then (,pdAddr0) <$> rdAddr0 else Nothing) :> (if issue.len >= 2 then (,pdAddr1) <$> rdAddr2 else Nothing) :> Nil
     takenCnt = sum $ bool 0 1 . isJust <$> taken
     specHead' = specHead + takenCnt
     specRmt' = foldl specRmtUpdate specRmt taken
-    archRmt' = foldl archRmtUpdate archRmt committed
-    (freeList', archHead') = foldl freePd (freeList, archHead) committed
+
+    commitMapping (fl, h, rmt) = maybe (fl, h, rmt) $ \Mapping {..} ->
+      (replace h (rmt !! rdAddr) fl, h + 1, replace rdAddr pdAddr rmt)
+    (freeList', archHead', archRmt') = foldl commitMapping (freeList, archHead, archRmt) committed
 
     state' =
       RenameState

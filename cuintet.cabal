@@ -98,6 +98,7 @@ library
     Cuintet.Unit.Ram
     Cuintet.Unit.RegFile
     Cuintet.Unit.Ring
+    Cuintet.Unit.Rob
     Cuintet.Upto
     Cuintet.Util
 

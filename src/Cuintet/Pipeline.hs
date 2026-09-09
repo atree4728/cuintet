@@ -45,7 +45,6 @@ data Renamed = Renamed
   , ps1Addr :: PRegAddr
   , ps2Addr :: PRegAddr
   , pdAddr :: PRegAddr
-  , oldPdAddr :: PRegAddr
   }
   deriving (Generic, NFDataX)
 
@@ -61,7 +60,6 @@ data Ready = Ready
   , rs2Data :: BitVector XLen
   , exception :: Maybe (TrapCause, BitVector XLen)
   , pdAddr :: PRegAddr
-  , oldPdAddr :: PRegAddr
   }
   deriving (Generic, NFDataX)
 
@@ -75,7 +73,6 @@ data Executed = Executed
   , rdAddr :: RegAddr
   , exception :: Maybe (TrapCause, BitVector XLen)
   , pdAddr :: PRegAddr
-  , oldPdAddr :: PRegAddr
   , aluResult :: BitVector XLen
   , wbData :: BitVector XLen
   }
@@ -90,7 +87,6 @@ data Completed = Completed
   , rdAddr :: RegAddr
   , exception :: Maybe (TrapCause, BitVector XLen)
   , pdAddr :: PRegAddr
-  , oldPdAddr :: PRegAddr
   , wbData :: BitVector XLen
   , mem :: Maybe MemReq
   }
@@ -138,6 +134,5 @@ serializing stage = isJust stage.exception || stage.ctrl.systemOp == Just SysMre
 data Mapping = Mapping
   { rdAddr :: RegAddr
   , pdAddr :: PRegAddr
-  , oldPdAddr :: PRegAddr
   }
   deriving (Generic, NFDataX)
