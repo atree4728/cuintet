@@ -1,70 +1,95 @@
--- | EX: operand selection, the ALU, the branch condition, and the multiply\/divide unit.
+-- | EX: the entry of every unit. Operand selection, the ALU and the branch condition happen here, and the multiply\/divide and load\/store jobs leave from here.
 module Cuintet.Stage.Execute (execute, ExecuteIn (..), ExecuteOut (..)) where
 
 import Clash.Prelude
-import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
-import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), isCsrRead)
-import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), DispatchWidth, XLen, misalignedCause, pattern INSTRUCTION_ADDRESS_MISALIGNED)
+import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), execUnit, isCsrRead, opClassOf)
+import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), IssueWidth, RobAddr, XLen, misalignedCause, pattern INSTRUCTION_ADDRESS_MISALIGNED)
 import Cuintet.Pipeline (Executed (..), Ready (..), isSerializing)
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
+import Cuintet.Unit.LoadStore (LoadStoreJob (..))
 import Cuintet.Unit.MulDiv (MulDivJob (..))
-import Cuintet.Upto (Upto (..))
-import Cuintet.Upto qualified as Upto
 import Cuintet.Util (orNothing)
 import Data.Maybe (isJust, isNothing)
 
 data ExecuteIn = ExecuteIn
-  { entries :: Upto DispatchWidth Ready
+  { entries :: Vec IssueWidth (Maybe Ready)
+  , robHead :: RobAddr
   , wready :: Bool
   }
 
 data ExecuteOut = ExecuteOut
-  { issue :: Upto DispatchWidth Executed
-  -- ^ The group handed to MA, lane 1 dropped when it turned out to be down the wrong path.
-  , issued :: Bool
-  -- ^ Whether the group leaves EX this clock, which 'redirect' must not feed into.
-  , wbData :: Vec DispatchWidth (BitVector XLen)
-  -- ^ For the broadcast, so before the squash.
-  , redirect :: Maybe Addr
-  , btbWrites :: Vec DispatchWidth (Maybe BtbWrite)
+  { completed :: Vec IssueWidth (Maybe Executed)
   , mulDivJob :: Maybe MulDivJob
+  , loadStoreJob :: Maybe LoadStoreJob
+  , issued :: Bool
+  , wbData :: Vec IssueWidth (BitVector XLen)
+  , redirect :: Maybe Addr
+  , btbWrites :: Vec IssueWidth (Maybe BtbWrite)
   }
 
 execute :: ExecuteIn -> ExecuteOut
 execute ExecuteIn {..} = ExecuteOut {..}
   where
-    issued = entries.len > 0 && wready
+    issued = any isJust entries && wready
 
-    mulDivJob = guard issued *> (mkJob executed0.mispredicted =<< Upto.head entries)
-    mkJob mispredicted Ready {..}
-      | isNothing exception
-      , Just mulDivOp <- ctrl.mulDivOp =
-          Just MulDivJob {mulDivOp, isOp32 = ctrl.isOp32, op1 = rs1Data, op2 = rs2Data, pdAddr, robAddr, mispredicted}
-      | otherwise = Nothing
+    lanes = fmap executeLane <$> entries
 
-    ((executed0, redirect0, btbWrite0), (executed1, redirect1, btbWrite1)) = vecToTuple $ executeLane <$> entries.elems
+    completed = zipWith keep entries lanes
+      where
+        keep entry lane = do
+          guard issued
+          Ready {ctrl} <- entry
+          Lane {executed} <- lane
+          guard (isNothing (execUnit (opClassOf ctrl)) || isJust executed.exception)
+          pure executed
 
-    squash1 = isJust redirect0 || isSerializing executed0
+    wbData = maybe (deepErrorX "Execute.wbData") (\lane -> lane.executed.wbData) <$> lanes
 
-    len
-      | not issued = 0
-      | entries.len == 2 && not squash1 = 2
-      | otherwise = 1
+    port0 = do
+      guard issued
+      ready <- head entries
+      lane <- head lanes
+      guard (isNothing lane.executed.exception)
+      pure (ready, lane)
 
-    issue = Upto {len, elems = executed0 :> executed1 :> Nil}
-    wbData = (.wbData) <$> issue.elems
+    mulDivJob = do
+      (Ready {ctrl, rs1Data, rs2Data, pdAddr, robAddr}, Lane {executed}) <- port0
+      mulDivOp <- ctrl.mulDivOp
+      pure MulDivJob {mulDivOp, isOp32 = ctrl.isOp32, op1 = rs1Data, op2 = rs2Data, pdAddr, robAddr, mispredicted = executed.mispredicted}
 
-    redirect
-      | len == 2 = redirect0 <|> redirect1
-      | len == 1 = redirect0
-      | otherwise = Nothing
+    loadStoreJob = do
+      (Ready {ctrl, rs2Data, pdAddr, robAddr}, Lane {executed, aluResult}) <- port0
+      memOp <- ctrl.memOp
+      pure LoadStoreJob {memOp, addr = bitCoerce aluResult, wdata = rs2Data, pdAddr, robAddr, mispredicted = executed.mispredicted}
 
-    btbWrites = (guard issued >> btbWrite0) :> (guard (issued && entries.len == 2) >> btbWrite1) :> Nil
+    redirect = do
+      guard issued
+      snd <$> fold pickOlder (zipWith mk entries lanes)
+      where
+        mk entry lane = do
+          Ready {robAddr} <- entry
+          nextPc <- lane >>= (.redirect)
+          pure (robAddr - robHead, nextPc)
+        pickOlder l r = case (l, r) of
+          (Just (x, _), Just (y, _)) -> if y < x then r else l
+          (Nothing, _) -> r
+          _ -> l
+
+    btbWrites = (>>= \lane -> guard issued >> lane.btbWrite) <$> lanes
 {-# OPAQUE execute #-}
 
-executeLane :: Ready -> (Executed, Maybe Addr, Maybe BtbWrite)
-executeLane Ready {..} = (executed, redirect, btbWrite)
+-- | What one port produced: the entry WB may take, plus what only EX itself needs.
+data Lane = Lane
+  { executed :: Executed
+  , aluResult :: BitVector XLen
+  -- ^ The load\/store address, which no later stage recomputes.
+  , redirect :: Maybe Addr
+  , btbWrite :: Maybe BtbWrite
+  }
+
+executeLane :: Ready -> Lane
+executeLane Ready {..} = Lane {executed, aluResult, redirect, btbWrite}
   where
     executed = Executed {exception = exception', mispredicted = isJust redirect, ..}
 

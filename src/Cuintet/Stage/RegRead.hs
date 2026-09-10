@@ -2,35 +2,30 @@ module Cuintet.Stage.RegRead (RegReadIn (..), RegReadOut (..), regRead) where
 
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
+import Control.Monad (guard)
 import Cuintet.CoreCtrl (usesRs1, usesRs2)
-import Cuintet.Eei (DispatchWidth, XLen)
+import Cuintet.Eei (IssueWidth, XLen)
 import Cuintet.Forwarding (Forwarding, NForwards, bypass)
 import Cuintet.Pipeline (Ready (..), Renamed (..))
-import Cuintet.Upto (Upto (..))
 import Data.Maybe (fromMaybe, isJust)
 
 data RegReadIn = RegReadIn
-  { entries :: Upto DispatchWidth Renamed
-  , rsData :: Vec (2 * DispatchWidth) (BitVector XLen)
+  { entries :: Vec IssueWidth (Maybe Renamed)
+  , rsData :: Vec (2 * IssueWidth) (BitVector XLen)
   , forwards :: Vec NForwards Forwarding
   , wready :: Bool
   }
 
-newtype RegReadOut = RegReadOut {issue :: Upto DispatchWidth Ready}
+newtype RegReadOut = RegReadOut {issue :: Vec IssueWidth (Maybe Ready)}
 
 regRead :: RegReadIn -> RegReadOut
 regRead RegReadIn {..} = RegReadOut {issue}
   where
-    ((ready0, ok0), (ready1, ok1)) = vecToTuple $ zipWith (readLane forwards) entries.elems (unconcat d2 rsData)
+    lanes = zipWith (\entry rs -> flip (readLane forwards) rs <$> entry) entries (unconcat d2 rsData)
 
-    issued =
-      entries.len
-        > 0
-        && wready
-        && ok0
-        && (entries.len < 2 || ok1)
+    issued = wready && all (maybe True snd) lanes
 
-    issue = Upto {len = if issued then entries.len else 0, elems = ready0 :> ready1 :> Nil}
+    issue = fmap (\r -> guard issued *> (fst <$> r)) lanes
 {-# OPAQUE regRead #-}
 
 readLane :: Vec NForwards Forwarding -> Renamed -> Vec 2 (BitVector XLen) -> (Ready, Bool)

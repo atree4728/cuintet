@@ -61,12 +61,10 @@ data Ready = Ready
 
 data Executed = Executed
   { ctrl :: InstCtrl
-  , rs2Data :: BitVector XLen
   , exception :: Maybe (TrapCause, BitVector XLen)
   , pdAddr :: Maybe PRegAddr
   , robAddr :: RobAddr
   , mispredicted :: Bool
-  , aluResult :: BitVector XLen
   , wbData :: BitVector XLen
   }
   deriving (Generic, NFDataX)

@@ -101,10 +101,10 @@ coreT ::
   , BtbResp
   , RobResp
   , RingResp FetchBufBits DispatchWidth Fetched
-  , FifoResp DispatchWidth Decoded
+  , FifoResp (Upto DispatchWidth Decoded)
   , IssueQueueResp
-  , FifoResp DispatchWidth Ready
-  , FifoResp DispatchWidth Executed
+  , FifoResp (Vec IssueWidth (Maybe Ready))
+  , FifoResp (Vec IssueWidth (Maybe Executed))
   ) ->
   ( CoreState
   , ( CoreOut
@@ -112,10 +112,10 @@ coreT ::
     , BtbReq
     , RobReq
     , RingReq FetchBufBits FetchWidth DispatchWidth Fetched
-    , FifoReq DispatchWidth Decoded
+    , FifoReq (Upto DispatchWidth Decoded)
     , IssueQueueReq
-    , FifoReq DispatchWidth Ready
-    , FifoReq DispatchWidth Executed
+    , FifoReq (Vec IssueWidth (Maybe Ready))
+    , FifoReq (Vec IssueWidth (Maybe Executed))
     )
   )
 coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, decodedResp, issueResp, readyResp, executedResp) =
@@ -123,16 +123,10 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
   where
     fetchIn = FetchIn {iResp, buf = fetchedResp, redirect, btbResp}
     decodeIn = DecodeIn {entries = fetchedResp.rdata, wready = decodedResp.wready, stall = flush}
-    renameIn = RenameIn {entries = decodedResp.rdata, committed = cmOut.renamed, nextRobAddr = robResp.buffer.tl, robFree = robResp.buffer.free, flush, drained = robResp.buffer.rdata.len == 0, wready = True}
-    regreadIn = RegReadIn {entries, rsData = regResp.rsData, forwards, wready = readyResp.wready}
-      where
-        len
-          | isJust (issueResp.issue !! (1 :: Index IssueWidth)) = 2
-          | isJust (issueResp.issue !! (0 :: Index IssueWidth)) = 1
-          | otherwise = 0
-        entries = Upto {len, elems = fromMaybe (deepErrorX "issueResp") <$> issueResp.issue}
-    executeIn = ExecuteIn {entries = readyResp.rdata, wready = executedResp.wready}
-    writebackIn = WriteBackIn {entries = executedResp.rdata, loadStoreDone = loadStoreResp.done, mulDivDone = mulDivResp.done, csrWrite = cmOut.csrWrite}
+    renameIn = RenameIn {entries = fromMaybe Upto.empty decodedResp.rdata, committed = cmOut.renamed, nextRobAddr = robResp.buffer.tl, robFree = robResp.buffer.free, flush, drained = robResp.buffer.rdata.len == 0, wready = True}
+    regreadIn = RegReadIn {entries = issueResp.issue, rsData = regResp.rsData, forwards, wready = readyResp.wready}
+    executeIn = ExecuteIn {entries = readyEntries, robHead = robResp.buffer.hd, wready = executedResp.wready}
+    writebackIn = WriteBackIn {entries = executedEntries, loadStoreDone = loadStoreResp.done, mulDivDone = mulDivResp.done, csrWrite = cmOut.csrWrite}
     commitIn = CommitIn {entries = robResp.buffer.rdata}
 
     (fetchState', ifOut) = fetch fetchState fetchIn
@@ -146,19 +140,20 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
     (mulDivState', mulDivResp) =
       mulDivStep mulDivState MulDivReq {job = exOut.mulDivJob, granted = wbOut.mulDivGranted, squash = cmOut.squash}
     (loadStoreState', loadStoreResp) =
-      loadStoreStep loadStoreState LoadStoreReq {job = wbOut.loadStoreJob, memResp = dResp, granted = wbOut.loadStoreGranted, squash = cmOut.squash}
+      loadStoreStep loadStoreState LoadStoreReq {job = exOut.loadStoreJob, memResp = dResp, granted = wbOut.loadStoreGranted, squash = cmOut.squash}
+
+    readyEntries = fromMaybe (repeat Nothing) readyResp.rdata
+    executedEntries = fromMaybe (repeat Nothing) executedResp.rdata
 
     forwards = fromEx 1 :> fromEx 0 :> fromWb 1 :> fromWb 0 :> mulDivResp.forwarding :> loadStoreResp.forwarding :> Nil
       where
-        fromEx, fromWb :: Index DispatchWidth -> Forwarding
-        exLanes = Upto.toMaybes readyResp.rdata
-        wbLanes = Upto.toMaybes executedResp.rdata
-        fromEx i = F.forwarding (pdOf =<< exLanes !! i) $ do
-          entry <- exLanes !! i
+        fromEx, fromWb :: Index IssueWidth -> Forwarding
+        fromEx i = F.forwarding (pdOf =<< readyEntries !! i) $ do
+          entry <- readyEntries !! i
           guard exOut.issued
           orNothing (hasResult entry) (exOut.wbData !! i)
-        fromWb i = F.forwarding (pdOf =<< wbLanes !! i) $ do
-          entry <- wbLanes !! i
+        fromWb i = F.forwarding (pdOf =<< executedEntries !! i) $ do
+          entry <- executedEntries !! i
           orNothing (hasResult entry) entry.wbData
 
     redirect = cmOut.redirect <|> exOut.redirect
@@ -169,15 +164,15 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
 
     inflightTo unit = any (maybe False ((== Just unit) . execUnit . opClassOf . (.ctrl)))
     busy =
-      (mulDivResp.busy || inflightTo MulDivUnit (Upto.toMaybes readyResp.rdata))
-        :> (loadStoreResp.busy || inflightTo MemUnit (Upto.toMaybes readyResp.rdata) || inflightTo MemUnit (Upto.toMaybes executedResp.rdata))
+      (mulDivResp.busy || inflightTo MulDivUnit readyEntries)
+        :> (loadStoreResp.busy || inflightTo MemUnit readyEntries)
         :> Nil
 
     fetchedReq = RingReq {wdata = ifOut.issue, pop = idOut.issue.len, squash = flush}
-    decodedReq = FifoReq {wdata = idOut.issue, rready = rnOut.issue.len > 0, flush}
-    issueReq = IssueQueueReq {dispatch = rnOut.issue, accepted = repeat (rrOut.issue.len > 0), robHead = robResp.buffer.hd, busy, flush}
-    readyReq = FifoReq {wdata = rrOut.issue, rready = exOut.issued, flush}
-    executedReq = FifoReq {wdata = exOut.issue, rready = wbOut.issued, flush = isJust cmOut.redirect}
+    decodedReq = FifoReq {wdata = orNothing (idOut.issue.len > 0) idOut.issue, rready = rnOut.issue.len > 0, flush}
+    issueReq = IssueQueueReq {dispatch = rnOut.issue, accepted = isJust <$> rrOut.issue, robHead = robResp.buffer.hd, busy, flush}
+    readyReq = FifoReq {wdata = orNothing (any isJust rrOut.issue) rrOut.issue, rready = exOut.issued, flush}
+    executedReq = FifoReq {wdata = orNothing (any isJust exOut.completed) exOut.completed, rready = wbOut.issued, flush = isJust cmOut.redirect}
     robReq = RobReq {allocates = rnOut.allocates, completes = (robWrite =<<) <$> wbOut.completions, pop = cmOut.pop, squash = cmOut.squash}
 
     coreOut = CoreOut {iReq = ifOut.iReq, dReq = loadStoreResp.memReq, retired = cmOut.retired, led = csrFile.led, coreTrace}
@@ -187,11 +182,14 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
         , ifIssue = if flush then Upto.empty else ifOut.issue
         , idIssue = idOut.issue.len
         , rnIssue = rnOut.issue.len
-        , rrIssue = rrOut.issue.len
-        , exIssue = exOut.issue.len
-        , wbIssue = wbOut.issue
+        , rrIssue = nIssued rrOut.issue
+        , exIssue = if exOut.issued then nIssued readyEntries else 0
+        , wbIssue = if wbOut.issued then nIssued executedEntries else 0
         , retired = cmOut.retired
         , flush
         }
 
     state' = CoreState {fetchState = fetchState', renameState = renameState', mulDivState = mulDivState', loadStoreState = loadStoreState', csrFile = csrFile'}
+
+nIssued :: Vec IssueWidth (Maybe a) -> Index (DispatchWidth + 1)
+nIssued = sum . fmap (\entry -> if isJust entry then 1 else 0)

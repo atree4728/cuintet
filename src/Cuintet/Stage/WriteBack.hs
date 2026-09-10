@@ -1,55 +1,40 @@
+-- | WB: nothing but the arbitration of the write ports.
 module Cuintet.Stage.WriteBack (writeback, WriteBackIn (..), WriteBackOut (..)) where
 
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
-import Cuintet.CoreCtrl (InstCtrl (..), Wakeup (..), execUnit, opClassOf, wakeup)
-import Cuintet.Eei (DispatchWidth, PRegAddr, WriteBackWidth, XLen)
+import Cuintet.CoreCtrl (Wakeup (..), opClassOf, wakeup)
+import Cuintet.Eei (IssueWidth, PRegAddr, WriteBackWidth, XLen)
 import Cuintet.Pipeline (Completion (..), Executed (..), pdOf)
-import Cuintet.Unit.LoadStore (LoadStoreJob (..))
 import Cuintet.Unit.Rob (RobDone (..))
-import Cuintet.Upto (Upto (..))
-import Cuintet.Upto qualified as Upto
 import Data.Bool (bool)
-import Data.Maybe (isJust, isNothing)
+import Data.Maybe (isJust)
 
 data WriteBackIn = WriteBackIn
-  { entries :: Upto DispatchWidth Executed
+  { entries :: Vec IssueWidth (Maybe Executed)
   , mulDivDone :: Maybe Completion
   , loadStoreDone :: Maybe Completion
   , csrWrite :: Maybe (PRegAddr, BitVector XLen)
   }
 
 data WriteBackOut = WriteBackOut
-  { issue :: Index (DispatchWidth + 1)
-  , issued :: Bool
+  { issued :: Bool
   , completions :: Vec WriteBackWidth (Maybe Completion)
-  , loadStoreJob :: Maybe LoadStoreJob
   , mulDivGranted :: Bool
   , loadStoreGranted :: Bool
   }
 
-dispatched :: Executed -> Bool
-dispatched entry = isNothing entry.exception && isJust (execUnit (opClassOf entry.ctrl))
-
 writeback :: WriteBackIn -> WriteBackOut
 writeback WriteBackIn {..} = WriteBackOut {..}
   where
-    (entry0, entry1) = vecToTuple entries.elems
+    (entry0, entry1) = vecToTuple entries
 
     taken, wanted :: Unsigned 3
     taken = sum $ bool 0 1 . isJust <$> (csrRequest :> loadStoreDone :> mulDivDone :> Nil)
-    wanted = bool 0 1 (entries.len >= 1 && not (dispatched entry0)) + bool 0 1 (entries.len >= 2)
+    wanted = sum $ bool 0 1 . isJust <$> entries
 
-    issued = entries.len > 0 && taken + wanted <= natToNum @WriteBackWidth
-    issue = if issued then entries.len else 0
-
-    loadStoreJob = do
-      guard issued
-      entry@Executed {..} <- Upto.head entries
-      guard (isNothing exception)
-      memOp <- ctrl.memOp
-      pure LoadStoreJob {memOp, addr = bitCoerce aluResult, wdata = rs2Data, pdAddr = pdOf entry, robAddr, mispredicted}
+    issued = wanted > 0 && taken + wanted <= natToNum @WriteBackWidth
 
     completed entry@Executed {..} =
       Complete entry.robAddr pd RobDone {exception, mispredicted, value = entry.wbData, mem = Nothing}
@@ -57,10 +42,10 @@ writeback WriteBackIn {..} = WriteBackOut {..}
         pd = guard (wakeup (opClassOf ctrl) /= AtCommit) *> pdOf entry
 
     csrRequest = uncurry CsrValue <$> csrWrite
-    lane0Request = guard (issued && entries.len >= 1 && not (dispatched entry0)) *> Just (completed entry0)
-    lane1Request = guard (issued && entries.len >= 2) *> Just (completed entry1)
+    port0Request = guard issued >> (completed <$> entry0)
+    port1Request = guard issued >> (completed <$> entry1)
 
-    (grants, completions) = arbitrate (csrRequest :> loadStoreDone :> mulDivDone :> lane0Request :> lane1Request :> Nil)
+    (grants, completions) = arbitrate (csrRequest :> loadStoreDone :> mulDivDone :> port0Request :> port1Request :> Nil)
     loadStoreGranted = grants !! (1 :: Index 4)
     mulDivGranted = grants !! (2 :: Index 5)
 {-# OPAQUE writeback #-}
