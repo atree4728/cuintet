@@ -9,7 +9,7 @@ import Cuintet.Unit.Csr (CsrFile (..), CsrReq (..), CsrResp (..), TrapSpec (..),
 import Cuintet.Unit.Rob (RobDone (..), RobEntry (..), RobStatic (..), committedMapping, squashes)
 import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 
 newtype CommitIn = CommitIn {entries :: Upto CommitWidth RobEntry}
 
@@ -28,7 +28,7 @@ commit csrFile CommitIn {..} = (csrFile', CommitOut {..})
     (entry0, entry1) = vecToTuple entries.elems
 
     pop
-      | entries.len >= 2, isJust entry0.done, not (squashes entry0), isJust entry1.done = 2
+      | entries.len >= 2, isJust entry0.done, not (squashes entry0), isJust entry1.done, isNothing (mkCsrReq entry1) = 2
       | entries.len >= 1, isJust entry0.done = 1
       | otherwise = 0
 

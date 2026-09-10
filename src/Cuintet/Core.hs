@@ -3,7 +3,7 @@ module Cuintet.Core (CoreIn (..), CoreOut (..), CoreTrace (..), core) where
 
 import Clash.Prelude
 import Control.Monad (guard)
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), CommitWidth, DispatchWidth, FetchWidth, MemReq, MemResp, XLen)
+import Cuintet.Eei (Addr, BusReq (..), BusResp (..), CommitWidth, DispatchWidth, FetchWidth, IssueWidth, MemReq, MemResp, XLen)
 import Cuintet.Forwarding (Forwarding)
 import Cuintet.Forwarding qualified as F
 import Cuintet.Pipeline (Decoded (..), Executed (..), FetchBufBits, Fetched (..), Ready (..), Renamed (..), Retire (..), hasResult, pdOf, regWrite, robWrite)
@@ -17,6 +17,7 @@ import Cuintet.Stage.WriteBack (WriteBackIn (..), WriteBackOut (..), writeback)
 import Cuintet.Unit.Btb (BtbReq (..), BtbResp, btb)
 import Cuintet.Unit.Csr (CsrFile (led), initCsrFile)
 import Cuintet.Unit.Fifo (FifoReq (..), FifoResp (..), fifo)
+import Cuintet.Unit.IssueQueue (IssueQueueReq (..), IssueQueueResp (..), issueQueue)
 import Cuintet.Unit.LoadStore (LoadStoreReq (..), LoadStoreState, loadStoreStep)
 import Cuintet.Unit.LoadStore qualified as L
 import Cuintet.Unit.MulDiv (MulDivReq (..), MulDivState, mulDivStep)
@@ -27,7 +28,7 @@ import Cuintet.Unit.Rob (RobReq (..), RobResp (..), rob)
 import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
 import Cuintet.Util (orNothing)
-import Data.Maybe (isJust)
+import Data.Maybe (fromMaybe, isJust)
 
 data CoreIn = CoreIn
   { iResp :: MemResp
@@ -81,14 +82,14 @@ core ::
   Signal dom CoreOut
 core coreIn = coreOut
   where
-    (coreOut, regReq, btbReq, robReq, fetchedReq, decodedReq, renamedReq, readyReq, executedReq) =
-      mealyB coreT initState (coreIn, regResp, btbResp, robResp, fetchedResp, decodedResp, renamedResp, readyResp, executedResp)
+    (coreOut, regReq, btbReq, robReq, fetchedReq, decodedReq, issueReq, readyReq, executedReq) =
+      mealyB coreT initState (coreIn, regResp, btbResp, robResp, fetchedResp, decodedResp, issueResp, readyResp, executedResp)
     btbResp = btb btbReq
     regResp = regFile regReq
     robResp = rob robReq
     fetchedResp = ring (SNat @FetchBufBits) fetchedReq
     decodedResp = fifo decodedReq
-    renamedResp = fifo renamedReq
+    issueResp = issueQueue issueReq
     readyResp = fifo readyReq
     executedResp = fifo executedReq
 
@@ -101,7 +102,7 @@ coreT ::
   , RobResp
   , RingResp FetchBufBits DispatchWidth Fetched
   , FifoResp DispatchWidth Decoded
-  , FifoResp DispatchWidth Renamed
+  , IssueQueueResp
   , FifoResp DispatchWidth Ready
   , FifoResp DispatchWidth Executed
   ) ->
@@ -112,18 +113,24 @@ coreT ::
     , RobReq
     , RingReq FetchBufBits FetchWidth DispatchWidth Fetched
     , FifoReq DispatchWidth Decoded
-    , FifoReq DispatchWidth Renamed
+    , IssueQueueReq
     , FifoReq DispatchWidth Ready
     , FifoReq DispatchWidth Executed
     )
   )
-coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, decodedResp, renamedResp, readyResp, executedResp) =
-  (state', (coreOut, regReq, btbReq, robReq, fetchedReq, decodedReq, renamedReq, readyReq, executedReq))
+coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, decodedResp, issueResp, readyResp, executedResp) =
+  (state', (coreOut, regReq, btbReq, robReq, fetchedReq, decodedReq, issueReq, readyReq, executedReq))
   where
     fetchIn = FetchIn {iResp, buf = fetchedResp, redirect, btbResp}
     decodeIn = DecodeIn {entries = fetchedResp.rdata, wready = decodedResp.wready, stall = flush}
-    renameIn = RenameIn {entries = decodedResp.rdata, committed = cmOut.renamed, nextRobAddr = robResp.buffer.tl, robFree = robResp.buffer.free, flush, drained = robResp.buffer.rdata.len == 0, wready = renamedResp.wready}
-    regreadIn = RegReadIn {entries = renamedResp.rdata, rsData = regResp.rsData, forwards, wready = readyResp.wready}
+    renameIn = RenameIn {entries = decodedResp.rdata, committed = cmOut.renamed, nextRobAddr = robResp.buffer.tl, robFree = robResp.buffer.free, flush, drained = robResp.buffer.rdata.len == 0, wready = True}
+    regreadIn = RegReadIn {entries, rsData = regResp.rsData, forwards, wready = readyResp.wready}
+      where
+        len
+          | isJust (issueResp.issue !! (1 :: Index IssueWidth)) = 2
+          | isJust (issueResp.issue !! (0 :: Index IssueWidth)) = 1
+          | otherwise = 0
+        entries = Upto {len, elems = fromMaybe (deepErrorX "issueResp") <$> issueResp.issue}
     executeIn = ExecuteIn {entries = readyResp.rdata, wready = executedResp.wready, mulDivBusy = mulDivResp.busy}
     writebackIn = WriteBackIn {entries = executedResp.rdata, loadStoreBusy = loadStoreResp.busy, loadStoreDone = loadStoreResp.done, mulDivDone = mulDivResp.done, csrWrite = cmOut.csrWrite, serializingInFlight}
     commitIn = CommitIn {entries = robResp.buffer.rdata}
@@ -157,13 +164,13 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
     redirect = cmOut.redirect <|> exOut.redirect
     flush = isJust redirect
     serializingInFlight' = not cmOut.squash && (serializingInFlight || wbOut.serializing)
-    rsAddrs = concatMap (maybe (repeat 0) (\Renamed {..} -> ps1Addr :> ps2Addr :> Nil)) (Upto.toMaybes renamedResp.rdata)
+    rsAddrs = concatMap (maybe (repeat 0) (\Renamed {..} -> ps1Addr :> ps2Addr :> Nil)) issueResp.issue
     regReq = RegReq {rsAddrs, writes = (regWrite =<<) <$> wbOut.completions}
     btbReq = BtbReq {lookupAddr = ifOut.btbLookup, prefetchAddr = ifOut.btbPrefetch, writes = exOut.btbWrites}
 
     fetchedReq = RingReq {wdata = ifOut.issue, pop = idOut.issue.len, squash = flush}
     decodedReq = FifoReq {wdata = idOut.issue, rready = rnOut.issue.len > 0, flush}
-    renamedReq = FifoReq {wdata = rnOut.issue, rready = rrOut.issue.len > 0, flush}
+    issueReq = IssueQueueReq {dispatch = rnOut.issue, accepted = repeat (rrOut.issue.len > 0), robHead = robResp.buffer.hd, flush}
     readyReq = FifoReq {wdata = rrOut.issue, rready = exOut.issued, flush}
     executedReq = FifoReq {wdata = exOut.issue, rready = wbOut.issued, flush = isJust cmOut.redirect}
     robReq = RobReq {allocates = rnOut.allocates, completes = (robWrite =<<) <$> wbOut.completions, pop = cmOut.pop, squash = cmOut.squash}

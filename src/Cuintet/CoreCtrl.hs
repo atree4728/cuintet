@@ -83,9 +83,6 @@ usesRs2 InstCtrl {format} = case format of
   BType -> True
   _ -> False
 
-{- | What an instruction's issue looks like: what it competes for, when its tag broadcasts, and
-which ports may run it. gem5's term.
--}
 data OpClass = Alu | Branch | Jal | Jalr | Csr | MulDiv | Load | Store
   deriving (Generic, NFDataX, Eq)
 
