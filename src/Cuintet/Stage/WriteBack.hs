@@ -3,9 +3,9 @@ module Cuintet.Stage.WriteBack (writeback, WriteBackIn (..), WriteBackOut (..)) 
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
-import Cuintet.CoreCtrl (InstCtrl (..), execUnit, opClassOf)
+import Cuintet.CoreCtrl (InstCtrl (..), Wakeup (..), execUnit, opClassOf, wakeup)
 import Cuintet.Eei (DispatchWidth, PRegAddr, WriteBackWidth, XLen)
-import Cuintet.Pipeline (Completion (..), Executed (..), isSerializing, pdOf)
+import Cuintet.Pipeline (Completion (..), Executed (..), pdOf)
 import Cuintet.Unit.LoadStore (LoadStoreJob (..))
 import Cuintet.Unit.Rob (RobDone (..))
 import Cuintet.Upto (Upto (..))
@@ -16,16 +16,13 @@ import Data.Maybe (isJust, isNothing)
 data WriteBackIn = WriteBackIn
   { entries :: Upto DispatchWidth Executed
   , mulDivDone :: Maybe Completion
-  , loadStoreBusy :: Bool
   , loadStoreDone :: Maybe Completion
   , csrWrite :: Maybe (PRegAddr, BitVector XLen)
-  , serializingInFlight :: Bool
   }
 
 data WriteBackOut = WriteBackOut
   { issue :: Index (DispatchWidth + 1)
   , issued :: Bool
-  , serializing :: Bool
   , completions :: Vec WriteBackWidth (Maybe Completion)
   , loadStoreJob :: Maybe LoadStoreJob
   , mulDivGranted :: Bool
@@ -44,23 +41,20 @@ writeback WriteBackIn {..} = WriteBackOut {..}
     taken = sum $ bool 0 1 . isJust <$> (csrRequest :> loadStoreDone :> mulDivDone :> Nil)
     wanted = bool 0 1 (entries.len >= 1 && not (dispatched entry0)) + bool 0 1 (entries.len >= 2)
 
-    memJob = do
+    issued = entries.len > 0 && taken + wanted <= natToNum @WriteBackWidth
+    issue = if issued then entries.len else 0
+
+    loadStoreJob = do
+      guard issued
       entry@Executed {..} <- Upto.head entries
       guard (isNothing exception)
       memOp <- ctrl.memOp
       pure LoadStoreJob {memOp, addr = bitCoerce aluResult, wdata = rs2Data, pdAddr = pdOf entry, robAddr, mispredicted}
 
-    memOk = case memJob of
-      Nothing -> True
-      Just _ -> not loadStoreBusy
-
-    issued = entries.len > 0 && memOk && not serializingInFlight && taken + wanted <= natToNum @WriteBackWidth
-    loadStoreJob = guard issued *> memJob
-    issue = if issued then entries.len else 0
-    serializing = issued && any (maybe False isSerializing) (Upto.toMaybes entries)
-
     completed entry@Executed {..} =
-      Complete entry.robAddr (pdOf entry) RobDone {exception, mispredicted, value = entry.wbData, mem = Nothing}
+      Complete entry.robAddr pd RobDone {exception, mispredicted, value = entry.wbData, mem = Nothing}
+      where
+        pd = guard (wakeup (opClassOf ctrl) /= AtCommit) *> pdOf entry
 
     csrRequest = uncurry CsrValue <$> csrWrite
     lane0Request = guard (issued && entries.len >= 1 && not (dispatched entry0)) *> Just (completed entry0)

@@ -9,6 +9,7 @@ module Cuintet.CoreCtrl (
   isJalr,
   OpClass (..),
   opClassOf,
+  NExecUnits,
   ExecUnit (..),
   execUnit,
   Wakeup (..),
@@ -97,9 +98,10 @@ opClassOf ctrl
   | isJust ctrl.branchOp = Branch
   | otherwise = Alu
 
--- | A resource an 'OpClass' may have to wait for.
 data ExecUnit = MulDivUnit | MemUnit
-  deriving (Generic, NFDataX, Eq)
+  deriving (Generic, NFDataX, Eq, Enum)
+
+type NExecUnits = 2
 
 execUnit :: OpClass -> Maybe ExecUnit
 execUnit MulDiv = Just MulDivUnit

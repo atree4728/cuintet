@@ -2,7 +2,7 @@ module Cuintet.Unit.IssueQueue (IqTag (..), IqPayload (..), Select (..), IssueQu
 
 import Clash.Prelude
 import Control.Monad (guard)
-import Cuintet.CoreCtrl (InstCtrl, OpClass, fitsPort, opClassOf)
+import Cuintet.CoreCtrl (ExecUnit (..), InstCtrl, NExecUnits, OpClass, execUnit, fitsPort, nonSpeculative, opClassOf)
 import Cuintet.Eei (Addr, DispatchWidth, IssueWidth, NRob, PRegAddr, RobAddr, TrapCause, XLen)
 import Cuintet.Pipeline (Renamed (..))
 import Cuintet.Unit.Btb (Prediction)
@@ -46,6 +46,7 @@ without excluded = fmap (>>= \(addr, tag) -> orNothing (addr /= excluded) (addr,
 data IssueQueueReq = IssueQueueReq
   { dispatch :: Upto DispatchWidth Renamed
   , accepted :: Vec IssueWidth Bool
+  , busy :: Vec NExecUnits Bool
   , robHead :: RobAddr
   , flush :: Bool
   }
@@ -56,18 +57,29 @@ step :: Vec NRob (Maybe IqTag) -> IssueQueueReq -> (Vec NRob (Maybe IqTag), Sele
 step tags IssueQueueReq {..} = (tags', Select {selected})
   where
     entries = imap (\i tag -> (numConvert i :: RobAddr,) <$> tag) tags
-    pick0 = oldest robHead entries
+    pick0 = do
+      entry <- oldest robHead entries
+      guard (candidate 0 entry)
+      pure entry
     pick1 = do
       (robAddr0, tag0) <- pick0
-      e@(_, tag) <- oldest robHead (without robAddr0 entries)
-      guard (fitsPort 1 tag.opClass)
-      -- Both entries are read the same cycle they're selected, so pick1 can't yet see a
-      -- result pick0 produces this cycle: don't pair them, or pick1 would read stale data.
-      guard (Just tag.ps1Addr /= tag0.pdAddr && Just tag.ps2Addr /= tag0.pdAddr)
-      pure e
+      (robAddr1, tag1) <- oldest robHead (without robAddr0 entries)
+      guard (candidate 1 (robAddr1, tag1))
+      guard (Just tag1.ps1Addr /= tag0.pdAddr && Just tag1.ps2Addr /= tag0.pdAddr)
+      pure (robAddr1, tag1)
     selected = pick0 :> pick1 :> Nil
 
     leaving = zipWith (\ok e -> guard ok *> (fst <$> e)) accepted selected
+
+    oldestMem = fst <$> oldest robHead (memOnly <$> entries)
+      where
+        memOnly = (>>= \(robAddr, tag) -> orNothing (execUnit tag.opClass == Just MemUnit) (robAddr, tag))
+
+    candidate port (robAddr, tag) =
+      fitsPort port tag.opClass
+        && maybe True (not . (busy !!) . fromEnum) (execUnit tag.opClass)
+        && (not (nonSpeculative tag.opClass) || robAddr == robHead)
+        && (execUnit tag.opClass /= Just MemUnit || Just robAddr == oldestMem)
 
     tags'
       | flush = repeat Nothing

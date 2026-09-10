@@ -3,6 +3,7 @@ module Cuintet.Core (CoreIn (..), CoreOut (..), CoreTrace (..), core) where
 
 import Clash.Prelude
 import Control.Monad (guard)
+import Cuintet.CoreCtrl (ExecUnit (..), execUnit, opClassOf)
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), CommitWidth, DispatchWidth, FetchWidth, IssueWidth, MemReq, MemResp, XLen)
 import Cuintet.Forwarding (Forwarding)
 import Cuintet.Forwarding qualified as F
@@ -55,12 +56,11 @@ data CoreState = CoreState
   , mulDivState :: MulDivState
   , loadStoreState :: LoadStoreState
   , csrFile :: CsrFile
-  , serializingInFlight :: Bool
   }
   deriving (Generic, NFDataX)
 
 initState :: CoreState
-initState = CoreState {fetchState = initFetchState, renameState = initRenameState, mulDivState = M.Idle, loadStoreState = L.Idle, csrFile = initCsrFile, serializingInFlight = False}
+initState = CoreState {fetchState = initFetchState, renameState = initRenameState, mulDivState = M.Idle, loadStoreState = L.Idle, csrFile = initCsrFile}
 
 data CoreTrace = CoreTrace
   { fetchStart :: Maybe Addr
@@ -131,8 +131,8 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
           | isJust (issueResp.issue !! (0 :: Index IssueWidth)) = 1
           | otherwise = 0
         entries = Upto {len, elems = fromMaybe (deepErrorX "issueResp") <$> issueResp.issue}
-    executeIn = ExecuteIn {entries = readyResp.rdata, wready = executedResp.wready, mulDivBusy = mulDivResp.busy}
-    writebackIn = WriteBackIn {entries = executedResp.rdata, loadStoreBusy = loadStoreResp.busy, loadStoreDone = loadStoreResp.done, mulDivDone = mulDivResp.done, csrWrite = cmOut.csrWrite, serializingInFlight}
+    executeIn = ExecuteIn {entries = readyResp.rdata, wready = executedResp.wready}
+    writebackIn = WriteBackIn {entries = executedResp.rdata, loadStoreDone = loadStoreResp.done, mulDivDone = mulDivResp.done, csrWrite = cmOut.csrWrite}
     commitIn = CommitIn {entries = robResp.buffer.rdata}
 
     (fetchState', ifOut) = fetch fetchState fetchIn
@@ -163,14 +163,19 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
 
     redirect = cmOut.redirect <|> exOut.redirect
     flush = isJust redirect
-    serializingInFlight' = not cmOut.squash && (serializingInFlight || wbOut.serializing)
     rsAddrs = concatMap (maybe (repeat 0) (\Renamed {..} -> ps1Addr :> ps2Addr :> Nil)) issueResp.issue
     regReq = RegReq {rsAddrs, writes = (regWrite =<<) <$> wbOut.completions}
     btbReq = BtbReq {lookupAddr = ifOut.btbLookup, prefetchAddr = ifOut.btbPrefetch, writes = exOut.btbWrites}
 
+    inflightTo unit = any (maybe False ((== Just unit) . execUnit . opClassOf . (.ctrl)))
+    busy =
+      (mulDivResp.busy || inflightTo MulDivUnit (Upto.toMaybes readyResp.rdata))
+        :> (loadStoreResp.busy || inflightTo MemUnit (Upto.toMaybes readyResp.rdata) || inflightTo MemUnit (Upto.toMaybes executedResp.rdata))
+        :> Nil
+
     fetchedReq = RingReq {wdata = ifOut.issue, pop = idOut.issue.len, squash = flush}
     decodedReq = FifoReq {wdata = idOut.issue, rready = rnOut.issue.len > 0, flush}
-    issueReq = IssueQueueReq {dispatch = rnOut.issue, accepted = repeat (rrOut.issue.len > 0), robHead = robResp.buffer.hd, flush}
+    issueReq = IssueQueueReq {dispatch = rnOut.issue, accepted = repeat (rrOut.issue.len > 0), robHead = robResp.buffer.hd, busy, flush}
     readyReq = FifoReq {wdata = rrOut.issue, rready = exOut.issued, flush}
     executedReq = FifoReq {wdata = exOut.issue, rready = wbOut.issued, flush = isJust cmOut.redirect}
     robReq = RobReq {allocates = rnOut.allocates, completes = (robWrite =<<) <$> wbOut.completions, pop = cmOut.pop, squash = cmOut.squash}
@@ -189,4 +194,4 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
         , flush
         }
 
-    state' = CoreState {fetchState = fetchState', renameState = renameState', mulDivState = mulDivState', loadStoreState = loadStoreState', csrFile = csrFile', serializingInFlight = serializingInFlight'}
+    state' = CoreState {fetchState = fetchState', renameState = renameState', mulDivState = mulDivState', loadStoreState = loadStoreState', csrFile = csrFile'}
