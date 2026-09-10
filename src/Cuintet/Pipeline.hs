@@ -3,7 +3,7 @@ module Cuintet.Pipeline (FetchBufBits, Fetched (..), Decoded (..), Renamed (..),
 
 import Clash.Prelude
 import Control.Monad (guard)
-import Cuintet.CoreCtrl (ExecUnit (..), InstCtrl (..), isCsrRead, unitOf)
+import Cuintet.CoreCtrl (InstCtrl (..), execUnit, isCsrRead, opClassOf)
 import Cuintet.Eei (Addr, Inst, MemReq, PRegAddr, RegAddr, RobAddr, SystemOp (..), TrapCause, XLen)
 import Cuintet.Unit.Btb (Prediction)
 import Cuintet.Unit.Rob (RobDone (..))
@@ -108,9 +108,7 @@ pdOf ::
 pdOf stage = guard (isNothing stage.exception) *> stage.pdAddr
 
 hasResult :: (HasField "ctrl" stage InstCtrl) => stage -> Bool
-hasResult stage = case unitOf stage.ctrl of
-  Alu _ -> not (isCsrRead stage.ctrl)
-  _ -> False
+hasResult stage = isNothing (execUnit (opClassOf stage.ctrl)) && not (isCsrRead stage.ctrl)
 
 isSerializing :: (HasField "exception" stage (Maybe a), HasField "ctrl" stage InstCtrl) => stage -> Bool
 isSerializing stage = isJust stage.exception || stage.ctrl.systemOp == Just SysMret

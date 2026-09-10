@@ -3,11 +3,10 @@ module Cuintet.Stage.WriteBack (writeback, WriteBackIn (..), WriteBackOut (..)) 
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
-import Cuintet.CoreCtrl (ExecUnit (..), InstCtrl (..), unitOf)
-import Cuintet.Eei (IssueWidth, PRegAddr, XLen)
+import Cuintet.CoreCtrl (InstCtrl (..), execUnit, opClassOf)
+import Cuintet.Eei (DispatchWidth, PRegAddr, WriteBackWidth, XLen)
 import Cuintet.Pipeline (Completion (..), Executed (..), isSerializing, pdOf)
 import Cuintet.Unit.LoadStore (LoadStoreJob (..))
-import Cuintet.Unit.RegFile (WritePorts)
 import Cuintet.Unit.Rob (RobDone (..))
 import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
@@ -15,7 +14,7 @@ import Data.Bool (bool)
 import Data.Maybe (isJust, isNothing)
 
 data WriteBackIn = WriteBackIn
-  { entries :: Upto IssueWidth Executed
+  { entries :: Upto DispatchWidth Executed
   , mulDivDone :: Maybe Completion
   , loadStoreBusy :: Bool
   , loadStoreDone :: Maybe Completion
@@ -24,20 +23,17 @@ data WriteBackIn = WriteBackIn
   }
 
 data WriteBackOut = WriteBackOut
-  { issue :: Index (IssueWidth + 1)
+  { issue :: Index (DispatchWidth + 1)
   , issued :: Bool
   , serializing :: Bool
-  , completions :: Vec WritePorts (Maybe Completion)
+  , completions :: Vec WriteBackWidth (Maybe Completion)
   , loadStoreJob :: Maybe LoadStoreJob
   , mulDivGranted :: Bool
   , loadStoreGranted :: Bool
   }
 
 dispatched :: Executed -> Bool
-dispatched entry =
-  isNothing entry.exception && case unitOf entry.ctrl of
-    Alu _ -> False
-    _ -> True
+dispatched entry = isNothing entry.exception && isJust (execUnit (opClassOf entry.ctrl))
 
 writeback :: WriteBackIn -> WriteBackOut
 writeback WriteBackIn {..} = WriteBackOut {..}
@@ -58,7 +54,7 @@ writeback WriteBackIn {..} = WriteBackOut {..}
       Nothing -> True
       Just _ -> not loadStoreBusy
 
-    issued = entries.len > 0 && memOk && not serializingInFlight && taken + wanted <= natToNum @WritePorts
+    issued = entries.len > 0 && memOk && not serializingInFlight && taken + wanted <= natToNum @WriteBackWidth
     loadStoreJob = guard issued *> memJob
     issue = if issued then entries.len else 0
     serializing = issued && any (maybe False isSerializing) (Upto.toMaybes entries)

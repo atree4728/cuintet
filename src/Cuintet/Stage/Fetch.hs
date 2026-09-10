@@ -2,7 +2,7 @@
 module Cuintet.Stage.Fetch (FetchState (..), initFetchState, FetchIn (..), FetchOut (..), fetch) where
 
 import Clash.Prelude
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), FetchWidth, IssueWidth, MemReq, MemResp, instSlice, resetVector)
+import Cuintet.Eei (Addr, BusReq (..), BusResp (..), DispatchWidth, FetchWidth, MemReq, MemResp, instSlice, resetVector)
 import Cuintet.Pipeline (FetchBufBits, Fetched (..))
 import Cuintet.Unit.Btb (BtbResp (..), Prediction (..), bankOf, isTaken)
 import Cuintet.Unit.Ring (RingResp (..))
@@ -45,7 +45,7 @@ initFetchState =
 data FetchIn = FetchIn
   { iResp :: MemResp
   -- ^ Response to a fetch request issued on an earlier clock.
-  , buf :: RingResp FetchBufBits IssueWidth Fetched
+  , buf :: RingResp FetchBufBits DispatchWidth Fetched
   -- ^ The fetch buffer, for the room it has.
   , redirect :: Maybe Addr
   -- ^ Where to restart, once MA has resolved control flow.

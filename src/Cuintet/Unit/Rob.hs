@@ -2,9 +2,8 @@ module Cuintet.Unit.Rob (RobStatic (..), RobDone (..), RobEntry (..), squashes, 
 
 import Clash.Prelude
 import Control.Monad (guard)
-import Cuintet.Eei (Addr, Inst, IssueWidth, Mapping, MemReq, NRob, RobAddr, SystemOp (..), TrapCause, XLen)
+import Cuintet.Eei (Addr, CommitWidth, DispatchWidth, Inst, Mapping, MemReq, NRob, RobAddr, SystemOp (..), TrapCause, WriteBackWidth, XLen)
 import Cuintet.Unit.MultiRam (multiRam)
-import Cuintet.Unit.RegFile (WritePorts)
 import Cuintet.Unit.Ring (RingReq (..), RingResp (..), ring)
 import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
@@ -34,14 +33,14 @@ data RobEntry = RobEntry
   deriving (Generic, NFDataX)
 
 data RobReq = RobReq
-  { allocates :: Upto IssueWidth RobStatic
-  , completes :: Vec WritePorts (Maybe (RobAddr, RobDone))
-  , pop :: Index (IssueWidth + 1)
+  { allocates :: Upto DispatchWidth RobStatic
+  , completes :: Vec WriteBackWidth (Maybe (RobAddr, RobDone))
+  , pop :: Index (CommitWidth + 1)
   , squash :: Bool
   }
   deriving (Generic, NFDataX)
 
-newtype RobResp = RobResp {buffer :: RingResp (BitSize RobAddr) IssueWidth RobEntry}
+newtype RobResp = RobResp {buffer :: RingResp (BitSize RobAddr) CommitWidth RobEntry}
   deriving newtype (Generic, NFDataX)
 
 squashes :: RobEntry -> Bool
@@ -63,7 +62,7 @@ rob req = mkResp <$> statics <*> dones
     statics = ring (SNat @(BitSize RobAddr)) (mkRingReq <$> req)
     mkRingReq RobReq {..} = RingReq {wdata = allocates, pop, squash}
 
-    addrs = (\RingResp {hd} -> (hd +) . numConvert <$> indicesI @IssueWidth) <$> statics
+    addrs = (\RingResp {hd} -> (hd +) . numConvert <$> indicesI @CommitWidth) <$> statics
     dones = zipWith orNothing <$> valids <*> multiRam addrs ((.completes) <$> req)
     valids = (\flags -> fmap (flags !!)) <$> completed <*> addrs
 

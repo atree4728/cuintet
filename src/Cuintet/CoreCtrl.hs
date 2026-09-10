@@ -7,12 +7,19 @@ module Cuintet.CoreCtrl (
   usesRs1,
   usesRs2,
   isJalr,
+  OpClass (..),
+  opClassOf,
   ExecUnit (..),
-  unitOf,
+  execUnit,
+  Wakeup (..),
+  wakeup,
+  nonSpeculative,
+  fitsPort,
 ) where
 
 import Clash.Prelude
-import Cuintet.Eei (AluOp, BranchOp, MemOp (..), MulDivOp, SystemOp (..))
+import Cuintet.Eei (AluOp, BranchOp, IssueWidth, MemOp, MulDivOp, SystemOp (..))
+import Cuintet.Eei qualified as Eei (MemOp (Load, Store))
 import Data.Maybe (isJust)
 
 -- | RISC-V instruction format.
@@ -50,11 +57,11 @@ data InstCtrl = InstCtrl
   deriving (Generic, NFDataX)
 
 isLoad :: InstCtrl -> Bool
-isLoad InstCtrl {memOp = Just (Load _ _)} = True
+isLoad InstCtrl {memOp = Just (Eei.Load _ _)} = True
 isLoad _ = False
 
 isStore :: InstCtrl -> Bool
-isStore InstCtrl {memOp = Just (Store _)} = True
+isStore InstCtrl {memOp = Just (Eei.Store _)} = True
 isStore _ = False
 
 isCsrRead :: InstCtrl -> Bool
@@ -76,12 +83,53 @@ usesRs2 InstCtrl {format} = case format of
   BType -> True
   _ -> False
 
-data ExecUnit = Alu (Index 2) | MulDiv | LoadStore
+{- | What an instruction's issue looks like: what it competes for, when its tag broadcasts, and
+which ports may run it. gem5's term.
+-}
+data OpClass = Alu | Branch | Jal | Jalr | Csr | MulDiv | Load | Store
   deriving (Generic, NFDataX, Eq)
 
-unitOf :: InstCtrl -> ExecUnit
-unitOf ctrl
-  | isJust ctrl.memOp = LoadStore
+opClassOf :: InstCtrl -> OpClass
+opClassOf ctrl
+  | isLoad ctrl = Load
+  | isStore ctrl = Store
   | isJust ctrl.mulDivOp = MulDiv
-  | isJust ctrl.systemOp = Alu 0
-  | otherwise = Alu 1
+  | isJust ctrl.systemOp = Csr
+  | isJalr ctrl = Jalr
+  | ctrl.isJump = Jal
+  | isJust ctrl.branchOp = Branch
+  | otherwise = Alu
+
+-- | A resource an 'OpClass' may have to wait for.
+data ExecUnit = MulDivUnit | MemUnit
+  deriving (Generic, NFDataX, Eq)
+
+execUnit :: OpClass -> Maybe ExecUnit
+execUnit MulDiv = Just MulDivUnit
+execUnit Load = Just MemUnit
+execUnit Store = Just MemUnit
+execUnit _ = Nothing
+
+-- | When an 'OpClass' broadcasts its destination tag.
+data Wakeup = AtIssue | AtComplete | AtCommit
+  deriving (Generic, NFDataX, Eq)
+
+wakeup :: OpClass -> Wakeup
+wakeup Csr = AtCommit
+wakeup MulDiv = AtComplete
+wakeup Load = AtComplete
+wakeup Store = AtComplete
+wakeup _ = AtIssue
+
+nonSpeculative :: OpClass -> Bool
+nonSpeculative Store = True
+nonSpeculative _ = False
+
+fitsPort :: Index IssueWidth -> OpClass -> Bool
+fitsPort port opClass
+  | port == 0 = True
+  | otherwise = case opClass of
+      Alu -> True
+      Branch -> True
+      Jal -> True
+      _ -> False

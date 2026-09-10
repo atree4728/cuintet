@@ -3,7 +3,7 @@ module Cuintet.Stage.Rename (RenameState (..), initRenameState, RenameIn (..), R
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Cuintet.CoreCtrl (InstCtrl (..))
-import Cuintet.Eei (IssueWidth, Mapping (..), NRegs, PRegAddr, RobAddr)
+import Cuintet.Eei (CommitWidth, DispatchWidth, Mapping (..), NRegs, PRegAddr, RobAddr)
 import Cuintet.Pipeline (Decoded (..), Renamed (..), validRdOf)
 import Cuintet.Unit.Rob (RobStatic (..))
 import Cuintet.Upto (Upto (..))
@@ -34,8 +34,8 @@ initRenameState =
     }
 
 data RenameIn = RenameIn
-  { entries :: Upto IssueWidth Decoded
-  , committed :: Vec IssueWidth (Maybe Mapping)
+  { entries :: Upto DispatchWidth Decoded
+  , committed :: Vec CommitWidth (Maybe Mapping)
   , nextRobAddr :: RobAddr
   , robFree :: RobAddr
   , flush :: Bool
@@ -45,8 +45,8 @@ data RenameIn = RenameIn
   }
 
 data RenameOut = RenameOut
-  { issue :: Upto IssueWidth Renamed
-  , allocates :: Upto IssueWidth RobStatic
+  { issue :: Upto DispatchWidth Renamed
+  , allocates :: Upto DispatchWidth RobStatic
   }
 
 rename :: RenameState -> RenameIn -> (RenameState, RenameOut)

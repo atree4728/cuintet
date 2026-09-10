@@ -3,20 +3,20 @@ module Cuintet.Stage.RegRead (RegReadIn (..), RegReadOut (..), regRead) where
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Cuintet.CoreCtrl (usesRs1, usesRs2)
-import Cuintet.Eei (IssueWidth, XLen)
+import Cuintet.Eei (DispatchWidth, XLen)
 import Cuintet.Forwarding (Forwarding, NForwards, bypass)
 import Cuintet.Pipeline (Ready (..), Renamed (..))
 import Cuintet.Upto (Upto (..))
 import Data.Maybe (fromMaybe, isJust)
 
 data RegReadIn = RegReadIn
-  { entries :: Upto IssueWidth Renamed
-  , rsData :: Vec (2 * IssueWidth) (BitVector XLen)
+  { entries :: Upto DispatchWidth Renamed
+  , rsData :: Vec (2 * DispatchWidth) (BitVector XLen)
   , forwards :: Vec NForwards Forwarding
   , wready :: Bool
   }
 
-newtype RegReadOut = RegReadOut {issue :: Upto IssueWidth Ready}
+newtype RegReadOut = RegReadOut {issue :: Upto DispatchWidth Ready}
 
 regRead :: RegReadIn -> RegReadOut
 regRead RegReadIn {..} = RegReadOut {issue}

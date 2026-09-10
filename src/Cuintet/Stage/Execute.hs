@@ -4,8 +4,8 @@ module Cuintet.Stage.Execute (execute, ExecuteIn (..), ExecuteOut (..)) where
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
-import Cuintet.CoreCtrl (ExecUnit (..), InstCtrl (..), InstFormat (..), isCsrRead, unitOf)
-import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), IssueWidth, XLen, misalignedCause, pattern INSTRUCTION_ADDRESS_MISALIGNED)
+import Cuintet.CoreCtrl (ExecUnit (..), InstCtrl (..), InstFormat (..), execUnit, isCsrRead, opClassOf)
+import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), DispatchWidth, XLen, misalignedCause, pattern INSTRUCTION_ADDRESS_MISALIGNED)
 import Cuintet.Pipeline (Executed (..), Ready (..), isSerializing)
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
 import Cuintet.Unit.MulDiv (MulDivJob (..))
@@ -15,27 +15,27 @@ import Cuintet.Util (orNothing)
 import Data.Maybe (isJust, isNothing)
 
 data ExecuteIn = ExecuteIn
-  { entries :: Upto IssueWidth Ready
+  { entries :: Upto DispatchWidth Ready
   , wready :: Bool
   , mulDivBusy :: Bool
   }
 
 data ExecuteOut = ExecuteOut
-  { issue :: Upto IssueWidth Executed
+  { issue :: Upto DispatchWidth Executed
   -- ^ The group handed to MA, lane 1 dropped when it turned out to be down the wrong path.
   , issued :: Bool
   -- ^ Whether the group leaves EX this clock, which 'redirect' must not feed into.
-  , wbData :: Vec IssueWidth (BitVector XLen)
+  , wbData :: Vec DispatchWidth (BitVector XLen)
   -- ^ For the broadcast, so before the squash.
   , redirect :: Maybe Addr
-  , btbWrites :: Vec IssueWidth (Maybe BtbWrite)
+  , btbWrites :: Vec DispatchWidth (Maybe BtbWrite)
   , mulDivJob :: Maybe MulDivJob
   }
 
 execute :: ExecuteIn -> ExecuteOut
 execute ExecuteIn {..} = ExecuteOut {..}
   where
-    needsMulDiv = maybe False (\Ready {..} -> isNothing exception && unitOf ctrl == MulDiv) (Upto.head entries)
+    needsMulDiv = maybe False (\Ready {..} -> isNothing exception && execUnit (opClassOf ctrl) == Just MulDivUnit) (Upto.head entries)
     issued = entries.len > 0 && wready && not (needsMulDiv && mulDivBusy)
 
     mulDivJob = guard issued *> (mkJob executed0.mispredicted =<< Upto.head entries)

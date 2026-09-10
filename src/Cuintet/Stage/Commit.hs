@@ -3,7 +3,7 @@ module Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit) where
 
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
-import Cuintet.Eei (Addr, IssueWidth, Mapping (..), PRegAddr, SystemOp (..), XLen)
+import Cuintet.Eei (Addr, CommitWidth, Mapping (..), PRegAddr, SystemOp (..), XLen)
 import Cuintet.Pipeline (Retire (..))
 import Cuintet.Unit.Csr (CsrFile (..), CsrReq (..), CsrResp (..), TrapSpec (..), csrStep)
 import Cuintet.Unit.Rob (RobDone (..), RobEntry (..), RobStatic (..), committedMapping, squashes)
@@ -11,14 +11,14 @@ import Cuintet.Upto (Upto (..))
 import Cuintet.Upto qualified as Upto
 import Data.Maybe (fromMaybe, isJust)
 
-newtype CommitIn = CommitIn {entries :: Upto IssueWidth RobEntry}
+newtype CommitIn = CommitIn {entries :: Upto CommitWidth RobEntry}
 
 data CommitOut = CommitOut
-  { retired :: Vec IssueWidth (Maybe Retire)
-  , renamed :: Vec IssueWidth (Maybe Mapping)
+  { retired :: Vec CommitWidth (Maybe Retire)
+  , renamed :: Vec CommitWidth (Maybe Mapping)
   , redirect :: Maybe Addr
   , csrWrite :: Maybe (PRegAddr, BitVector XLen)
-  , pop :: Index (IssueWidth + 1)
+  , pop :: Index (CommitWidth + 1)
   , squash :: Bool
   }
 

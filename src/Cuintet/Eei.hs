@@ -56,8 +56,11 @@ module Cuintet.Eei (
   pattern STORE_AMO_ADDRESS_MISALIGNED,
   pattern ENVIRONMENT_CALL_FROM_M_MODE,
   misalignedCause,
-  IssueWidth,
   FetchWidth,
+  DispatchWidth,
+  IssueWidth,
+  WriteBackWidth,
+  CommitWidth,
 ) where
 
 import Clash.Annotations.BitRepresentation
@@ -102,8 +105,9 @@ type RobAddr = Unsigned 4
 
 type NRob = 2 ^ BitSize RobAddr
 
--- | What renaming an instruction's destination register decided: Cm makes it architectural, and
--- the physical register the architectural map table held until then goes back to the free list.
+{- | What renaming an instruction's destination register decided: Cm makes it architectural, and
+the physical register the architectural map table held until then goes back to the free list.
+-}
 data Mapping = Mapping
   { rdAddr :: RegAddr
   , pdAddr :: PRegAddr
@@ -459,5 +463,10 @@ misalignedCause memOp addr = orNothing (not $ aligned width $ laneOffset addr) c
       Load w _ -> (w, LOAD_ADDRESS_MISALIGNED)
       Store w -> (w, STORE_AMO_ADDRESS_MISALIGNED)
 
--- | # of superscalar ways
+type DispatchWidth = 2
+
 type IssueWidth = 2
+
+type WriteBackWidth = 2
+
+type CommitWidth = 2

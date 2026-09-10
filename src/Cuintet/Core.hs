@@ -3,7 +3,7 @@ module Cuintet.Core (CoreIn (..), CoreOut (..), CoreTrace (..), core) where
 
 import Clash.Prelude
 import Control.Monad (guard)
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), FetchWidth, IssueWidth, MemReq, MemResp, XLen)
+import Cuintet.Eei (Addr, BusReq (..), BusResp (..), CommitWidth, DispatchWidth, FetchWidth, MemReq, MemResp, XLen)
 import Cuintet.Forwarding (Forwarding)
 import Cuintet.Forwarding qualified as F
 import Cuintet.Pipeline (Decoded (..), Executed (..), FetchBufBits, Fetched (..), Ready (..), Renamed (..), Retire (..), hasResult, pdOf, regWrite, robWrite)
@@ -41,7 +41,7 @@ data CoreOut = CoreOut
   -- ^ Instruction fetch request.
   , dReq :: Maybe MemReq
   -- ^ Load/store request.
-  , retired :: Vec IssueWidth (Maybe Retire)
+  , retired :: Vec CommitWidth (Maybe Retire)
   -- ^ Execution log of a single instruction, emitted only in the clock it retires.
   , led :: BitVector XLen
   , coreTrace :: CoreTrace
@@ -64,12 +64,12 @@ initState = CoreState {fetchState = initFetchState, renameState = initRenameStat
 data CoreTrace = CoreTrace
   { fetchStart :: Maybe Addr
   , ifIssue :: Upto FetchWidth Fetched
-  , idIssue :: Index (IssueWidth + 1)
-  , rnIssue :: Index (IssueWidth + 1)
-  , rrIssue :: Index (IssueWidth + 1)
-  , exIssue :: Index (IssueWidth + 1)
-  , wbIssue :: Index (IssueWidth + 1)
-  , retired :: Vec IssueWidth (Maybe Retire)
+  , idIssue :: Index (DispatchWidth + 1)
+  , rnIssue :: Index (DispatchWidth + 1)
+  , rrIssue :: Index (DispatchWidth + 1)
+  , exIssue :: Index (DispatchWidth + 1)
+  , wbIssue :: Index (DispatchWidth + 1)
+  , retired :: Vec CommitWidth (Maybe Retire)
   , flush :: Bool
   }
   deriving (Generic, NFDataX)
@@ -99,22 +99,22 @@ coreT ::
   , RegResp
   , BtbResp
   , RobResp
-  , RingResp FetchBufBits IssueWidth Fetched
-  , FifoResp IssueWidth Decoded
-  , FifoResp IssueWidth Renamed
-  , FifoResp IssueWidth Ready
-  , FifoResp IssueWidth Executed
+  , RingResp FetchBufBits DispatchWidth Fetched
+  , FifoResp DispatchWidth Decoded
+  , FifoResp DispatchWidth Renamed
+  , FifoResp DispatchWidth Ready
+  , FifoResp DispatchWidth Executed
   ) ->
   ( CoreState
   , ( CoreOut
     , RegReq
     , BtbReq
     , RobReq
-    , RingReq FetchBufBits FetchWidth IssueWidth Fetched
-    , FifoReq IssueWidth Decoded
-    , FifoReq IssueWidth Renamed
-    , FifoReq IssueWidth Ready
-    , FifoReq IssueWidth Executed
+    , RingReq FetchBufBits FetchWidth DispatchWidth Fetched
+    , FifoReq DispatchWidth Decoded
+    , FifoReq DispatchWidth Renamed
+    , FifoReq DispatchWidth Ready
+    , FifoReq DispatchWidth Executed
     )
   )
 coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, decodedResp, renamedResp, readyResp, executedResp) =
@@ -143,7 +143,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
 
     forwards = fromEx 1 :> fromEx 0 :> fromWb 1 :> fromWb 0 :> mulDivResp.forwarding :> loadStoreResp.forwarding :> Nil
       where
-        fromEx, fromWb :: Index IssueWidth -> Forwarding
+        fromEx, fromWb :: Index DispatchWidth -> Forwarding
         exLanes = Upto.toMaybes readyResp.rdata
         wbLanes = Upto.toMaybes executedResp.rdata
         fromEx i = F.forwarding (pdOf =<< exLanes !! i) $ do
