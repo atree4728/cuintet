@@ -12,7 +12,7 @@ ramAddrWidth :: SNat 16
 ramAddrWidth = SNat
 
 budget :: Int
-budget = 400000
+budget = 600000
 
 main :: IO ()
 main = do

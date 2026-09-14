@@ -36,10 +36,10 @@ traceImage budget img = sampleWithResetN @System d1 budget $ (.coreTrace) <$> sy
 upToEcall :: [CoreTrace] -> [CoreTrace]
 upToEcall = P.foldr (\t rest -> t : if containEcall t then [] else rest) []
   where
-    containEcall tr = any (maybe False isEcall) tr.retired
+    containEcall tr = any (maybe False isEcall) tr.cmRetire
 
 retires :: [CoreTrace] -> [Retire]
-retires = P.concatMap (catMaybes . toList . (.retired))
+retires = P.concatMap (catMaybes . toList . (.cmRetire))
 
 -- | The register file a run of 'Retire's leaves behind.
 finalRegs :: [Retire] -> RegFile
@@ -54,6 +54,6 @@ runImage budget = P.foldl' step initial . upToEcall . traceImage budget
   where
     initial = Run {cycles = 0, retired = 0, regs = replicate d32 0, halted = False}
     step :: Run -> CoreTrace -> Run
-    step run tr = P.foldl' commit run {cycles = run.cycles + 1} (catMaybes (toList tr.retired))
+    step run tr = P.foldl' commit run {cycles = run.cycles + 1} (catMaybes (toList tr.cmRetire))
       where
         commit r retire = r {retired = r.retired + 1, regs = writeBack r.regs retire, halted = isEcall retire}

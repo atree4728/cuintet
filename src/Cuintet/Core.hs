@@ -3,8 +3,8 @@ module Cuintet.Core (CoreIn (..), CoreOut (..), CoreTrace (..), core) where
 
 import Clash.Prelude
 import Control.Monad (guard)
-import Cuintet.CoreCtrl (ExecUnit (..), Wakeup (..), execUnit, opClassOf, wakeup)
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), CommitWidth, DispatchWidth, FetchWidth, IssueWidth, MemReq, MemResp, PRegAddr, RobAddr, XLen)
+import Cuintet.CoreCtrl (ExecUnit (..), NExecUnits, Wakeup (..), execUnit, opClassOf, wakeup)
+import Cuintet.Eei (Addr, BusReq (..), BusResp (..), CommitWidth, DispatchWidth, FetchWidth, IssueWidth, MemReq, MemResp, PRegAddr, RobAddr, WriteBackWidth, XLen)
 import Cuintet.Forwarding (Forwarding)
 import Cuintet.Forwarding qualified as F
 import Cuintet.Pipeline (Decoded (..), Executed (..), FetchBufBits, Fetched (..), Ready (..), Renamed (..), Retire (..), hasResult, pdOf, regWrite, robWrite)
@@ -62,15 +62,20 @@ data CoreState = CoreState
 initState :: CoreState
 initState = CoreState {fetchState = initFetchState, renameState = initRenameState, mulDivState = M.Idle, loadStoreState = L.Idle, csrFile = initCsrFile, pendingRedirect = Nothing}
 
+-- | From the ROB on, the stages are told by which entry each of them holds in the clock.
 data CoreTrace = CoreTrace
-  { fetchStart :: Maybe Addr
+  { ifStart :: Maybe Addr
   , ifIssue :: Vec FetchWidth (Maybe Fetched)
   , idIssue :: Index (DispatchWidth + 1)
-  , rnIssue :: Index (DispatchWidth + 1)
-  , rrIssue :: Index (DispatchWidth + 1)
-  , exIssue :: Index (DispatchWidth + 1)
-  , wbIssue :: Index (DispatchWidth + 1)
-  , retired :: Vec CommitWidth (Maybe Retire)
+  , rnIssue :: Vec DispatchWidth (Maybe RobAddr)
+  , rrIssue :: Vec IssueWidth (Maybe RobAddr)
+  , exHold :: Vec IssueWidth (Maybe RobAddr)
+  , unitHold :: Vec NExecUnits (Maybe RobAddr)
+  , wbHold :: Vec IssueWidth (Maybe RobAddr)
+  , wbComplete :: Vec WriteBackWidth (Maybe RobAddr)
+  , robHead :: RobAddr
+  , robTail :: RobAddr
+  , cmRetire :: Vec CommitWidth (Maybe Retire)
   , flush :: Bool
   }
   deriving (Generic, NFDataX)
@@ -204,16 +209,30 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
     coreOut = CoreOut {iReq = ifOut.iReq, dReq = loadStoreResp.memReq, retired = cmOut.retired, led = csrFile.led, coreTrace}
     coreTrace =
       CoreTrace
-        { fetchStart = if iResp.ready && not flush then (.addr) <$> ifOut.iReq else Nothing
+        { ifStart = if iResp.ready && not flush then (.addr) <$> ifOut.iReq else Nothing
         , ifIssue = if flush then repeat Nothing else ifOut.issue
         , idIssue = nIssued idOut.issue
-        , rnIssue = nIssued rnOut.issue
-        , rrIssue = nIssued rrOut.issue
-        , exIssue = if exOut.issued then nIssued readyEntries else 0
-        , wbIssue = if wbOut.issued then nIssued executedEntries else 0
-        , retired = cmOut.retired
+        , rnIssue = fmap fst <$> rnOut.allocates
+        , rrIssue = fmap (.robAddr) <$> rrOut.issue
+        , exHold = fmap (.robAddr) <$> readyEntries
+        , unitHold = mulDivHolder :> loadStoreHolder :> Nil
+        , wbHold = fmap (.robAddr) <$> executedEntries
+        , wbComplete = fmap fst . (robWrite =<<) <$> wbOut.completions
+        , robHead = robResp.hd
+        , robTail = robResp.tl
+        , cmRetire = cmOut.retired
         , flush
         }
+      where
+        mulDivHolder = case mulDivState of
+          M.Busy job _ -> Just job.robAddr
+          M.Waiting c -> fst <$> robWrite c
+          M.Idle -> Nothing
+        loadStoreHolder = case loadStoreState of
+          L.WaitReady job _ -> Just job.robAddr
+          L.WaitValid job _ -> Just job.robAddr
+          L.Waiting c -> fst <$> robWrite c
+          L.Idle -> Nothing
 
     state' = CoreState {fetchState = fetchState', renameState = renameState', mulDivState = mulDivState', loadStoreState = loadStoreState', csrFile = csrFile', pendingRedirect = pendingRedirect'}
 

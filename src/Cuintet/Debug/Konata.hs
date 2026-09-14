@@ -3,15 +3,17 @@
 -- | A Konata pipeline log, reconstructed from the per-clock 'CoreTrace'.
 module Cuintet.Debug.Konata (konataLog) where
 
-import Clash.Prelude (natToNum)
+import Clash.Prelude (imap, natToNum)
 import Cuintet.Core (CoreTrace (..))
+import Cuintet.CoreCtrl (ExecUnit (..))
 import Cuintet.Debug.Show (hex, retireLines)
-import Cuintet.Eei (Addr, FetchWidth, Inst)
+import Cuintet.Eei (Addr, FetchWidth, Inst, RobAddr)
 import Cuintet.Pipeline (Fetched (..), Retire (..))
 import Cuintet.Unit.Btb (bankOf)
 import Data.Foldable (toList)
 import Data.Function (applyWhen)
-import Data.Maybe (catMaybes)
+import Data.List (mapAccumL, partition)
+import Data.Maybe (catMaybes, fromMaybe)
 import Text.Printf (printf)
 import Prelude
 
@@ -21,24 +23,33 @@ data Inflight = Inflight
   , instBits :: Maybe Inst
   }
 
-data Stage = IF | ID | RN | RR | EX | WB | Cm
+data Stage = IF | ID | RN | IQ | RR | EX | MD | LS | WB | Cm
   deriving (Eq, Show)
 
--- | Where everything in flight is. IF holds one list per fetch, since a fetch enters the fetch buffer whole.
+unitStage :: ExecUnit -> Stage
+unitStage = \case
+  MulDivUnit -> MD
+  MemUnit -> LS
+
+data Tracked = Tracked
+  { robAddr :: RobAddr
+  , inflight :: Inflight
+  , completed :: Bool
+  }
+
+-- | Where everything in flight is at the start of a clock. Up to RN a fetch moves as a group; from the ROB on an entry is found by its address.
 data Model = Model
   { nextId :: Int
   , commits :: Int
   , ifQ :: [[Inflight]]
   , idQ :: [Inflight]
   , rnQ :: [Inflight]
-  , rrQ :: [Inflight]
-  , exQ :: [Inflight]
-  , wbQ :: [Inflight]
-  , cmQ :: [Inflight]
+  , rob :: [Tracked]
+  , drawn :: [(Int, Stage)]
   }
 
 initModel :: Model
-initModel = Model {nextId = 0, commits = 0, ifQ = [], idQ = [], rnQ = [], rrQ = [], exQ = [], wbQ = [], cmQ = []}
+initModel = Model {nextId = 0, commits = 0, ifQ = [], idQ = [], rnQ = [], rob = [], drawn = []}
 
 -- | The instructions a fetch brings back: the slots of the bus word from its address up, as 'Cuintet.Eei.instSlice' cuts them.
 fetchGroup :: Int -> Addr -> [Inflight]
@@ -66,67 +77,82 @@ move push src pop cur
   | pop > 0 = []
   | otherwise = cur
 
-modelStep :: Model -> CoreTrace -> Model
-modelStep model@Model {..} trace@CoreTrace {..} = applyWhen flush flushed moved
-  where
-    flushed x = x {ifQ = [], idQ = [], rnQ = [], rrQ = [], exQ = []}
-
-    retires = length (catMaybes (toList retired))
-    entered = fst (handedOver model trace)
-    started = maybe [] (\addr -> [fetchGroup nextId addr]) fetchStart
-
-    moved =
-      Model
-        { nextId = nextId + length (concat started)
-        , commits = commits + retires
-        , ifQ = (if null entered then ifQ else drop 1 ifQ) <> started
-        , idQ = drop (count idIssue) idQ <> entered
-        , rnQ = move (count idIssue) idQ (count rnIssue) rnQ
-        , rrQ = move (count rnIssue) rnQ (count rrIssue) rrQ
-        , exQ = move (count rrIssue) rrQ (count exIssue) exQ
-        , wbQ = move (count exIssue) exQ (count wbIssue) wbQ
-        , cmQ = drop retires cmQ <> take (count wbIssue) wbQ
-        }
-
 count :: (Integral a) => a -> Int
 count = fromIntegral
-
-stages :: Model -> [(Inflight, Stage)]
-stages Model {..} = concat [slot IF (concat ifQ), slot ID idQ, slot RN rnQ, slot RR rrQ, slot EX exQ, slot WB wbQ, slot Cm cmQ]
-  where
-    slot s is = [(i, s) | i <- is]
 
 label :: Addr -> Maybe Inst -> String
 label pc bits = printf "%s: %s" (hex pc) (maybe "(not fetched)" hex bits)
 
-clockLines :: CoreTrace -> [(Inflight, Stage)] -> Model -> [String]
-clockLines trace@CoreTrace {..} was cur@Model {..} = concatMap entering (stages cur) <> retiredLog <> concatMap lostLines lost
+lostLines :: Inflight -> [String]
+lostLines i = [printf "L\t%d\t0\t%s" i.instId (label i.pc i.instBits), printf "R\t%d\t%d\t1" i.instId i.instId]
+
+-- | The stages of one clock, then its retires and the instructions it drops, which end at the next.
+clock :: Model -> CoreTrace -> (Model, [String])
+clock model@Model {..} trace@CoreTrace {..} =
+  (model', concatMap lostLines squashed <> concatMap draw stages <> ["C\t1"] <> concat (zipWith retireLog [commits ..] retires) <> concatMap lostLines lost)
   where
-    seen = [(i.instId, s) | (i, s) <- was]
-    entering (i, s) = case lookup i.instId seen of
+    -- an entry gone from the ROB without retiring was squashed at the end of the last clock
+    (live, gone) = partition (\t -> t.robAddr - robHead < robTail - robHead) rob
+    squashed
+      | length live /= count (robTail - robHead) = errorWithoutStackTrace "konataLog: lost track of the ROB"
+      | otherwise = (.inflight) <$> gone
+
+    holders =
+      [(a, RR) | Just a <- toList rrIssue]
+        <> [(a, EX) | Just a <- toList exHold]
+        <> [(a, unitStage (toEnum (fromEnum u))) | (u, Just a) <- toList (imap (,) unitHold)]
+        <> [(a, WB) | Just a <- toList wbHold]
+    stageOf t = fromMaybe (if t.completed then Cm else IQ) (lookup t.robAddr holders)
+
+    stages =
+      [(i, IF) | i <- concat ifQ]
+        <> [(i, ID) | i <- idQ]
+        <> [(i, RN) | i <- rnQ]
+        <> [(t.inflight, stageOf t) | t <- live]
+
+    draw (i, s) = case lookup i.instId drawn of
       Just u | u == s -> []
-      Just _ -> [sLine i s]
-      Nothing -> [printf "I\t%d\t%d\t0" i.instId i.instId, sLine i s]
-
-    sLine i s = printf "S\t%d\t0\t%s" i.instId (show s)
-
-    retiredLog = concat (zipWith3 ofRetire [0 ..] cmQ (catMaybes (toList retired)))
+      Just _ -> [sLine]
+      Nothing -> [printf "I\t%d\t%d\t0" i.instId i.instId, sLine]
       where
-        ofRetire k i l =
-          printf "L\t%d\t0\t%s" i.instId (label l.pc (Just l.instBits))
-            : [printf "L\t%d\t1\t%s" i.instId ln | ln <- retireLines l]
-              <> [printf "R\t%d\t%d\t0" i.instId (commits + k)]
+        sLine = printf "S\t%d\t0\t%s" i.instId (show s)
 
-    -- a predicted-taken branch cuts off the rest of its fetch; EX drops the lanes younger than a redirect or a trap; a flush drops everything still upstream of MA
-    lost = snd (handedOver cur trace) <> squashed <> flushedOut
-      where
-        squashed = if flush || count exIssue > 0 then drop (count exIssue) exQ else []
-        flushedOut = if flush then rrQ <> rnQ <> idQ <> concat ifQ else []
+    retires = [(robHead + k, r) | (k, Just r) <- zip [0 ..] (toList cmRetire)]
+    retireLog n (a, r) = case [t.inflight | t <- live, t.robAddr == a] of
+      [i]
+        | i.pc == r.pc ->
+            printf "L\t%d\t0\t%s" i.instId (label r.pc (Just r.instBits))
+              : [printf "L\t%d\t1\t%s" i.instId ln | ln <- retireLines r]
+                <> [printf "R\t%d\t%d\t0" i.instId n]
+      _ -> errorWithoutStackTrace "konataLog: retired an entry it was not tracking"
 
-    lostLines i = [printf "L\t%d\t0\t%s" i.instId (label i.pc i.instBits), printf "R\t%d\t%d\t1" i.instId i.instId]
+    (entered, cutOff) = handedOver model trace
+    started = maybe [] (\addr -> [fetchGroup nextId addr]) ifStart
+    ifQ' = (if null entered then ifQ else drop 1 ifQ) <> started
+    idQ' = drop (count idIssue) idQ <> entered
+    renamed = catMaybes (toList rnIssue)
+    rnQ' = move (count idIssue) idQ (length renamed) rnQ
+
+    allocated
+      | not (null renamed) && length renamed /= length rnQ = errorWithoutStackTrace "konataLog: RN renamed part of a group"
+      | otherwise = zipWith (\a i -> Tracked {robAddr = a, inflight = i, completed = False}) renamed rnQ
+    done = catMaybes (toList wbComplete)
+    rob' =
+      [t {completed = t.completed || t.robAddr `elem` done} | t <- live, t.robAddr `notElem` map fst retires]
+        <> allocated
+
+    lost = cutOff <> if flush then concat ifQ' <> idQ' <> rnQ' else []
+
+    model' =
+      Model
+        { nextId = nextId + length (concat started)
+        , commits = commits + length retires
+        , ifQ = applyWhen flush (const []) ifQ'
+        , idQ = applyWhen flush (const []) idQ'
+        , rnQ = applyWhen flush (const []) rnQ'
+        , rob = rob'
+        , drawn = [(i.instId, s) | (i, s) <- stages]
+        }
 
 konataLog :: [CoreTrace] -> [String]
-konataLog ts = "Kanata\t0004" : "C=\t0" : concat (zipWith3 clock ts ([] : map stages models) models)
-  where
-    models = scanl modelStep initModel ts
-    clock t was cur = clockLines t was cur <> ["C\t1"]
+konataLog ts = "Kanata\t0004" : "C=\t0" : concat (snd (mapAccumL clock initModel ts))
