@@ -15,6 +15,7 @@ import Data.Maybe (isJust, isNothing)
 data ExecuteIn = ExecuteIn
   { entries :: Vec IssueWidth (Maybe Ready)
   , robHead :: RobAddr
+  , pendingRedirect :: Maybe RobAddr
   , wready :: Bool
   }
 
@@ -63,9 +64,12 @@ execute ExecuteIn {..} = ExecuteOut {..}
       memOp <- ctrl.memOp
       pure LoadStoreJob {memOp, addr = bitCoerce aluResult, wdata = rs2Data, pdAddr, robAddr, mispredicted = executed.mispredicted}
 
+    -- A younger redirect than a pending one comes from the wrong path.
     redirect = do
       guard issued
-      snd <$> fold pickOlder (zipWith mk entries lanes)
+      (age, r) <- fold pickOlder (zipWith mk entries lanes)
+      guard (maybe True (\p -> age < p - robHead) pendingRedirect)
+      pure r
       where
         mk entry lane = do
           Ready {robAddr} <- entry

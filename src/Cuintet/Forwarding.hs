@@ -1,4 +1,4 @@
-module Cuintet.Forwarding (NForwards, Forwarding (..), bypass, forwarding, broadcast) where
+module Cuintet.Forwarding (NForwards, Forwarding (..), bypass, forwarding, broadcast, dest) where
 
 import Clash.Prelude
 import Cuintet.Completion (Completion, regWrite)
@@ -23,3 +23,7 @@ forwarding rdM value = fromMaybe Idle (Ready <$> rdM <*> value)
 
 broadcast :: Completion -> Forwarding
 broadcast = maybe Idle (uncurry Ready) . regWrite
+
+dest :: Forwarding -> Maybe PRegAddr
+dest (Ready rd _) = Just rd
+dest Idle = Nothing
