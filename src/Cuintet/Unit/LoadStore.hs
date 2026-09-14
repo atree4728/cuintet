@@ -67,14 +67,14 @@ loadStoreStep state LoadStoreReq {job, memResp, granted, squash}
   | otherwise = case state of
       Idle -> (maybe Idle (\j -> WaitReady j (busAccess j.memOp j.addr j.wdata)) job, nop)
       WaitReady j acc ->
-        (if memResp.ready then WaitValid j acc else state, inflight j.pdAddr (Just (busReq j.addr acc)))
+        (if memResp.ready then WaitValid j acc else state, inflight (Just (busReq j.addr acc)))
       WaitValid j acc -> case memResp.rdata of
-        Nothing -> (state, inflight j.pdAddr Nothing)
+        Nothing -> (state, inflight Nothing)
         Just w -> settle (completion j acc w)
       Waiting c -> settle c
   where
     nop = LoadStoreResp {busy = False, done = Nothing, forwarding = F.Idle, memReq = Nothing}
-    inflight pdAddr memReq = LoadStoreResp {busy = True, done = Nothing, forwarding = F.forwarding pdAddr Nothing, memReq}
+    inflight memReq = LoadStoreResp {busy = True, done = Nothing, forwarding = F.Idle, memReq}
     settle c =
       ( if granted then Idle else Waiting c
       , LoadStoreResp {busy = True, done = Just c, forwarding = F.broadcast c, memReq = Nothing}

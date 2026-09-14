@@ -3,8 +3,8 @@ module Cuintet.Core (CoreIn (..), CoreOut (..), CoreTrace (..), core) where
 
 import Clash.Prelude
 import Control.Monad (guard)
-import Cuintet.CoreCtrl (ExecUnit (..), execUnit, opClassOf)
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), CommitWidth, DispatchWidth, FetchWidth, IssueWidth, MemReq, MemResp, XLen)
+import Cuintet.CoreCtrl (ExecUnit (..), Wakeup (..), execUnit, opClassOf, wakeup)
+import Cuintet.Eei (Addr, BusReq (..), BusResp (..), CommitWidth, DispatchWidth, FetchWidth, IssueWidth, MemReq, MemResp, PRegAddr, RobAddr, XLen)
 import Cuintet.Forwarding (Forwarding)
 import Cuintet.Forwarding qualified as F
 import Cuintet.Pipeline (Decoded (..), Executed (..), FetchBufBits, Fetched (..), Ready (..), Renamed (..), Retire (..), hasResult, pdOf, regWrite, robWrite)
@@ -56,11 +56,13 @@ data CoreState = CoreState
   , mulDivState :: MulDivState
   , loadStoreState :: LoadStoreState
   , csrFile :: CsrFile
+  , pendingRedirect :: Maybe RobAddr
+  -- ^ The oldest entry whose redirect IF has taken and Cm has not yet squashed.
   }
   deriving (Generic, NFDataX)
 
 initState :: CoreState
-initState = CoreState {fetchState = initFetchState, renameState = initRenameState, mulDivState = M.Idle, loadStoreState = L.Idle, csrFile = initCsrFile}
+initState = CoreState {fetchState = initFetchState, renameState = initRenameState, mulDivState = M.Idle, loadStoreState = L.Idle, csrFile = initCsrFile, pendingRedirect = Nothing}
 
 data CoreTrace = CoreTrace
   { fetchStart :: Maybe Addr
@@ -156,7 +158,16 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
           entry <- executedEntries !! i
           orNothing (hasResult entry) entry.wbData
 
-    redirect = cmOut.redirect <|> exOut.redirect
+    -- A younger redirect than a pending one comes from the wrong path; the squash at retire ends the pending one.
+    exRedirect = do
+      (robAddr, pc) <- exOut.redirect
+      guard (maybe True (\p -> robAddr - robResp.buffer.hd < p - robResp.buffer.hd) pendingRedirect)
+      pure (robAddr, pc)
+    pendingRedirect'
+      | cmOut.squash = Nothing
+      | otherwise = (fst <$> exRedirect) <|> pendingRedirect
+
+    redirect = cmOut.redirect <|> (snd <$> exRedirect)
     flush = isJust redirect
     rsAddrs = concatMap (maybe (repeat 0) (\Renamed {..} -> ps1Addr :> ps2Addr :> Nil)) issueResp.issue
     regReq = RegReq {rsAddrs, writes = (regWrite =<<) <$> wbOut.completions}
@@ -170,9 +181,26 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
 
     fetchedReq = RingReq {wdata = ifOut.issue, pop = idOut.issue.len, squash = flush}
     decodedReq = FifoReq {wdata = orNothing (idOut.issue.len > 0) idOut.issue, rready = rnOut.issue.len > 0, flush}
-    issueReq = IssueQueueReq {dispatch = rnOut.issue, accepted = isJust <$> rrOut.issue, robHead = robResp.buffer.hd, busy, flush}
-    readyReq = FifoReq {wdata = orNothing (any isJust rrOut.issue) rrOut.issue, rready = exOut.issued, flush}
-    executedReq = FifoReq {wdata = orNothing (any isJust exOut.completed) exOut.completed, rready = wbOut.issued, flush = isJust cmOut.redirect}
+    wakeups =
+      atIssue 0
+        :> atIssue 1
+        :> broadcasted mulDivResp.forwarding
+        :> broadcasted loadStoreResp.forwarding
+        :> (fst <$> cmOut.csrWrite)
+        :> Nil
+      where
+        atIssue :: Index IssueWidth -> Maybe PRegAddr
+        atIssue i = do
+          entry <- rrOut.issue !! i
+          guard (wakeup (opClassOf entry.ctrl) == AtIssue)
+          pdOf entry
+        broadcasted = \case
+          F.Ready pd _ -> Just pd
+          F.Idle -> Nothing
+
+    issueReq = IssueQueueReq {dispatch = rnOut.issue, accepted = isJust <$> rrOut.issue, robHead = robResp.buffer.hd, busy, wakeup = wakeups, squash = cmOut.squash}
+    readyReq = FifoReq {wdata = orNothing (any isJust rrOut.issue) rrOut.issue, rready = exOut.issued, flush = cmOut.squash}
+    executedReq = FifoReq {wdata = orNothing (any isJust exOut.completed) exOut.completed, rready = wbOut.issued, flush = cmOut.squash}
     robReq = RobReq {allocates = rnOut.allocates, completes = (robWrite =<<) <$> wbOut.completions, pop = cmOut.pop, squash = cmOut.squash}
 
     coreOut = CoreOut {iReq = ifOut.iReq, dReq = loadStoreResp.memReq, retired = cmOut.retired, led = csrFile.led, coreTrace}
@@ -189,7 +217,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
         , flush
         }
 
-    state' = CoreState {fetchState = fetchState', renameState = renameState', mulDivState = mulDivState', loadStoreState = loadStoreState', csrFile = csrFile'}
+    state' = CoreState {fetchState = fetchState', renameState = renameState', mulDivState = mulDivState', loadStoreState = loadStoreState', csrFile = csrFile', pendingRedirect = pendingRedirect'}
 
 nIssued :: Vec IssueWidth (Maybe a) -> Index (DispatchWidth + 1)
 nIssued = sum . fmap (\entry -> if isJust entry then 1 else 0)

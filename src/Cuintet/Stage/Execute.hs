@@ -24,7 +24,7 @@ data ExecuteOut = ExecuteOut
   , loadStoreJob :: Maybe LoadStoreJob
   , issued :: Bool
   , wbData :: Vec IssueWidth (BitVector XLen)
-  , redirect :: Maybe Addr
+  , redirect :: Maybe (RobAddr, Addr)
   , btbWrites :: Vec IssueWidth (Maybe BtbWrite)
   }
 
@@ -70,7 +70,7 @@ execute ExecuteIn {..} = ExecuteOut {..}
         mk entry lane = do
           Ready {robAddr} <- entry
           nextPc <- lane >>= (.redirect)
-          pure (robAddr - robHead, nextPc)
+          pure (robAddr - robHead, (robAddr, nextPc))
         pickOlder l r = case (l, r) of
           (Just (x, _), Just (y, _)) -> if y < x then r else l
           (Nothing, _) -> r

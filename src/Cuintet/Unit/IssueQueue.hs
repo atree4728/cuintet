@@ -1,9 +1,8 @@
-module Cuintet.Unit.IssueQueue (IqTag (..), IqPayload (..), Select (..), IssueQueueReq (..), IssueQueueResp (..), issueQueue) where
+module Cuintet.Unit.IssueQueue (NBroadcast, IqTag (..), IqPayload (..), Select (..), IssueQueueReq (..), IssueQueueResp (..), issueQueue) where
 
 import Clash.Prelude
-import Control.Monad (guard)
-import Cuintet.CoreCtrl (ExecUnit (..), InstCtrl, NExecUnits, OpClass, execUnit, fitsPort, nonSpeculative, opClassOf)
-import Cuintet.Eei (Addr, DispatchWidth, IssueWidth, NRob, PRegAddr, RobAddr, TrapCause, XLen)
+import Cuintet.CoreCtrl (ExecUnit (..), InstCtrl, NExecUnits, OpClass, execUnit, fitsPort, nonSpeculative, opClassOf, usesRs1, usesRs2)
+import Cuintet.Eei (Addr, DispatchWidth, IssueWidth, NPRegs, NRob, PRegAddr, RobAddr, TrapCause, XLen)
 import Cuintet.Pipeline (Renamed (..))
 import Cuintet.Unit.Btb (Prediction)
 import Cuintet.Unit.MultiRam (multiRam)
@@ -11,10 +10,12 @@ import Cuintet.Upto (Upto)
 import Cuintet.Upto qualified as Upto
 import Cuintet.Util (orNothing)
 
+-- | AtIssue from both ports, AtComplete from both units, AtCommit.
+type NBroadcast = 5
+
 data IqTag = IqTag
   { ready1, ready2 :: Bool
   , ps1Addr, ps2Addr :: PRegAddr
-  , pdAddr :: Maybe PRegAddr
   , opClass :: OpClass
   }
   deriving (Generic, NFDataX)
@@ -25,6 +26,7 @@ data IqPayload = IqPayload
   , ctrl :: InstCtrl
   , imm :: BitVector XLen
   , exception :: Maybe (TrapCause, BitVector XLen)
+  , pdAddr :: Maybe PRegAddr
   }
   deriving (Generic, NFDataX)
 
@@ -48,51 +50,68 @@ data IssueQueueReq = IssueQueueReq
   , accepted :: Vec IssueWidth Bool
   , busy :: Vec NExecUnits Bool
   , robHead :: RobAddr
-  , flush :: Bool
+  , wakeup :: Vec NBroadcast (Maybe PRegAddr)
+  , squash :: Bool
   }
 
 newtype IssueQueueResp = IssueQueueResp {issue :: Vec IssueWidth (Maybe Renamed)}
 
-step :: Vec NRob (Maybe IqTag) -> IssueQueueReq -> (Vec NRob (Maybe IqTag), Select)
-step tags IssueQueueReq {..} = (tags', Select {selected})
+data IssueQueueState = IssueQueueState
+  { tags :: Vec NRob (Maybe IqTag)
+  , ready :: Vec NPRegs Bool
+  }
+  deriving (Generic, NFDataX)
+
+initState :: IssueQueueState
+initState = IssueQueueState {tags = repeat Nothing, ready = repeat True}
+
+step :: IssueQueueState -> IssueQueueReq -> (IssueQueueState, Select)
+step IssueQueueState {..} IssueQueueReq {..} = (IssueQueueState {tags = tags', ready = ready'}, Select {selected})
   where
     entries = imap (\i tag -> (numConvert i :: RobAddr,) <$> tag) tags
-    pick0 = do
-      entry <- oldest robHead entries
-      guard (candidate 0 entry)
-      pure entry
-    pick1 = do
-      (robAddr0, tag0) <- pick0
-      (robAddr1, tag1) <- oldest robHead (without robAddr0 entries)
-      guard (candidate 1 (robAddr1, tag1))
-      guard (Just tag1.ps1Addr /= tag0.pdAddr && Just tag1.ps2Addr /= tag0.pdAddr)
-      pure (robAddr1, tag1)
+
+    candidates port = (>>= \e -> orNothing (candidate port e) e) <$> entries
+    pick0 = oldest robHead (candidates 0)
+    pick1 = oldest robHead (maybe id (without . fst) pick0 (candidates 1))
     selected = pick0 :> pick1 :> Nil
 
-    leaving = zipWith (\ok e -> guard ok *> (fst <$> e)) accepted selected
+    leaving = zipWith (\ok e -> if ok then fst <$> e else Nothing) accepted selected
 
     oldestMem = fst <$> oldest robHead (memOnly <$> entries)
       where
         memOnly = (>>= \(robAddr, tag) -> orNothing (execUnit tag.opClass == Just MemUnit) (robAddr, tag))
 
     candidate port (robAddr, tag) =
-      fitsPort port tag.opClass
+      tag.ready1
+        && tag.ready2
+        && fitsPort port tag.opClass
         && maybe True (not . (busy !!) . fromEnum) (execUnit tag.opClass)
         && (not (nonSpeculative tag.opClass) || robAddr == robHead)
         && (execUnit tag.opClass /= Just MemUnit || Just robAddr == oldestMem)
 
-    tags'
-      | flush = repeat Nothing
-      | otherwise = inserted
+    -- Set before clear: a tag allocated in this clock is not ready.
+    ready' = foldl (mark False) (foldl (mark True) ready wakeup) ((>>= (.pdAddr)) <$> Upto.toMaybes dispatch)
       where
-        cleared = foldl clear tags leaving
-        clear ts = maybe ts (\a -> replace a Nothing ts)
+        mark v rs = maybe rs (\p -> replace p v rs)
 
-        inserted = foldl insert cleared (Upto.toMaybes dispatch)
+    hit ps = Just ps `elem` wakeup
+    woken tag = tag {ready1 = tag.ready1 || hit tag.ps1Addr, ready2 = tag.ready2 || hit tag.ps2Addr}
+
+    tagOf Renamed {..} =
+      IqTag
+        { ready1 = not (usesRs1 ctrl) || ready' !! ps1Addr
+        , ready2 = not (usesRs2 ctrl) || ready' !! ps2Addr
+        , ps1Addr
+        , ps2Addr
+        , opClass = opClassOf ctrl
+        }
+
+    tags'
+      | squash = repeat Nothing
+      | otherwise = foldl insert (fmap woken <$> cleared) (Upto.toMaybes dispatch)
+      where
+        cleared = foldl (\ts -> maybe ts (\a -> replace a Nothing ts)) tags leaving
         insert ts = maybe ts (\r -> replace r.robAddr (Just (tagOf r)) ts)
-
-tagOf :: Renamed -> IqTag
-tagOf Renamed {..} = IqTag {ready1 = True, ready2 = True, ps1Addr, ps2Addr, pdAddr, opClass = opClassOf ctrl}
 
 issueQueue :: (HiddenClockResetEnable dom) => Signal dom IssueQueueReq -> Signal dom IssueQueueResp
 issueQueue req = mkOut <$> selection <*> multiRam (addrs <$> selection) (writes <$> req)
@@ -100,7 +119,7 @@ issueQueue req = mkOut <$> selection <*> multiRam (addrs <$> selection) (writes 
     mkOut Select {selected} payloads = IssueQueueResp {issue = zipWith toRenamed payloads selected}
     toRenamed IqPayload {..} = fmap $ \(robAddr, IqTag {..}) -> Renamed {..}
 
-    selection = mealy step (repeat Nothing) req
+    selection = mealy step initState req
 
     addrs Select {selected} = maybe 0 fst <$> selected
 
