@@ -67,7 +67,7 @@ data CoreTrace = CoreTrace
   { ifStart :: Maybe Addr
   , ifIssue :: Vec FetchWidth (Maybe Fetched)
   , idIssue :: Index (DispatchWidth + 1)
-  , rnIssue :: Vec DispatchWidth (Maybe RobAddr)
+  , rnIssue :: Vec DispatchWidth (Maybe Renamed)
   , rrIssue :: Vec IssueWidth (Maybe RobAddr)
   , exHold :: Vec IssueWidth (Maybe RobAddr)
   , unitHold :: Vec NExecUnits (Maybe RobAddr)
@@ -174,7 +174,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
         { ifStart = if iResp.ready && not flush then (.addr) <$> ifOut.iReq else Nothing
         , ifIssue = if flush then repeat Nothing else ifOut.issue
         , idIssue
-        , rnIssue = fmap fst <$> rnOut.allocates
+        , rnIssue = rnOut.issue
         , rrIssue = fmap (.robAddr) <$> rrOut.issue
         , exHold = fmap (.robAddr) <$> readyResp.rdata
         , unitHold = mulDivHolder mulDivState :> loadStoreHolder loadStoreState :> Nil

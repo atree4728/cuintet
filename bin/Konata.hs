@@ -1,7 +1,7 @@
 module Main (main) where
 
 import Clash.Prelude
-import Cuintet.Debug.Image (elfImage)
+import Cuintet.Debug.Image (disassemble, elfImage)
 import Cuintet.Debug.Konata (konataLog)
 import Cuintet.Debug.Sim (traceImage, upToEcall)
 import System.Environment (getArgs)
@@ -24,4 +24,5 @@ main = do
 run :: FilePath -> IO ()
 run elf = do
   img <- elfImage ramAddrWidth elf
-  P.putStr $ P.unlines $ konataLog $ upToEcall $ traceImage budget img
+  mnemonic <- disassemble elf
+  P.putStr $ P.unlines $ konataLog mnemonic $ upToEcall $ traceImage budget img

@@ -5,10 +5,10 @@ module Cuintet.Debug.Konata (konataLog) where
 
 import Clash.Prelude (imap, natToNum)
 import Cuintet.Core (CoreTrace (..))
-import Cuintet.CoreCtrl (ExecUnit (..))
+import Cuintet.CoreCtrl (ExecUnit (..), usesRs1, usesRs2)
 import Cuintet.Debug.Show (hex, retireLines)
-import Cuintet.Eei (Addr, FetchWidth, Inst, RobAddr)
-import Cuintet.Pipeline (Fetched (..), Retire (..))
+import Cuintet.Eei (Addr, FetchWidth, Inst, PRegAddr, RobAddr)
+import Cuintet.Pipeline (Fetched (..), Renamed (..), Retire (..))
 import Cuintet.Unit.Btb (bankOf)
 import Data.Foldable (toList)
 import Data.Function (applyWhen)
@@ -33,6 +33,7 @@ unitStage = \case
 
 data Tracked = Tracked
   { robAddr :: RobAddr
+  , pdAddr :: Maybe PRegAddr
   , inflight :: Inflight
   , completed :: Bool
   }
@@ -80,16 +81,16 @@ move push src pop cur
 count :: (Integral a) => a -> Int
 count = fromIntegral
 
-label :: Addr -> Maybe Inst -> String
-label pc bits = printf "%s: %s" (hex pc) (maybe "(not fetched)" hex bits)
+label :: (Addr -> String) -> Addr -> Maybe Inst -> String
+label mnemonic pc bits = printf "%s: %s  %s" (hex pc) (maybe "(not fetched)" hex bits) (mnemonic pc)
 
-lostLines :: Inflight -> [String]
-lostLines i = [printf "L\t%d\t0\t%s" i.instId (label i.pc i.instBits), printf "R\t%d\t%d\t1" i.instId i.instId]
+lostLines :: (Addr -> String) -> Inflight -> [String]
+lostLines mnemonic i = [printf "L\t%d\t0\t%s" i.instId (label mnemonic i.pc i.instBits), printf "R\t%d\t%d\t1" i.instId i.instId]
 
 -- | The stages of one clock, then its retires and the instructions it drops, which end at the next.
-clock :: Model -> CoreTrace -> (Model, [String])
-clock model@Model {..} trace@CoreTrace {..} =
-  (model', concatMap lostLines squashed <> concatMap draw stages <> ["C\t1"] <> concat (zipWith retireLog [commits ..] retires) <> concatMap lostLines lost)
+clock :: (Addr -> String) -> Model -> CoreTrace -> (Model, [String])
+clock mnemonic model@Model {..} trace@CoreTrace {..} =
+  (model', concatMap (lostLines mnemonic) squashed <> concatMap draw stages <> depLines <> ["C\t1"] <> concat (zipWith retireLog [commits ..] retires) <> concatMap (lostLines mnemonic) lost)
   where
     -- an entry gone from the ROB without retiring was squashed at the end of the last clock
     (live, gone) = partition (\t -> t.robAddr - robHead < robTail - robHead) rob
@@ -121,7 +122,7 @@ clock model@Model {..} trace@CoreTrace {..} =
     retireLog n (a, r) = case [t.inflight | t <- live, t.robAddr == a] of
       [i]
         | i.pc == r.pc ->
-            printf "L\t%d\t0\t%s" i.instId (label r.pc (Just r.instBits))
+            printf "L\t%d\t0\t%s" i.instId (label mnemonic r.pc (Just r.instBits))
               : [printf "L\t%d\t1\t%s" i.instId ln | ln <- retireLines r]
                 <> [printf "R\t%d\t%d\t0" i.instId n]
       _ -> errorWithoutStackTrace "konataLog: retired an entry it was not tracking"
@@ -135,7 +136,17 @@ clock model@Model {..} trace@CoreTrace {..} =
 
     allocated
       | not (null renamed) && length renamed /= length rnQ = errorWithoutStackTrace "konataLog: RN renamed part of a group"
-      | otherwise = zipWith (\a i -> Tracked {robAddr = a, inflight = i, completed = False}) renamed rnQ
+      | otherwise = zipWith (\r i -> Tracked {robAddr = r.robAddr, pdAddr = r.pdAddr, inflight = i, completed = False}) renamed rnQ
+
+    -- a source waits on the live entry its physical register is allocated to
+    depLines =
+      [ printf "W\t%d\t%d\t0" i.instId t.inflight.instId
+      | (r, i) <- zip renamed rnQ
+      , (uses, ps) <- [(usesRs1 r.ctrl, r.ps1Addr), (usesRs2 r.ctrl, r.ps2Addr)]
+      , uses
+      , t <- live
+      , t.pdAddr == Just ps
+      ]
     done = catMaybes (toList wbComplete)
     rob' =
       [t {completed = t.completed || t.robAddr `elem` done} | t <- live, t.robAddr `notElem` map fst retires]
@@ -154,5 +165,5 @@ clock model@Model {..} trace@CoreTrace {..} =
         , drawn = [(i.instId, s) | (i, s) <- stages]
         }
 
-konataLog :: [CoreTrace] -> [String]
-konataLog ts = "Kanata\t0004" : "C=\t0" : concat (snd (mapAccumL clock initModel ts))
+konataLog :: (Addr -> String) -> [CoreTrace] -> [String]
+konataLog mnemonic ts = "Kanata\t0004" : "C=\t0" : concat (snd (mapAccumL (clock mnemonic) initModel ts))

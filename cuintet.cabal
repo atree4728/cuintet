@@ -106,6 +106,7 @@ library
   build-depends:
     attoparsec >=0.14 && <0.15,
     bytestring,
+    containers,
     process,
     temporary,
 
