@@ -4,9 +4,10 @@ module Cuintet.Stage.WriteBack (writeback, WriteBackIn (..), WriteBackOut (..)) 
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
+import Cuintet.Completion (Completion (..))
 import Cuintet.CoreCtrl (Wakeup (..), opClassOf, wakeup)
 import Cuintet.Eei (IssueWidth, PRegAddr, WriteBackWidth, XLen)
-import Cuintet.Pipeline (Completion (..), Executed (..), pdOf)
+import Cuintet.Pipeline (Executed (..))
 import Cuintet.Unit.Rob (RobDone (..))
 import Data.Bool (bool)
 import Data.Maybe (isJust)
@@ -39,7 +40,7 @@ writeback WriteBackIn {..} = WriteBackOut {..}
     completed entry@Executed {..} =
       Complete entry.robAddr pd RobDone {exception, mispredicted, value = entry.wbData, mem = Nothing}
       where
-        pd = guard (wakeup (opClassOf ctrl) /= AtCommit) *> pdOf entry
+        pd = guard (wakeup (opClassOf ctrl) /= AtCommit) *> pdAddr
 
     csrRequest = uncurry CsrValue <$> csrWrite
     port0Request = guard issued >> (completed <$> entry0)

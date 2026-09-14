@@ -1,8 +1,8 @@
 module Cuintet.Forwarding (NForwards, Forwarding (..), bypass, forwarding, broadcast) where
 
 import Clash.Prelude
+import Cuintet.Completion (Completion, regWrite)
 import Cuintet.Eei (PRegAddr, XLen)
-import Cuintet.Pipeline (Completion, regWrite)
 import Data.Maybe (fromMaybe)
 
 type NForwards = 6 -- MulDiv, LSU, ALU * 2 for EX/WB

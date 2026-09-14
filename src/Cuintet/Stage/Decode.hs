@@ -3,10 +3,10 @@ module Cuintet.Stage.Decode (decode, DecodeIn (..), DecodeOut (..), immI, immS, 
 
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
-import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), fitsPort, opClassOf, usesRs1, usesRs2)
-import Cuintet.Eei (AluOp, DispatchWidth, Inst, MemOp (..), Opcode (..), System12 (..), SystemOp (..), XLen, parseBranchOp, parseCsr, parseLoad, parseStore, pattern BREAKPOINT, pattern ENVIRONMENT_CALL_FROM_M_MODE, pattern ILLEGAL_INSTRUCTION)
-import Cuintet.Pipeline (Decoded (..), Fetched (..), isSerializing, rdOf)
 import Control.Monad (guard)
+import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), usesRs1, usesRs2)
+import Cuintet.Eei (AluOp, DispatchWidth, Inst, MemOp (..), Opcode (..), System12 (..), SystemOp (..), XLen, parseBranchOp, parseCsr, parseLoad, parseStore, pattern BREAKPOINT, pattern ENVIRONMENT_CALL_FROM_M_MODE, pattern ILLEGAL_INSTRUCTION)
+import Cuintet.Pipeline (Decoded (..), Fetched (..))
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isNothing)
 
@@ -29,14 +29,10 @@ decode DecodeIn {..} = DecodeOut {issue = issue0 :> issue1 :> Nil}
     issue1 = do
       decoded0 <- issue0
       decoded1 <- entry1
-      guard $
-        not (isSerializing decoded0)
-          && not (isSerializing decoded1)
-          && fitsPort 1 (opClassOf decoded1.ctrl)
-          && not (hasRAW decoded0 decoded1)
+      guard $ not (hasRAW decoded0 decoded1)
       pure decoded1
 
-    hasRAW decoded0 decoded1 = maybe False readRd0 (rdOf decoded0)
+    hasRAW decoded0 decoded1 = maybe False readRd0 decoded0.rdAddr
       where
         readRd0 rd = usesRs1 decoded1.ctrl && decoded1.rs1Addr == rd || usesRs2 decoded1.ctrl && decoded1.rs2Addr == rd
 {-# OPAQUE decode #-}
@@ -48,7 +44,8 @@ decodeLane Fetched {..} = Decoded {..}
     (ctrl, imm) = fromMaybe (trapCtrl, 0) decoded
     rs1Addr = unpack $ slice d19 d15 instBits
     rs2Addr = unpack $ slice d24 d20 instBits
-    rdAddr = unpack $ slice d11 d7 instBits
+    rd = unpack $ slice d11 d7 instBits
+    rdAddr = orNothing (ctrl.rwbEn && rd /= 0) rd
 
     exception
       | isNothing decoded = Just (ILLEGAL_INSTRUCTION, zeroExtend instBits)

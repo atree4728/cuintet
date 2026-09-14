@@ -4,8 +4,8 @@ module Cuintet.Stage.Execute (execute, ExecuteIn (..), ExecuteOut (..)) where
 import Clash.Prelude
 import Control.Monad (guard)
 import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), execUnit, isCsrRead, opClassOf)
-import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), IssueWidth, RobAddr, XLen, misalignedCause, pattern INSTRUCTION_ADDRESS_MISALIGNED)
-import Cuintet.Pipeline (Executed (..), Ready (..), isSerializing)
+import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), IssueWidth, RobAddr, SystemOp (..), XLen, misalignedCause, pattern INSTRUCTION_ADDRESS_MISALIGNED)
+import Cuintet.Pipeline (Executed (..), Ready (..))
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
 import Cuintet.Unit.LoadStore (LoadStoreJob (..))
 import Cuintet.Unit.MulDiv (MulDivJob (..))
@@ -91,7 +91,7 @@ data Lane = Lane
 executeLane :: Ready -> Lane
 executeLane Ready {..} = Lane {executed, aluResult, redirect, btbWrite}
   where
-    executed = Executed {exception = exception', mispredicted = isJust redirect, ..}
+    executed = Executed {exception = exception', pdAddr = guard (isNothing exception') *> pdAddr, mispredicted = isJust redirect, ..}
 
     (op1, op2) = operands ctrl imm rs1Data rs2Data pc
     aluResult = alu ctrl op1 op2
@@ -123,6 +123,9 @@ executeLane Ready {..} = Lane {executed, aluResult, redirect, btbWrite}
     redirect = orNothing (not (isSerializing executed) && nextPc /= predicted pc prediction) nextPc
 
     btbWrite = guard (isNothing exception') >> train pc prediction (orNothing (nextPc /= pc + 4) nextPc)
+
+isSerializing :: Executed -> Bool
+isSerializing executed = isJust executed.exception || executed.ctrl.systemOp == Just SysMret
 
 -- | Extract the two operands according to the instruction form.
 operands ::

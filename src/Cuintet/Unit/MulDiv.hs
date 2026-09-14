@@ -1,10 +1,10 @@
 module Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState (..), MulDivJob (..), mulDivStep) where
 
 import Clash.Prelude
+import Cuintet.Completion (Completion (..))
 import Cuintet.Eei (DivOp (..), MulDivOp (..), MulOp (..), PRegAddr, RobAddr, Sign (..), XLen)
 import Cuintet.Forwarding (Forwarding)
 import Cuintet.Forwarding qualified as F
-import Cuintet.Pipeline (Completion (..))
 import Cuintet.Unit.MulDiv.Div (DivOperands (..), DivResult (..), DivState, divInit, divResult, divStep)
 import Cuintet.Unit.MulDiv.Mul (MulOperands (..), MulResult (..), MulState, mulInit, mulResult, mulStep)
 import Cuintet.Unit.Rob (RobDone (..))

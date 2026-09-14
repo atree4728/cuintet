@@ -67,6 +67,7 @@ library
   -- cabal-gild: discover src
   exposed-modules:
     Cuintet
+    Cuintet.Completion
     Cuintet.Core
     Cuintet.CoreCtrl
     Cuintet.Debug.Image

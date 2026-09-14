@@ -1,15 +1,10 @@
 -- | The payloads that cross the stage boundaries, one record per FIFO.
-module Cuintet.Pipeline (FetchBufBits, Fetched (..), Decoded (..), Renamed (..), Ready (..), Executed (..), Retire (..), Completion (..), validRdOf, rdOf, pdOf, isSerializing, hasResult, regWrite, robWrite) where
+module Cuintet.Pipeline (FetchBufBits, Fetched (..), Decoded (..), Renamed (..), Ready (..), Executed (..), Retire (..)) where
 
 import Clash.Prelude
-import Control.Monad (guard)
-import Cuintet.CoreCtrl (InstCtrl (..), execUnit, isCsrRead, opClassOf)
-import Cuintet.Eei (Addr, Inst, MemReq, PRegAddr, RegAddr, RobAddr, SystemOp (..), TrapCause, XLen)
+import Cuintet.CoreCtrl (InstCtrl (..))
+import Cuintet.Eei (Addr, Inst, MemReq, PRegAddr, RegAddr, RobAddr, TrapCause, XLen)
 import Cuintet.Unit.Btb (Prediction)
-import Cuintet.Unit.Rob (RobDone (..))
-import Cuintet.Util (orNothing)
-import Data.Maybe (isJust, isNothing)
-import GHC.Records (HasField)
 
 type FetchBufBits = 3
 
@@ -28,7 +23,7 @@ data Decoded = Decoded
   , imm :: BitVector XLen
   , rs1Addr :: RegAddr
   , rs2Addr :: RegAddr
-  , rdAddr :: RegAddr
+  , rdAddr :: Maybe RegAddr
   , exception :: Maybe (TrapCause, BitVector XLen)
   }
   deriving (Generic, NFDataX)
@@ -63,6 +58,7 @@ data Executed = Executed
   { ctrl :: InstCtrl
   , exception :: Maybe (TrapCause, BitVector XLen)
   , pdAddr :: Maybe PRegAddr
+  -- ^ 'Nothing' when the instruction traps.
   , robAddr :: RobAddr
   , mispredicted :: Bool
   , wbData :: BitVector XLen
@@ -77,46 +73,3 @@ data Retire = Retire
   , trap :: Maybe TrapCause
   }
   deriving (Generic, NFDataX, Eq)
-
-data Completion
-  = Complete RobAddr (Maybe PRegAddr) RobDone
-  | CsrValue PRegAddr (BitVector XLen)
-  deriving (Generic, NFDataX)
-
-validRdOf ::
-  ( HasField "ctrl" stage InstCtrl
-  , HasField "rdAddr" stage RegAddr
-  ) =>
-  stage -> Maybe RegAddr
-validRdOf stage = orNothing (stage.ctrl.rwbEn && stage.rdAddr /= 0) stage.rdAddr
-
-rdOf ::
-  ( HasField "exception" stage (Maybe (TrapCause, BitVector XLen))
-  , HasField "ctrl" stage InstCtrl
-  , HasField "rdAddr" stage RegAddr
-  ) =>
-  stage -> Maybe RegAddr
-rdOf stage = guard (isNothing stage.exception) *> validRdOf stage
-
-pdOf ::
-  ( HasField "exception" stage (Maybe (TrapCause, BitVector XLen))
-  , HasField "pdAddr" stage (Maybe PRegAddr)
-  ) =>
-  stage -> Maybe PRegAddr
-pdOf stage = guard (isNothing stage.exception) *> stage.pdAddr
-
-hasResult :: (HasField "ctrl" stage InstCtrl) => stage -> Bool
-hasResult stage = isNothing (execUnit (opClassOf stage.ctrl)) && not (isCsrRead stage.ctrl)
-
-isSerializing :: (HasField "exception" stage (Maybe a), HasField "ctrl" stage InstCtrl) => stage -> Bool
-isSerializing stage = isJust stage.exception || stage.ctrl.systemOp == Just SysMret
-
-robWrite :: Completion -> Maybe (RobAddr, RobDone)
-robWrite = \case
-  Complete robAddr _ done -> Just (robAddr, done)
-  CsrValue {} -> Nothing
-
-regWrite :: Completion -> Maybe (PRegAddr, BitVector XLen)
-regWrite = \case
-  Complete _ pdAddr done -> (,done.value) <$> pdAddr
-  CsrValue pdAddr value -> Just (pdAddr, value)

@@ -13,10 +13,10 @@ module Cuintet.Unit.LoadStore (
 ) where
 
 import Clash.Prelude
+import Cuintet.Completion (Completion (..))
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), LaneOffset, LoadShape (..), MemDataBytes, MemOp (..), MemReq, MemResp, PRegAddr, RobAddr, Sign (..), StoreLanes (..), Width (..), XLen, aligned, bitOffset, laneMask, laneOffset)
 import Cuintet.Forwarding (Forwarding)
 import Cuintet.Forwarding qualified as F
-import Cuintet.Pipeline (Completion (..))
 import Cuintet.Unit.Rob (RobDone (..))
 import Cuintet.Util (orNothing)
 

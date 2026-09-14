@@ -3,11 +3,12 @@ module Cuintet.Core (CoreIn (..), CoreOut (..), CoreTrace (..), core) where
 
 import Clash.Prelude
 import Control.Monad (guard)
+import Cuintet.Completion (regWrite, robWrite)
 import Cuintet.CoreCtrl (ExecUnit (..), NExecUnits, Wakeup (..), execUnit, opClassOf, wakeup)
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), CommitWidth, DispatchWidth, FetchWidth, IssueWidth, MemReq, MemResp, PRegAddr, RobAddr, WriteBackWidth, XLen)
 import Cuintet.Forwarding (Forwarding)
 import Cuintet.Forwarding qualified as F
-import Cuintet.Pipeline (Decoded (..), Executed (..), FetchBufBits, Fetched (..), Ready (..), Renamed (..), Retire (..), hasResult, pdOf, regWrite, robWrite)
+import Cuintet.Pipeline (Decoded (..), Executed (..), FetchBufBits, Fetched (..), Ready (..), Renamed (..), Retire (..))
 import Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit)
 import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
 import Cuintet.Stage.Execute (ExecuteIn (..), ExecuteOut (..), execute)
@@ -128,7 +129,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
   where
     fetchIn = FetchIn {iResp, buf = fetchedResp, redirect, btbResp}
     decodeIn = DecodeIn {entries = fetchedResp.rdata, wready = decodedResp.wready, stall = flush}
-    renameIn = RenameIn {entries = decodedResp.rdata, committed = cmOut.renamed, nextRobAddr = robResp.tl, robFree = robResp.free, flush, drained = robResp.hd == robResp.tl, wready = True}
+    renameIn = RenameIn {entries = decodedResp.rdata, committed = cmOut.renamed, nextRobAddr = robResp.tl, robFree = robResp.free, flush, drained = robResp.hd == robResp.tl}
     regreadIn = RegReadIn {entries = issueResp.issue, rsData = regResp.rsData, forwards, wready = readyResp.wready}
     executeIn = ExecuteIn {entries = readyEntries, robHead = robResp.hd, wready = executedResp.wready}
     writebackIn = WriteBackIn {entries = executedEntries, loadStoreDone = loadStoreResp.done, mulDivDone = mulDivResp.done, csrWrite = cmOut.csrWrite}
@@ -153,13 +154,13 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
     forwards = fromEx 1 :> fromEx 0 :> fromWb 1 :> fromWb 0 :> mulDivResp.forwarding :> loadStoreResp.forwarding :> Nil
       where
         fromEx, fromWb :: Index IssueWidth -> Forwarding
-        fromEx i = F.forwarding (pdOf =<< readyEntries !! i) $ do
+        fromEx i = F.forwarding ((.pdAddr) =<< readyEntries !! i) $ do
           entry <- readyEntries !! i
           guard exOut.issued
-          orNothing (hasResult entry) (exOut.wbData !! i)
-        fromWb i = F.forwarding (pdOf =<< executedEntries !! i) $ do
+          orNothing (wakeup (opClassOf entry.ctrl) == AtIssue) (exOut.wbData !! i)
+        fromWb i = F.forwarding ((.pdAddr) =<< executedEntries !! i) $ do
           entry <- executedEntries !! i
-          orNothing (hasResult entry) entry.wbData
+          orNothing (wakeup (opClassOf entry.ctrl) == AtIssue) entry.wbData
 
     -- A younger redirect than a pending one comes from the wrong path; the squash at retire ends the pending one.
     exRedirect = do
@@ -196,7 +197,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
         atIssue i = do
           entry <- rrOut.issue !! i
           guard (wakeup (opClassOf entry.ctrl) == AtIssue)
-          pdOf entry
+          entry.pdAddr
         broadcasted = \case
           F.Ready pd _ -> Just pd
           F.Idle -> Nothing

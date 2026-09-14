@@ -5,7 +5,7 @@ import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
 import Cuintet.CoreCtrl (InstCtrl (..))
 import Cuintet.Eei (CommitWidth, DispatchWidth, Mapping (..), NRegs, PRegAddr, RobAddr)
-import Cuintet.Pipeline (Decoded (..), Renamed (..), validRdOf)
+import Cuintet.Pipeline (Decoded (..), Renamed (..))
 import Cuintet.Unit.Rob (RobStatic (..))
 import Data.Bool (bool)
 import Data.Maybe (isJust)
@@ -41,7 +41,6 @@ data RenameIn = RenameIn
   , flush :: Bool
   , drained :: Bool
   -- ^ Whether the ROB is empty, so nothing more will reach Cm.
-  , wready :: Bool
   }
 
 data RenameOut = RenameOut
@@ -54,11 +53,11 @@ rename RenameState {..} RenameIn {..} = (state', RenameOut {..})
   where
     (decoded0, decoded1) = vecToTuple entries
 
-    issued = any isJust entries && wready && not flush && not recovering && sum (bool 0 1 . isJust <$> entries) <= robFree
+    issued = any isJust entries && not flush && not recovering && sum (bool 0 1 . isJust <$> entries) <= robFree
     (lane0, lane1) = vecToTuple $ (guard issued *>) <$> entries
 
-    rdAddr0 = validRdOf =<< decoded0
-    rdAddr1 = validRdOf =<< decoded1
+    rdAddr0 = (.rdAddr) =<< decoded0
+    rdAddr1 = (.rdAddr) =<< decoded1
 
     freePd0 = freeList !! specHead
     freePd1 = freeList !! (specHead + if isJust rdAddr0 then 1 else 0)
