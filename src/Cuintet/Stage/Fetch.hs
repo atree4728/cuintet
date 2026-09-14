@@ -2,13 +2,13 @@
 module Cuintet.Stage.Fetch (FetchState (..), initFetchState, FetchIn (..), FetchOut (..), fetch) where
 
 import Clash.Prelude
+import Control.Monad (guard)
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), DispatchWidth, FetchWidth, MemReq, MemResp, instSlice, resetVector)
 import Cuintet.Pipeline (FetchBufBits, Fetched (..))
 import Cuintet.Unit.Btb (BtbResp (..), Prediction (..), bankOf, isTaken)
 import Cuintet.Unit.Ring (RingResp (..))
-import Cuintet.Upto (Upto (..))
-import Cuintet.Upto qualified as Upto
 import Cuintet.Util (orNothing)
+import Data.Bool (bool)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 
 -- | A fetch in flight: the address, and what the BTB said about it at the time.
@@ -25,7 +25,7 @@ data FetchState = FetchState
   -- ^ The address to fetch next; the predicted successor of @fetching@, if any.
   , fetching :: Maybe Fetching
   -- ^ The fetch whose response has not come back yet.
-  , staged :: Upto FetchWidth Fetched
+  , staged :: Vec FetchWidth (Maybe Fetched)
   -- ^ Fetched instructions waiting for room in the fetch buffer.
   , restart :: Maybe Addr
   -- ^ Where a resolved redirect sends IF, taken one clock later so that it stays out of @next@'s cone.
@@ -38,7 +38,7 @@ initFetchState =
   FetchState
     { next = resetVector
     , fetching = Nothing
-    , staged = Upto.empty
+    , staged = repeat Nothing
     , restart = Nothing
     }
 
@@ -53,7 +53,7 @@ data FetchIn = FetchIn
   }
 
 data FetchOut = FetchOut
-  { issue :: Upto FetchWidth Fetched
+  { issue :: Vec FetchWidth (Maybe Fetched)
   -- ^ What the fetch buffer takes this clock.
   , iReq :: Maybe MemReq
   -- ^ Instruction fetch request.
@@ -68,7 +68,8 @@ fetch FetchState {..} FetchIn {..} =
   , FetchOut {issue, iReq, btbLookup = next, btbPrefetch = next'}
   )
   where
-    room = buf.free >= numConvert staged.len + natToNum @FetchWidth
+    nStaged = sum (bool 0 1 . isJust <$> staged)
+    room = buf.free >= nStaged + natToNum @FetchWidth
     iReq = orNothing (room && isNothing restart) BusReq {addr = next, wdata = Nothing}
     accepted = isJust iReq && iResp.ready
 
@@ -89,23 +90,24 @@ fetch FetchState {..} FetchIn {..} =
     fallthrough = (next .&. complement 7) + 8
 
     fetched = mkGroup <$> fetching <*> iResp.rdata
-    mkGroup Fetching {..} busWord =
-      Upto {len = min insts.len cut, elems = izipWith entry insts.elems predictions}
+    mkGroup Fetching {..} busWord = izipWith entry (instSlice pc busWord) predictions
       where
-        insts = instSlice pc busWord
-        cut = maybe maxBound (\i -> numConvert i + 1) (findIndex (isJust . takenTarget) predictions)
-        entry i instBits prediction = Fetched {pc = pc + 4 * numConvert i, instBits, prediction}
+        cut = findIndex (isJust . takenTarget) predictions
+        entry i inst prediction = do
+          instBits <- inst
+          guard (maybe True (i <=) cut)
+          pure Fetched {pc = pc + 4 * numConvert i, instBits, prediction}
 
     takenTarget p = do
       Prediction {target, hint} <- p
       orNothing (isTaken hint) target
 
-    pushed = buf.free >= numConvert staged.len
-    issue = if pushed then staged else Upto.empty
+    pushed = buf.free >= nStaged
+    issue = if pushed then staged else repeat Nothing
 
     staged'
-      | isJust redirect = Upto.empty
+      | isJust redirect = repeat Nothing
       | Just entry <- fetched = entry
-      | pushed = Upto.empty
+      | pushed = repeat Nothing
       | otherwise = staged
 {-# OPAQUE fetch #-}

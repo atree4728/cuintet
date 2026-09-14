@@ -9,7 +9,6 @@ import Cuintet.Debug.Show (hex, retireLines)
 import Cuintet.Eei (Addr, FetchWidth, Inst)
 import Cuintet.Pipeline (Fetched (..), Retire (..))
 import Cuintet.Unit.Btb (bankOf)
-import Cuintet.Upto qualified as Upto
 import Data.Foldable (toList)
 import Data.Function (applyWhen)
 import Data.Maybe (catMaybes)
@@ -55,7 +54,7 @@ handedOver Model {ifQ} CoreTrace {ifIssue}
   | otherwise = (zipWith fill group entries, drop (length entries) group)
   where
     group = concat (take 1 ifQ)
-    entries = catMaybes (toList (Upto.toMaybes ifIssue))
+    entries = catMaybes (toList ifIssue)
     fill i e
       | i.pc == e.pc = Inflight {instId = i.instId, pc = e.pc, instBits = Just e.instBits}
       | otherwise = errorWithoutStackTrace "konataLog: lost track of the fetch path"

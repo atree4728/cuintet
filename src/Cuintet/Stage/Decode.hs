@@ -6,44 +6,39 @@ import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), fitsPort, opClassOf, usesRs1, usesRs2)
 import Cuintet.Eei (AluOp, DispatchWidth, Inst, MemOp (..), Opcode (..), System12 (..), SystemOp (..), XLen, parseBranchOp, parseCsr, parseLoad, parseStore, pattern BREAKPOINT, pattern ENVIRONMENT_CALL_FROM_M_MODE, pattern ILLEGAL_INSTRUCTION)
 import Cuintet.Pipeline (Decoded (..), Fetched (..), isSerializing, rdOf)
-import Cuintet.Upto (Upto (..))
+import Control.Monad (guard)
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isNothing)
 
 data DecodeIn = DecodeIn
-  { entries :: Upto DispatchWidth Fetched
+  { entries :: Vec DispatchWidth (Maybe Fetched)
   , wready :: Bool
   , stall :: Bool
   }
 
 -- | The instruction handed to EX, absent on a clock ID does not issue.
-newtype DecodeOut = DecodeOut {issue :: Upto DispatchWidth Decoded}
+newtype DecodeOut = DecodeOut {issue :: Vec DispatchWidth (Maybe Decoded)}
 
 -- | One clock of ID.
 decode :: DecodeIn -> DecodeOut
-decode DecodeIn {..} = DecodeOut {issue}
+decode DecodeIn {..} = DecodeOut {issue = issue0 :> issue1 :> Nil}
   where
-    (decoded0, decoded1) = vecToTuple $ decodeLane <$> entries.elems
+    (entry0, entry1) = vecToTuple $ fmap decodeLane <$> entries
 
-    issued0 = entries.len >= 1 && wready && not stall
-    issued1 =
-      issued0
-        && entries.len
-        >= 2
-        && not (isSerializing decoded0)
-        && not (isSerializing decoded1)
-        && fitsPort 1 (opClassOf decoded1.ctrl)
-        && not hasRAW
-    hasRAW = maybe False readRd0 (rdOf decoded0)
+    issue0 = guard (wready && not stall) *> entry0
+    issue1 = do
+      decoded0 <- issue0
+      decoded1 <- entry1
+      guard $
+        not (isSerializing decoded0)
+          && not (isSerializing decoded1)
+          && fitsPort 1 (opClassOf decoded1.ctrl)
+          && not (hasRAW decoded0 decoded1)
+      pure decoded1
+
+    hasRAW decoded0 decoded1 = maybe False readRd0 (rdOf decoded0)
       where
         readRd0 rd = usesRs1 decoded1.ctrl && decoded1.rs1Addr == rd || usesRs2 decoded1.ctrl && decoded1.rs2Addr == rd
-
-    len
-      | issued1 = 2
-      | issued0 = 1
-      | otherwise = 0
-
-    issue = Upto {len, elems = decoded0 :> decoded1 :> Nil}
 {-# OPAQUE decode #-}
 
 decodeLane :: Fetched -> Decoded

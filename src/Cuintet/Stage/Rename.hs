@@ -2,11 +2,11 @@ module Cuintet.Stage.Rename (RenameState (..), initRenameState, RenameIn (..), R
 
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
+import Control.Monad (guard)
 import Cuintet.CoreCtrl (InstCtrl (..))
 import Cuintet.Eei (CommitWidth, DispatchWidth, Mapping (..), NRegs, PRegAddr, RobAddr)
 import Cuintet.Pipeline (Decoded (..), Renamed (..), validRdOf)
 import Cuintet.Unit.Rob (RobStatic (..))
-import Cuintet.Upto (Upto (..))
 import Data.Bool (bool)
 import Data.Maybe (isJust)
 
@@ -34,7 +34,7 @@ initRenameState =
     }
 
 data RenameIn = RenameIn
-  { entries :: Upto DispatchWidth Decoded
+  { entries :: Vec DispatchWidth (Maybe Decoded)
   , committed :: Vec CommitWidth (Maybe Mapping)
   , nextRobAddr :: RobAddr
   , robFree :: RobAddr
@@ -45,19 +45,20 @@ data RenameIn = RenameIn
   }
 
 data RenameOut = RenameOut
-  { issue :: Upto DispatchWidth Renamed
-  , allocates :: Upto DispatchWidth RobStatic
+  { issue :: Vec DispatchWidth (Maybe Renamed)
+  , allocates :: Vec DispatchWidth (Maybe (RobAddr, RobStatic))
   }
 
 rename :: RenameState -> RenameIn -> (RenameState, RenameOut)
 rename RenameState {..} RenameIn {..} = (state', RenameOut {..})
   where
-    (decoded0, decoded1) = vecToTuple entries.elems
+    (decoded0, decoded1) = vecToTuple entries
 
-    issued = entries.len > 0 && wready && not flush && not recovering && numConvert entries.len <= robFree
+    issued = any isJust entries && wready && not flush && not recovering && sum (bool 0 1 . isJust <$> entries) <= robFree
+    (lane0, lane1) = vecToTuple $ (guard issued *>) <$> entries
 
-    rdAddr0 = validRdOf decoded0
-    rdAddr1 = validRdOf decoded1
+    rdAddr0 = validRdOf =<< decoded0
+    rdAddr1 = validRdOf =<< decoded1
 
     freePd0 = freeList !! specHead
     freePd1 = freeList !! (specHead + if isJust rdAddr0 then 1 else 0)
@@ -68,7 +69,7 @@ rename RenameState {..} RenameIn {..} = (state', RenameOut {..})
     robAddr0 = nextRobAddr
     robAddr1 = nextRobAddr + 1
 
-    robStatic Decoded {..} rd pd =
+    robStatic rd pd Decoded {..} =
       RobStatic
         { pc
         , mapping = (\r -> Mapping {rdAddr = r, pdAddr = pd}) <$> rd
@@ -76,16 +77,15 @@ rename RenameState {..} RenameIn {..} = (state', RenameOut {..})
         , instBits
         }
 
-    len = if issued then entries.len else 0
-    issue = Upto {len, elems = renamedLane decoded0 pdAddr0 robAddr0 :> renamedLane decoded1 pdAddr1 robAddr1 :> Nil}
-    renamedLane Decoded {..} pdAddr robAddr = Renamed {..}
+    issue = (renamedLane pdAddr0 robAddr0 <$> lane0) :> (renamedLane pdAddr1 robAddr1 <$> lane1) :> Nil
+    renamedLane pdAddr robAddr Decoded {..} = Renamed {..}
       where
         ps1Addr = specRmt !! rs1Addr
         ps2Addr = specRmt !! rs2Addr
 
-    allocates = Upto {len, elems = robStatic decoded0 rdAddr0 freePd0 :> robStatic decoded1 rdAddr1 freePd1 :> Nil}
+    allocates = ((robAddr0,) . robStatic rdAddr0 freePd0 <$> lane0) :> ((robAddr1,) . robStatic rdAddr1 freePd1 <$> lane1) :> Nil
 
-    taken = (if issue.len >= 1 then (,freePd0) <$> rdAddr0 else Nothing) :> (if issue.len >= 2 then (,freePd1) <$> rdAddr1 else Nothing) :> Nil
+    taken = (lane0 *> ((,freePd0) <$> rdAddr0)) :> (lane1 *> ((,freePd1) <$> rdAddr1)) :> Nil
     takenCnt = sum $ bool 0 1 . isJust <$> taken
     specHead' = specHead + takenCnt
 

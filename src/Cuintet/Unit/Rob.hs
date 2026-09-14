@@ -4,10 +4,8 @@ import Clash.Prelude
 import Control.Monad (guard)
 import Cuintet.Eei (Addr, CommitWidth, DispatchWidth, Inst, Mapping, MemReq, NRob, RobAddr, SystemOp (..), TrapCause, WriteBackWidth, XLen)
 import Cuintet.Unit.MultiRam (multiRam)
-import Cuintet.Unit.Ring (RingReq (..), RingResp (..), ring)
-import Cuintet.Upto (Upto (..))
-import Cuintet.Upto qualified as Upto
 import Cuintet.Util (orNothing)
+import Data.Bool (bool)
 import Data.Maybe (isJust, isNothing)
 
 data RobStatic = RobStatic
@@ -33,15 +31,26 @@ data RobEntry = RobEntry
   deriving (Generic, NFDataX)
 
 data RobReq = RobReq
-  { allocates :: Upto DispatchWidth RobStatic
+  { allocates :: Vec DispatchWidth (Maybe (RobAddr, RobStatic))
   , completes :: Vec WriteBackWidth (Maybe (RobAddr, RobDone))
   , pop :: Index (CommitWidth + 1)
   , squash :: Bool
   }
   deriving (Generic, NFDataX)
 
-newtype RobResp = RobResp {buffer :: RingResp (BitSize RobAddr) CommitWidth RobEntry}
-  deriving newtype (Generic, NFDataX)
+data RobResp = RobResp
+  { entries :: Vec CommitWidth (Maybe RobEntry)
+  , hd :: RobAddr
+  , tl :: RobAddr
+  , free :: RobAddr
+  }
+  deriving (Generic, NFDataX)
+
+data RobState = RobState
+  { hd :: RobAddr
+  , tl :: RobAddr
+  }
+  deriving (Generic, NFDataX)
 
 squashes :: RobEntry -> Bool
 squashes RobEntry {..} = any squashing done
@@ -55,21 +64,30 @@ committedMapping RobEntry {..} = do
   static.mapping
 
 rob :: forall dom. (HiddenClockResetEnable dom) => Signal dom RobReq -> Signal dom RobResp
-rob req = mkResp <$> statics <*> dones
+rob req = mkResp <$> cur <*> multiRam addrs allocs <*> dones
   where
-    mkResp resp@RingResp {rdata} ds = RobResp resp {rdata = rdata {elems = zipWith RobEntry rdata.elems ds}}
+    (cur, allocs) = unbundle $ mealy step RobState {hd = 0, tl = 0} req
 
-    statics = ring (SNat @(BitSize RobAddr)) (mkRingReq <$> req)
-    mkRingReq RobReq {..} = RingReq {wdata = allocates, pop, squash}
+    step s@RobState {hd, tl} RobReq {..} = (RobState {hd = hd', tl = tl'}, (s, if squash then repeat Nothing else allocates))
+      where
+        hd' = hd + numConvert pop
+        tl'
+          | squash = hd'
+          | otherwise = tl + sum (bool 0 1 . isJust <$> allocates)
 
-    addrs = (\RingResp {hd} -> (hd +) . numConvert <$> indicesI @CommitWidth) <$> statics
+    mkResp RobState {hd, tl} statics ds = RobResp {entries, hd, tl, free = maxBound - used}
+      where
+        used = tl - hd
+        entries = izipWith (\i s d -> orNothing (numConvert i < used) (RobEntry s d)) statics ds
+
+    addrs = (\RobState {hd} -> (hd +) . numConvert <$> indicesI @CommitWidth) <$> cur
     dones = zipWith orNothing <$> valids <*> multiRam addrs ((.completes) <$> req)
     valids = (\flags -> fmap (flags !!)) <$> completed <*> addrs
 
-    completed = mealy step (repeat @NRob False) (bundle (statics, req))
-    step flags (RingResp {tl}, RobReq {allocates, completes}) = (foldl assign flags (clears ++ sets), flags)
+    completed = mealy flagStep (repeat @NRob False) (bundle (allocs, (.completes) <$> req))
+    flagStep flags (as, cs) = (foldl assign flags (clears ++ sets), flags)
       where
-        clears = imap (\i -> fmap (const (tl + numConvert i, False))) (Upto.toMaybes allocates)
-        sets = fmap (\(robAddr, _) -> (robAddr, True)) <$> completes
+        clears = fmap (\(robAddr, _) -> (robAddr, False)) <$> as
+        sets = fmap (\(robAddr, _) -> (robAddr, True)) <$> cs
         assign f = maybe f (\(addr, v) -> replace addr v f)
 {-# OPAQUE rob #-}

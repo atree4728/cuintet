@@ -6,8 +6,6 @@ import Cuintet.Eei (Addr, DispatchWidth, IssueWidth, NPRegs, NRob, PRegAddr, Rob
 import Cuintet.Pipeline (Renamed (..))
 import Cuintet.Unit.Btb (Prediction)
 import Cuintet.Unit.MultiRam (multiRam)
-import Cuintet.Upto (Upto)
-import Cuintet.Upto qualified as Upto
 import Cuintet.Util (orNothing)
 
 -- | AtIssue from both ports, AtComplete from both units, AtCommit.
@@ -46,7 +44,7 @@ without :: RobAddr -> Vec n (Maybe (RobAddr, IqTag)) -> Vec n (Maybe (RobAddr, I
 without excluded = fmap (>>= \(addr, tag) -> orNothing (addr /= excluded) (addr, tag))
 
 data IssueQueueReq = IssueQueueReq
-  { dispatch :: Upto DispatchWidth Renamed
+  { dispatch :: Vec DispatchWidth (Maybe Renamed)
   , accepted :: Vec IssueWidth Bool
   , busy :: Vec NExecUnits Bool
   , robHead :: RobAddr
@@ -90,7 +88,7 @@ step IssueQueueState {..} IssueQueueReq {..} = (IssueQueueState {tags = tags', r
         && (execUnit tag.opClass /= Just MemUnit || Just robAddr == oldestMem)
 
     -- Set before clear: a tag allocated in this clock is not ready.
-    ready' = foldl (mark False) (foldl (mark True) ready wakeup) ((>>= (.pdAddr)) <$> Upto.toMaybes dispatch)
+    ready' = foldl (mark False) (foldl (mark True) ready wakeup) ((>>= (.pdAddr)) <$> dispatch)
       where
         mark v rs = maybe rs (\p -> replace p v rs)
 
@@ -108,7 +106,7 @@ step IssueQueueState {..} IssueQueueReq {..} = (IssueQueueState {tags = tags', r
 
     tags'
       | squash = repeat Nothing
-      | otherwise = foldl insert (fmap woken <$> cleared) (Upto.toMaybes dispatch)
+      | otherwise = foldl insert (fmap woken <$> cleared) dispatch
       where
         cleared = foldl (\ts -> maybe ts (\a -> replace a Nothing ts)) tags leaving
         insert ts = maybe ts (\r -> replace r.robAddr (Just (tagOf r)) ts)
@@ -123,5 +121,5 @@ issueQueue req = mkOut <$> selection <*> multiRam (addrs <$> selection) (writes 
 
     addrs Select {selected} = maybe 0 fst <$> selected
 
-    writes IssueQueueReq {dispatch} = fmap payloadOf <$> Upto.toMaybes dispatch
+    writes IssueQueueReq {dispatch} = fmap payloadOf <$> dispatch
     payloadOf Renamed {..} = (robAddr, IqPayload {..})

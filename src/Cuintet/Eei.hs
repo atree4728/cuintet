@@ -67,7 +67,6 @@ import Clash.Annotations.BitRepresentation
 import Clash.Annotations.BitRepresentation.Deriving
 import Clash.Prelude
 import Control.Monad (guard)
-import Cuintet.Upto (Upto (..))
 import Cuintet.Util (orNothing)
 
 -- | The length of integer registers.
@@ -174,10 +173,10 @@ laneMask width off = reverse $ bitCoerce mask
     mask = ones `shiftL` numConvert off
     ones = complement (complement 0 `shiftL` numConvert (sizeBytes width))
 
-instSlice :: Addr -> BitVector (MemDataBytes * 8) -> Upto FetchWidth Inst
+instSlice :: Addr -> BitVector (MemDataBytes * 8) -> Vec FetchWidth (Maybe Inst)
 instSlice addr busWord
-  | pack addr `testBit` 2 = Upto {len = 1, elems = upper :> deepErrorX "instSlice: past the word" :> Nil}
-  | otherwise = Upto {len = 2, elems = lower :> upper :> Nil}
+  | pack addr `testBit` 2 = Just upper :> Nothing :> Nil
+  | otherwise = Just lower :> Just upper :> Nil
   where
     (upper, lower) = split busWord
 

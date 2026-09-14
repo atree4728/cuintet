@@ -100,7 +100,6 @@ library
     Cuintet.Unit.RegFile
     Cuintet.Unit.Ring
     Cuintet.Unit.Rob
-    Cuintet.Upto
     Cuintet.Util
 
   build-depends:
