@@ -88,7 +88,6 @@ library
     Cuintet.Top.TangNano9k
     Cuintet.Top.Timing
     Cuintet.Unit.Btb
-    Cuintet.Unit.BusArbiter
     Cuintet.Unit.Csr
     Cuintet.Unit.Fifo
     Cuintet.Unit.IssueQueue
