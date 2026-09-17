@@ -3,7 +3,7 @@ module Cuintet.Pipeline (FetchBufBits, Fetched (..), Decoded (..), Renamed (..),
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..))
-import Cuintet.Eei (Addr, Inst, MemReq, PRegAddr, RegAddr, RobAddr, StoreQueueAddr, TrapCause, XLen)
+import Cuintet.Eei (Addr, Inst, LoadQueueAddr, MemReq, PRegAddr, RegAddr, RobAddr, StoreQueueAddr, TrapCause, XLen)
 import Cuintet.Unit.Btb (Prediction)
 
 type FetchBufBits = 3
@@ -39,6 +39,7 @@ data Renamed = Renamed
   , pdAddr :: Maybe PRegAddr
   , robAddr :: RobAddr
   , sqAddr :: StoreQueueAddr
+  , lqAddr :: LoadQueueAddr
   }
   deriving (Generic, NFDataX)
 
@@ -53,6 +54,7 @@ data Ready = Ready
   , pdAddr :: Maybe PRegAddr
   , robAddr :: RobAddr
   , sqAddr :: StoreQueueAddr
+  , lqAddr :: LoadQueueAddr
   }
   deriving (Generic, NFDataX)
 
@@ -60,7 +62,6 @@ data Executed = Executed
   { ctrl :: InstCtrl
   , exception :: Maybe (TrapCause, BitVector XLen)
   , pdAddr :: Maybe PRegAddr
-  -- ^ 'Nothing' when the instruction traps.
   , robAddr :: RobAddr
   , mispredicted :: Bool
   , wbData :: BitVector XLen

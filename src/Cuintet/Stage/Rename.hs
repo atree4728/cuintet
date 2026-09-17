@@ -3,8 +3,8 @@ module Cuintet.Stage.Rename (RenameState (..), initRenameState, RenameIn (..), R
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
-import Cuintet.CoreCtrl (InstCtrl (..), isStore, opClassOf)
-import Cuintet.Eei (CommitWidth, DispatchWidth, Mapping (..), NRegs, PRegAddr, RobAddr, StoreQueueAddr)
+import Cuintet.CoreCtrl (InstCtrl (..), isLoad, isStore, opClassOf)
+import Cuintet.Eei (CommitWidth, DispatchWidth, LoadQueueAddr, Mapping (..), NRegs, PRegAddr, RobAddr, StoreQueueAddr)
 import Cuintet.Pipeline (Decoded (..), Renamed (..))
 import Cuintet.Unit.Rob (RobStatic (..))
 import Data.Bool (bool)
@@ -40,6 +40,7 @@ data RenameIn = RenameIn
   , robFree :: RobAddr
   , nextSqAddr :: StoreQueueAddr
   , sqFree :: StoreQueueAddr
+  , nextLqAddr :: LoadQueueAddr
   , flush :: Bool
   , drained :: Bool
   -- ^ Whether the ROB is empty, so nothing more will reach Cm.
@@ -56,6 +57,7 @@ rename RenameState {..} RenameIn {..} = (state', RenameOut {..})
     (decoded0, decoded1) = vecToTuple entries
 
     storing = maybe False (isStore . (.ctrl))
+    loading = maybe False (isLoad . (.ctrl))
 
     issued =
       any isJust entries
@@ -80,6 +82,9 @@ rename RenameState {..} RenameIn {..} = (state', RenameOut {..})
     sqAddr0 = nextSqAddr
     sqAddr1 = nextSqAddr + bool 0 1 (storing decoded0)
 
+    lqAddr0 = nextLqAddr
+    lqAddr1 = nextLqAddr + bool 0 1 (loading decoded0)
+
     robStatic rd pd Decoded {..} =
       RobStatic
         { pc
@@ -89,8 +94,8 @@ rename RenameState {..} RenameIn {..} = (state', RenameOut {..})
         , instBits
         }
 
-    issue = (renamedLane pdAddr0 robAddr0 sqAddr0 <$> lane0) :> (renamedLane pdAddr1 robAddr1 sqAddr1 <$> lane1) :> Nil
-    renamedLane pdAddr robAddr sqAddr Decoded {..} = Renamed {..}
+    issue = (renamedLane pdAddr0 robAddr0 sqAddr0 lqAddr0 <$> lane0) :> (renamedLane pdAddr1 robAddr1 sqAddr1 lqAddr1 <$> lane1) :> Nil
+    renamedLane pdAddr robAddr sqAddr lqAddr Decoded {..} = Renamed {..}
       where
         ps1Addr = specRmt !! rs1Addr
         ps2Addr = specRmt !! rs2Addr

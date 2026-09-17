@@ -1,8 +1,8 @@
 module Cuintet.Unit.IssueQueue (NBroadcast, IqTag (..), IqPayload (..), Select (..), IssueQueueReq (..), IssueQueueResp (..), issueQueue) where
 
 import Clash.Prelude
-import Cuintet.CoreCtrl (InstCtrl, NExecUnits, OpClass (..), execUnit, fitsPort, opClassOf, usesRs1, usesRs2)
-import Cuintet.Eei (Addr, DispatchWidth, IssueWidth, NPRegs, NRob, PRegAddr, RobAddr, StoreQueueAddr, TrapCause, XLen)
+import Cuintet.CoreCtrl (InstCtrl, NExecUnits, OpClass, execUnit, fitsPort, opClassOf, usesRs1, usesRs2)
+import Cuintet.Eei (Addr, DispatchWidth, IssueWidth, LoadQueueAddr, NPRegs, NRob, PRegAddr, RobAddr, StoreQueueAddr, TrapCause, XLen)
 import Cuintet.Pipeline (Renamed (..))
 import Cuintet.Unit.Btb (Prediction)
 import Cuintet.Unit.MultiRam (multiRam)
@@ -26,6 +26,7 @@ data IqPayload = IqPayload
   , exception :: Maybe (TrapCause, BitVector XLen)
   , pdAddr :: Maybe PRegAddr
   , sqAddr :: StoreQueueAddr
+  , lqAddr :: LoadQueueAddr
   }
   deriving (Generic, NFDataX)
 
@@ -76,16 +77,11 @@ step IssueQueueState {..} IssueQueueReq {..} = (IssueQueueState {tags = tags', r
 
     leaving = zipWith (\ok e -> if ok then fst <$> e else Nothing) accepted selected
 
-    oldestMem = fst <$> oldest robHead (memOnly <$> entries)
-      where
-        memOnly = (>>= \(robAddr, tag) -> orNothing (isMem tag.opClass) (robAddr, tag))
-
-    candidate port (robAddr, tag) =
+    candidate port (_, tag) =
       tag.ready1
         && tag.ready2
         && fitsPort port tag.opClass
         && maybe True (not . (busy !!) . fromEnum) (execUnit tag.opClass)
-        && (not (isMem tag.opClass) || Just robAddr == oldestMem)
 
     -- Set before clear: a tag allocated in this clock is not ready.
     ready' = foldl (mark False) (foldl (mark True) ready wakeup) ((>>= (.pdAddr)) <$> dispatch)
@@ -123,6 +119,3 @@ issueQueue req = mkOut <$> selection <*> multiRam (addrs <$> selection) (writes 
 
     writes IssueQueueReq {dispatch} = fmap payloadOf <$> dispatch
     payloadOf Renamed {..} = (robAddr, IqPayload {..})
-
-isMem :: OpClass -> Bool
-isMem opClass = opClass == Load || opClass == Store

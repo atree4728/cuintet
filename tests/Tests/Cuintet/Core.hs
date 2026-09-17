@@ -141,6 +141,16 @@ loadUseProg =
   , 0x00118213 -- 10: addi x4, x3, 1
   ]
 
+orderFailProg :: [Inst]
+orderFailProg =
+  [ 0x00100293 --  0: addi x5, x0, 1
+  , 0x10000313 --  4: addi x6, x0, 256
+  , 0x025300b3 --  8: mul  x1, x6, x5  : x1 = 256, late
+  , 0x02a00113 --  c: addi x2, x0, 42
+  , 0x0020b023 -- 10: sd   x2, 0(x1)   : its address waits on the mul
+  , 0x10003183 -- 14: ld   x3, 256(x0) : ready at once, so it runs ahead of the sd
+  ]
+
 tests :: TestTree
 tests =
   testGroup
@@ -199,4 +209,7 @@ tests =
         (regs !! (2 :: Int)) @?= 42
         (regs !! (3 :: Int)) @?= 43
         (regs !! (4 :: Int)) @?= 44
+    , testCase "Re-execute a load that ran ahead of an older store" $ do
+        ((.pc) <$> runProgram 6 orderFailProg) @?= ((resetVector +) <$> [0x0, 0x4, 0x8, 0xc, 0x10, 0x14])
+        (regsAfter 6 orderFailProg !! (3 :: Int)) @?= 42
     ]

@@ -91,6 +91,7 @@ library
     Cuintet.Unit.Csr
     Cuintet.Unit.Fifo
     Cuintet.Unit.IssueQueue
+    Cuintet.Unit.LoadQueue
     Cuintet.Unit.LoadStore
     Cuintet.Unit.MulDiv
     Cuintet.Unit.MulDiv.Div

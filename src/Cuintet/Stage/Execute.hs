@@ -4,9 +4,10 @@ module Cuintet.Stage.Execute (execute, ExecuteIn (..), ExecuteOut (..)) where
 import Clash.Prelude
 import Control.Monad (guard)
 import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), execUnit, isCsrRead, opClassOf)
-import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), BusReq (..), IssueWidth, LoadShape (..), MemOp (..), RobAddr, StoreQueueAddr, SystemOp (..), XLen, laneOffset, misalignedCause, storeLanes, pattern INSTRUCTION_ADDRESS_MISALIGNED)
+import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), BusReq (..), IssueWidth, LoadQueueAddr, LoadShape (..), MemOp (..), RobAddr, StoreQueueAddr, SystemOp (..), XLen, laneOffset, laneMask, misalignedCause, storeLanes, pattern INSTRUCTION_ADDRESS_MISALIGNED)
 import Cuintet.Pipeline (Executed (..), Ready (..))
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
+import Cuintet.Unit.LoadQueue (LoadQueueEntry (..))
 import Cuintet.Unit.LoadStore (LoadJob (..))
 import Cuintet.Unit.MulDiv (MulDivJob (..))
 import Cuintet.Unit.StoreQueue (StoreQueueEntry (..))
@@ -25,6 +26,8 @@ data ExecuteOut = ExecuteOut
   , mulDivJob :: Maybe MulDivJob
   , loadJob :: Maybe LoadJob
   , storeWrite :: Maybe (StoreQueueAddr, StoreQueueEntry)
+  , loadRecord :: Maybe (LoadQueueAddr, LoadQueueEntry)
+  , storeSearch :: Maybe (LoadQueueAddr, StoreQueueEntry)
   , issued :: Bool
   , wbData :: Vec IssueWidth (BitVector XLen)
   , redirect :: Maybe (RobAddr, Addr)
@@ -62,15 +65,24 @@ execute ExecuteIn {..} = ExecuteOut {..}
       pure MulDivJob {mulDivOp, isOp32 = ctrl.isOp32, op1 = rs1Data, op2 = rs2Data, pdAddr, robAddr, mispredicted = executed.mispredicted}
 
     loadJob = do
-      (Ready {ctrl, sqAddr, pdAddr, robAddr}, Lane {executed, aluResult}) <- port0
+      (Ready {ctrl, sqAddr, lqAddr, pdAddr, robAddr}, Lane {executed, aluResult}) <- port0
       Load width sign <- ctrl.memOp
       let addr = unpack aluResult
-      pure LoadJob {addr, shape = LoadShape {width, sign, offset = laneOffset addr}, sqAddr, pdAddr, robAddr, mispredicted = executed.mispredicted}
+      pure LoadJob {addr, shape = LoadShape {width, sign, offset = laneOffset addr}, sqAddr, lqAddr, pdAddr, robAddr, mispredicted = executed.mispredicted}
 
     storeWrite = do
       (Ready {sqAddr}, Lane {executed}) <- port0
       BusReq {addr, wdata = Just bytes} <- executed.mem
       pure (sqAddr, StoreQueueEntry {addr, lanes = bytes})
+
+    loadRecord = do
+      LoadJob {addr, shape = LoadShape {width, offset}, lqAddr} <- loadJob
+      pure (lqAddr, LoadQueueEntry {addr, mask = laneMask width offset})
+
+    storeSearch = do
+      (Ready {lqAddr}, _) <- port0
+      (_, entry) <- storeWrite
+      pure (lqAddr, entry)
 
     -- A younger redirect than a pending one comes from the wrong path.
     redirect = do

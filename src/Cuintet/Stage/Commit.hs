@@ -12,7 +12,11 @@ import Cuintet.Unit.Rob (RobDone (..), RobEntry (..), RobStatic (..), committedM
 import Data.Bool (bool)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 
-newtype CommitIn = CommitIn {entries :: Vec CommitWidth (Maybe RobEntry)}
+data CommitIn = CommitIn
+  { entries :: Vec CommitWidth (Maybe RobEntry)
+  , orderFail :: Vec CommitWidth Bool
+  -- ^ From the head of the load queue on.
+  }
 
 data CommitOut = CommitOut
   { retired :: Vec CommitWidth (Maybe Retire)
@@ -21,6 +25,7 @@ data CommitOut = CommitOut
   , csrWrite :: Maybe (PRegAddr, BitVector XLen)
   , pop :: Index (CommitWidth + 1)
   , stores :: Index (CommitWidth + 1)
+  , loads :: Index (CommitWidth + 1)
   , squash :: Bool
   }
 
@@ -28,11 +33,21 @@ commit :: CsrFile -> CommitIn -> (CsrFile, CommitOut)
 commit csrFile CommitIn {..} = (csrFile', CommitOut {..})
   where
     (entry0, entry1) = vecToTuple entries
+    (fail0, fail1) = vecToTuple orderFail
 
-    commit0 = mfilter (isJust . (.done)) entry0
-    commit1 = do
+    isLoadEntry e = e.static.opClass == Load
+
+    -- The head of the load queue is lane 0's load, or lane 1's when lane 0 holds no load.
+    refetch0 = mfilter (\e -> isLoadEntry e && fail0) entry0
+    refetch1 = do
       e0 <- commit0
       guard (not (squashes e0))
+      mfilter (\e -> isLoadEntry e && if isLoadEntry e0 then fail1 else fail0) entry1
+
+    commit0 = guard (isNothing refetch0) *> mfilter (isJust . (.done)) entry0
+    commit1 = do
+      e0 <- commit0
+      guard (not (squashes e0) && isNothing refetch1)
       mfilter (\e -> isJust e.done && isNothing (mkCsrReq e)) entry1
     commits = commit0 :> commit1 :> Nil
 
@@ -41,14 +56,16 @@ commit csrFile CommitIn {..} = (csrFile', CommitOut {..})
       | isJust commit0 = 1
       | otherwise = 0
 
-    squash = maybe False squashes (commit1 <|> commit0)
+    refetch = (.static.pc) <$> (refetch0 <|> refetch1)
+    squash = maybe False squashes (commit1 <|> commit0) || isJust refetch
 
+    loads = counted Load commits
     stores = counted Store commits
 
     (csrFile', csrResp) = csrStep csrFile (mkCsrReq =<< commit0)
 
     readValue = case csrResp of Just (ReadValue v) -> Just v; _ -> Nothing
-    redirect = case csrResp of Just (Redirect v) -> Just v; _ -> Nothing
+    redirect = (case csrResp of Just (Redirect v) -> Just v; _ -> Nothing) <|> refetch
 
     renamed = (committedMapping =<<) <$> commits
 

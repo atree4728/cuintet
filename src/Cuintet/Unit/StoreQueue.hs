@@ -4,7 +4,7 @@ import Clash.Prelude
 import Control.Monad (guard)
 import Cuintet.Eei (Addr, BusReq (..), CommitWidth, DispatchWidth, LoadShape (..), MemDataBytes, MemReq, NStoreQueue, StoreLanes (..), StoreQueueAddr, laneMask)
 import Data.Function (applyWhen)
-import Data.Maybe (fromMaybe, isJust, isNothing)
+import Data.Maybe (fromMaybe, isJust)
 
 data StoreQueueEntry = StoreQueueEntry
   { addr :: Addr
@@ -63,25 +63,23 @@ storeReq StoreQueueResp {..} = do
   StoreQueueEntry {..} <- entries !! hd
   pure BusReq {addr, wdata = Just lanes}
 
-data Forward = NoMatch | Forwarded (BitVector (MemDataBytes * 8)) | Stall
+data Forward = NoMatch | Forwarded (BitVector (MemDataBytes * 8)) | Stall | OrderFail
   deriving (Generic, NFDataX)
 
 -- | What the store queue has for a load whose older stores are @[hd, sqAddr)@: the youngest of them that writes a byte it reads.
--- A store whose address is still unknown makes it wait, and so does one that covers only part of it.
+-- A store whose address is still unknown is taken to write elsewhere. One that covers only part of the load is waited for
+-- when committed; otherwise waiting in the unit could block an older load, so the load is to run again from the ROB head.
 loadForward :: StoreQueueResp -> StoreQueueAddr -> Addr -> LoadShape -> Forward
-loadForward StoreQueueResp {entries, hd} sqAddr addr LoadShape {width, offset}
-  | unknown = Stall
-  | otherwise = case fold later hits of
-      Nothing -> NoMatch
-      Just (_, bytes)
-        | and (zipWith (\m b -> not m || isJust b) mask bytes) -> Forwarded (bitCoerce (reverse (fromMaybe 0 <$> bytes)))
-        | otherwise -> Stall
+loadForward StoreQueueResp {entries, hd, cm} sqAddr addr LoadShape {width, offset} = case fold later hits of
+  Nothing -> NoMatch
+  Just (age', bytes)
+    | and (zipWith (\m b -> not m || isJust b) mask bytes) -> Forwarded (bitCoerce (reverse (fromMaybe 0 <$> bytes)))
+    | age' < age cm -> Stall
+    | otherwise -> OrderFail
   where
     mask = laneMask width offset
     age i = i - hd
     older i = age i < age sqAddr
-
-    unknown = or (imap (\i e -> older (numConvert i) && isNothing e) entries)
 
     hits = imap hit entries
     hit i e = do

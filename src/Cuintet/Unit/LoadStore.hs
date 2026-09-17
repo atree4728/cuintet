@@ -3,7 +3,7 @@ module Cuintet.Unit.LoadStore (LoadJob (..), LoadState (..), LoadStoreReq (..), 
 
 import Clash.Prelude
 import Cuintet.Completion (Completion (..))
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), LoadShape, MemDataBytes, MemReq, MemResp, PRegAddr, RobAddr, StoreQueueAddr, loadResult)
+import Cuintet.Eei (Addr, BusReq (..), BusResp (..), LoadQueueAddr, LoadShape, MemDataBytes, MemReq, MemResp, PRegAddr, RobAddr, StoreQueueAddr, loadResult)
 import Cuintet.Forwarding (Forwarding)
 import Cuintet.Forwarding qualified as F
 import Cuintet.Unit.Rob (RobDone (..))
@@ -15,6 +15,7 @@ data LoadJob = LoadJob
   { addr :: Addr
   , shape :: LoadShape
   , sqAddr :: StoreQueueAddr
+  , lqAddr :: LoadQueueAddr
   , pdAddr :: Maybe PRegAddr
   , robAddr :: RobAddr
   , mispredicted :: Bool
@@ -43,6 +44,7 @@ data LoadStoreResp = LoadStoreResp
   , forwarding :: Forwarding
   , memReq :: Maybe MemReq
   , written :: Bool
+  , failed :: Maybe LoadQueueAddr
   }
 
 loadStoreStep :: LoadState -> LoadStoreReq -> (LoadState, LoadStoreResp)
@@ -56,6 +58,10 @@ loadStoreStep state LoadStoreReq {..} = (state', LoadStoreResp {..})
     (state', loadReq, done)
       | squash = (Idle, Nothing, Nothing)
       | otherwise = loadStep state job sq memResp {ready = memResp.ready && isNothing store} granted
+
+    failed = case state of
+      WaitValid j OrderFail | not squash -> Just j.lqAddr
+      _ -> Nothing
 
     memReq = store <|> loadReq
     forwarding = maybe F.Idle F.broadcast done
@@ -76,6 +82,7 @@ loadStep state@(WaitValid job fwd) _ _ memResp granted = case (memResp.rdata, fw
   (Just _, Stall) -> (WaitReady job, Nothing, Nothing)
   (Just w, NoMatch) -> settle granted (completion job w)
   (Just _, Forwarded w) -> settle granted (completion job w)
+  (Just w, OrderFail) -> settle granted (completion job w)
 loadStep (Waiting c) _ _ _ granted = settle granted c
 
 settle :: Bool -> Completion -> (LoadState, Maybe MemReq, Maybe Completion)
