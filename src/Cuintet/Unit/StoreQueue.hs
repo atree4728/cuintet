@@ -1,9 +1,10 @@
-module Cuintet.Unit.StoreQueue (StoreQueueEntry (..), StoreQueueReq (..), StoreQueueResp (..), Forward (..), storeQueue, storeReq, loadForward) where
+module Cuintet.Unit.StoreQueue (StoreQueueEntry (..), StoreQueueReq (..), StoreQueueResp (..), Forward (..), storeQueue, storeReq, loadForward, overlaps) where
 
 import Clash.Prelude
 import Control.Monad (guard)
-import Cuintet.Eei (Addr, BusReq (..), CommitWidth, DispatchWidth, LoadShape, MemDataBytes, MemReq, NStoreQueue, StoreLanes, StoreQueueAddr)
+import Cuintet.Eei (Addr, BusReq (..), CommitWidth, DispatchWidth, LoadShape (..), MemDataBytes, MemReq, NStoreQueue, StoreLanes (..), StoreQueueAddr, laneMask)
 import Data.Function (applyWhen)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 
 data StoreQueueEntry = StoreQueueEntry
   { addr :: Addr
@@ -65,8 +66,38 @@ storeReq StoreQueueResp {..} = do
 data Forward = NoMatch | Forwarded (BitVector (MemDataBytes * 8)) | Stall
   deriving (Generic, NFDataX)
 
--- | What the store queue has for a load whose older stores are @[hd, sqAddr)@. For now any of them makes it wait.
+-- | What the store queue has for a load whose older stores are @[hd, sqAddr)@: the youngest of them that writes a byte it reads.
+-- A store whose address is still unknown makes it wait, and so does one that covers only part of it.
 loadForward :: StoreQueueResp -> StoreQueueAddr -> Addr -> LoadShape -> Forward
-loadForward StoreQueueResp {hd} sqAddr _ _
-  | sqAddr == hd = NoMatch
-  | otherwise = Stall
+loadForward StoreQueueResp {entries, hd} sqAddr addr LoadShape {width, offset}
+  | unknown = Stall
+  | otherwise = case fold later hits of
+      Nothing -> NoMatch
+      Just (_, bytes)
+        | and (zipWith (\m b -> not m || isJust b) mask bytes) -> Forwarded (bitCoerce (reverse (fromMaybe 0 <$> bytes)))
+        | otherwise -> Stall
+  where
+    mask = laneMask width offset
+    age i = i - hd
+    older i = age i < age sqAddr
+
+    unknown = or (imap (\i e -> older (numConvert i) && isNothing e) entries)
+
+    hits = imap hit entries
+    hit i e = do
+      let a = numConvert i
+      guard (older a)
+      StoreQueueEntry {addr = storeAddr, lanes = StoreLanes bytes} <- e
+      guard (overlaps addr mask storeAddr (isJust <$> bytes))
+      pure (age a, bytes)
+
+    later l r = case (l, r) of
+      (Just (x, _), Just (y, _)) | y > x -> r
+      (Nothing, _) -> r
+      _ -> l
+
+-- | Whether two accesses share a byte: the same bus word, and a lane both cover.
+overlaps :: Addr -> Vec MemDataBytes Bool -> Addr -> Vec MemDataBytes Bool -> Bool
+overlaps a m b n = word a == word b && or (zipWith (&&) m n)
+  where
+    word x = x `shiftR` natToNum @(CLog 2 MemDataBytes)
