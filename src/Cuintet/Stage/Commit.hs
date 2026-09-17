@@ -4,10 +4,12 @@ module Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit) where
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard, mfilter)
+import Cuintet.CoreCtrl (OpClass (..))
 import Cuintet.Eei (Addr, CommitWidth, Mapping (..), PRegAddr, SystemOp (..), XLen)
 import Cuintet.Pipeline (Retire (..))
 import Cuintet.Unit.Csr (CsrFile (..), CsrReq (..), CsrResp (..), TrapSpec (..), csrStep)
 import Cuintet.Unit.Rob (RobDone (..), RobEntry (..), RobStatic (..), committedMapping, squashes)
+import Data.Bool (bool)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 
 newtype CommitIn = CommitIn {entries :: Vec CommitWidth (Maybe RobEntry)}
@@ -18,6 +20,7 @@ data CommitOut = CommitOut
   , redirect :: Maybe Addr
   , csrWrite :: Maybe (PRegAddr, BitVector XLen)
   , pop :: Index (CommitWidth + 1)
+  , stores :: Index (CommitWidth + 1)
   , squash :: Bool
   }
 
@@ -39,6 +42,8 @@ commit csrFile CommitIn {..} = (csrFile', CommitOut {..})
       | otherwise = 0
 
     squash = maybe False squashes (commit1 <|> commit0)
+
+    stores = counted Store commits
 
     (csrFile', csrResp) = csrStep csrFile (mkCsrReq =<< commit0)
 
@@ -75,3 +80,8 @@ mkRetire csrValue entry@RobEntry {static} = do
       , mem
       , trap = fst <$> exception
       }
+
+counted :: OpClass -> Vec CommitWidth (Maybe RobEntry) -> Index (CommitWidth + 1)
+counted opClass = sum . fmap (bool 0 1 . maybe False retiring)
+  where
+    retiring RobEntry {..} = static.opClass == opClass && any (isNothing . (.exception)) done

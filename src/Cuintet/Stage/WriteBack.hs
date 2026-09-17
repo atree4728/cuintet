@@ -38,13 +38,13 @@ writeback WriteBackIn {..} = WriteBackOut {..}
     issued = wanted > 0 && taken + wanted <= natToNum @WriteBackWidth
 
     completed entry@Executed {..} =
-      Complete entry.robAddr pd RobDone {exception, mispredicted, value = entry.wbData, mem = Nothing}
+      Complete entry.robAddr pd RobDone {exception, mispredicted, value = entry.wbData, mem}
       where
         pd = guard (wakeup (opClassOf ctrl) /= AtCommit) *> pdAddr
 
     csrRequest = uncurry CsrValue <$> csrWrite
-    port0Request = guard issued >> (completed <$> entry0)
-    port1Request = guard issued >> (completed <$> entry1)
+    port0Request = guard issued *> (completed <$> entry0)
+    port1Request = guard issued *> (completed <$> entry1)
 
     (grants, completions) = arbitrate (csrRequest :> loadStoreDone :> mulDivDone :> port0Request :> port1Request :> Nil)
     loadStoreGranted = grants !! (1 :: Index 4)

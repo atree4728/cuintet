@@ -1,8 +1,8 @@
 module Cuintet.Unit.IssueQueue (NBroadcast, IqTag (..), IqPayload (..), Select (..), IssueQueueReq (..), IssueQueueResp (..), issueQueue) where
 
 import Clash.Prelude
-import Cuintet.CoreCtrl (ExecUnit (..), InstCtrl, NExecUnits, OpClass, execUnit, fitsPort, nonSpeculative, opClassOf, usesRs1, usesRs2)
-import Cuintet.Eei (Addr, DispatchWidth, IssueWidth, NPRegs, NRob, PRegAddr, RobAddr, TrapCause, XLen)
+import Cuintet.CoreCtrl (InstCtrl, NExecUnits, OpClass (..), execUnit, fitsPort, opClassOf, usesRs1, usesRs2)
+import Cuintet.Eei (Addr, DispatchWidth, IssueWidth, NPRegs, NRob, PRegAddr, RobAddr, StoreQueueAddr, TrapCause, XLen)
 import Cuintet.Pipeline (Renamed (..))
 import Cuintet.Unit.Btb (Prediction)
 import Cuintet.Unit.MultiRam (multiRam)
@@ -25,6 +25,7 @@ data IqPayload = IqPayload
   , imm :: BitVector XLen
   , exception :: Maybe (TrapCause, BitVector XLen)
   , pdAddr :: Maybe PRegAddr
+  , sqAddr :: StoreQueueAddr
   }
   deriving (Generic, NFDataX)
 
@@ -77,15 +78,14 @@ step IssueQueueState {..} IssueQueueReq {..} = (IssueQueueState {tags = tags', r
 
     oldestMem = fst <$> oldest robHead (memOnly <$> entries)
       where
-        memOnly = (>>= \(robAddr, tag) -> orNothing (execUnit tag.opClass == Just MemUnit) (robAddr, tag))
+        memOnly = (>>= \(robAddr, tag) -> orNothing (isMem tag.opClass) (robAddr, tag))
 
     candidate port (robAddr, tag) =
       tag.ready1
         && tag.ready2
         && fitsPort port tag.opClass
         && maybe True (not . (busy !!) . fromEnum) (execUnit tag.opClass)
-        && (not (nonSpeculative tag.opClass) || robAddr == robHead)
-        && (execUnit tag.opClass /= Just MemUnit || Just robAddr == oldestMem)
+        && (not (isMem tag.opClass) || Just robAddr == oldestMem)
 
     -- Set before clear: a tag allocated in this clock is not ready.
     ready' = foldl (mark False) (foldl (mark True) ready wakeup) ((>>= (.pdAddr)) <$> dispatch)
@@ -123,3 +123,6 @@ issueQueue req = mkOut <$> selection <*> multiRam (addrs <$> selection) (writes 
 
     writes IssueQueueReq {dispatch} = fmap payloadOf <$> dispatch
     payloadOf Renamed {..} = (robAddr, IqPayload {..})
+
+isMem :: OpClass -> Bool
+isMem opClass = opClass == Load || opClass == Store

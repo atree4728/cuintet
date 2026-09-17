@@ -4,11 +4,12 @@ module Cuintet.Stage.Execute (execute, ExecuteIn (..), ExecuteOut (..)) where
 import Clash.Prelude
 import Control.Monad (guard)
 import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), execUnit, isCsrRead, opClassOf)
-import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), IssueWidth, RobAddr, SystemOp (..), XLen, misalignedCause, pattern INSTRUCTION_ADDRESS_MISALIGNED)
+import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), BusReq (..), IssueWidth, LoadShape (..), MemOp (..), RobAddr, StoreQueueAddr, SystemOp (..), XLen, laneOffset, misalignedCause, storeLanes, pattern INSTRUCTION_ADDRESS_MISALIGNED)
 import Cuintet.Pipeline (Executed (..), Ready (..))
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
-import Cuintet.Unit.LoadStore (LoadStoreJob (..))
+import Cuintet.Unit.LoadStore (LoadJob (..))
 import Cuintet.Unit.MulDiv (MulDivJob (..))
+import Cuintet.Unit.StoreQueue (StoreQueueEntry (..))
 import Cuintet.Util (orNothing)
 import Data.Maybe (isJust, isNothing)
 
@@ -22,7 +23,8 @@ data ExecuteIn = ExecuteIn
 data ExecuteOut = ExecuteOut
   { completed :: Vec IssueWidth (Maybe Executed)
   , mulDivJob :: Maybe MulDivJob
-  , loadStoreJob :: Maybe LoadStoreJob
+  , loadJob :: Maybe LoadJob
+  , storeWrite :: Maybe (StoreQueueAddr, StoreQueueEntry)
   , issued :: Bool
   , wbData :: Vec IssueWidth (BitVector XLen)
   , redirect :: Maybe (RobAddr, Addr)
@@ -59,10 +61,16 @@ execute ExecuteIn {..} = ExecuteOut {..}
       mulDivOp <- ctrl.mulDivOp
       pure MulDivJob {mulDivOp, isOp32 = ctrl.isOp32, op1 = rs1Data, op2 = rs2Data, pdAddr, robAddr, mispredicted = executed.mispredicted}
 
-    loadStoreJob = do
-      (Ready {ctrl, rs2Data, pdAddr, robAddr}, Lane {executed, aluResult}) <- port0
-      memOp <- ctrl.memOp
-      pure LoadStoreJob {memOp, addr = bitCoerce aluResult, wdata = rs2Data, pdAddr, robAddr, mispredicted = executed.mispredicted}
+    loadJob = do
+      (Ready {ctrl, sqAddr, pdAddr, robAddr}, Lane {executed, aluResult}) <- port0
+      Load width sign <- ctrl.memOp
+      let addr = unpack aluResult
+      pure LoadJob {addr, shape = LoadShape {width, sign, offset = laneOffset addr}, sqAddr, pdAddr, robAddr, mispredicted = executed.mispredicted}
+
+    storeWrite = do
+      (Ready {sqAddr}, Lane {executed}) <- port0
+      BusReq {addr, wdata = Just bytes} <- executed.mem
+      pure (sqAddr, StoreQueueEntry {addr, lanes = bytes})
 
     -- A younger redirect than a pending one comes from the wrong path.
     redirect = do
@@ -127,6 +135,12 @@ executeLane Ready {..} = Lane {executed, aluResult, redirect, btbWrite}
     redirect = orNothing (not (isSerializing executed) && nextPc /= predicted pc prediction) nextPc
 
     btbWrite = guard (isNothing exception') >> train pc prediction (orNothing (nextPc /= pc + 4) nextPc)
+
+    mem = do
+      guard (isNothing exception')
+      Store width <- ctrl.memOp
+      let addr = unpack aluResult
+      pure BusReq {addr, wdata = Just (storeLanes width (laneOffset addr) rs2Data)}
 
 isSerializing :: Executed -> Bool
 isSerializing executed = isJust executed.exception || executed.ctrl.systemOp == Just SysMret

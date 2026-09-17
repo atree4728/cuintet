@@ -3,8 +3,8 @@ module Cuintet.Stage.Rename (RenameState (..), initRenameState, RenameIn (..), R
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
-import Cuintet.CoreCtrl (InstCtrl (..))
-import Cuintet.Eei (CommitWidth, DispatchWidth, Mapping (..), NRegs, PRegAddr, RobAddr)
+import Cuintet.CoreCtrl (InstCtrl (..), isStore, opClassOf)
+import Cuintet.Eei (CommitWidth, DispatchWidth, Mapping (..), NRegs, PRegAddr, RobAddr, StoreQueueAddr)
 import Cuintet.Pipeline (Decoded (..), Renamed (..))
 import Cuintet.Unit.Rob (RobStatic (..))
 import Data.Bool (bool)
@@ -38,6 +38,8 @@ data RenameIn = RenameIn
   , committed :: Vec CommitWidth (Maybe Mapping)
   , nextRobAddr :: RobAddr
   , robFree :: RobAddr
+  , nextSqAddr :: StoreQueueAddr
+  , sqFree :: StoreQueueAddr
   , flush :: Bool
   , drained :: Bool
   -- ^ Whether the ROB is empty, so nothing more will reach Cm.
@@ -53,7 +55,14 @@ rename RenameState {..} RenameIn {..} = (state', RenameOut {..})
   where
     (decoded0, decoded1) = vecToTuple entries
 
-    issued = any isJust entries && not flush && not recovering && sum (bool 0 1 . isJust <$> entries) <= robFree
+    storing = maybe False (isStore . (.ctrl))
+
+    issued =
+      any isJust entries
+        && not flush
+        && not recovering
+        && sum (bool 0 1 . isJust <$> entries) <= robFree
+        && sum (bool 0 1 . storing <$> entries) <= sqFree
     (lane0, lane1) = vecToTuple $ (guard issued *>) <$> entries
 
     rdAddr0 = (.rdAddr) =<< decoded0
@@ -68,16 +77,20 @@ rename RenameState {..} RenameIn {..} = (state', RenameOut {..})
     robAddr0 = nextRobAddr
     robAddr1 = nextRobAddr + 1
 
+    sqAddr0 = nextSqAddr
+    sqAddr1 = nextSqAddr + bool 0 1 (storing decoded0)
+
     robStatic rd pd Decoded {..} =
       RobStatic
         { pc
         , mapping = (\r -> Mapping {rdAddr = r, pdAddr = pd}) <$> rd
         , systemOp = ctrl.systemOp
+        , opClass = opClassOf ctrl
         , instBits
         }
 
-    issue = (renamedLane pdAddr0 robAddr0 <$> lane0) :> (renamedLane pdAddr1 robAddr1 <$> lane1) :> Nil
-    renamedLane pdAddr robAddr Decoded {..} = Renamed {..}
+    issue = (renamedLane pdAddr0 robAddr0 sqAddr0 <$> lane0) :> (renamedLane pdAddr1 robAddr1 sqAddr1 <$> lane1) :> Nil
+    renamedLane pdAddr robAddr sqAddr Decoded {..} = Renamed {..}
       where
         ps1Addr = specRmt !! rs1Addr
         ps2Addr = specRmt !! rs2Addr

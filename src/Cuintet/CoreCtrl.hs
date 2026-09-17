@@ -14,7 +14,6 @@ module Cuintet.CoreCtrl (
   execUnit,
   Wakeup (..),
   wakeup,
-  nonSpeculative,
   fitsPort,
 ) where
 
@@ -106,7 +105,6 @@ type NExecUnits = 2
 execUnit :: OpClass -> Maybe ExecUnit
 execUnit MulDiv = Just MulDivUnit
 execUnit Load = Just MemUnit
-execUnit Store = Just MemUnit
 execUnit _ = Nothing
 
 -- | When an 'OpClass' broadcasts its destination tag.
@@ -117,12 +115,7 @@ wakeup :: OpClass -> Wakeup
 wakeup Csr = AtCommit
 wakeup MulDiv = AtComplete
 wakeup Load = AtComplete
-wakeup Store = AtComplete
 wakeup _ = AtIssue
-
-nonSpeculative :: OpClass -> Bool
-nonSpeculative Store = True
-nonSpeculative _ = False
 
 fitsPort :: Index IssueWidth -> OpClass -> Bool
 fitsPort port opClass

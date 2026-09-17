@@ -19,6 +19,8 @@ module Cuintet.Eei (
   laneMask,
   StoreLanes (..),
   LoadShape (..),
+  storeLanes,
+  loadResult,
   BusReq (..),
   BusResp (..),
   MemDataBytes,
@@ -47,6 +49,10 @@ module Cuintet.Eei (
   NRegs,
   NPRegs,
   NRob,
+  StoreQueueAddr,
+  NStoreQueue,
+  LoadQueueAddr,
+  NLoadQueue,
   Mapping (..),
   TrapCause (..),
   pattern INSTRUCTION_ADDRESS_MISALIGNED,
@@ -103,6 +109,14 @@ type NPRegs = 2 ^ BitSize PRegAddr
 type RobAddr = Unsigned 4
 
 type NRob = 2 ^ BitSize RobAddr
+
+type StoreQueueAddr = Unsigned 4
+
+type NStoreQueue = 2 ^ BitSize StoreQueueAddr
+
+type LoadQueueAddr = Unsigned 4
+
+type NLoadQueue = 2 ^ BitSize LoadQueueAddr
 
 {- | What renaming an instruction's destination register decided: Cm makes it architectural, and
 the physical register the architectural map table held until then goes back to the free list.
@@ -189,6 +203,39 @@ newtype StoreLanes nBytes = StoreLanes (Vec nBytes (Maybe (BitVector 8)))
 -- | Load request, which is to be sliced and extended.
 data LoadShape = LoadShape {width :: Width, sign :: Sign, offset :: LaneOffset}
   deriving (Generic, NFDataX)
+
+-- | Construct the byte lanes to write.
+storeLanes :: Width -> LaneOffset -> BitVector (MemDataBytes * 8) -> StoreLanes MemDataBytes
+storeLanes width offset word = StoreLanes $ zipWith orNothing (laneMask width offset) bytes
+  where
+    bytes = reverse $ bitCoerce $ word `shiftL` bitOffset offset
+
+{- | The value a load produces: the bus word sliced and extended to its 'LoadShape'.
+
+>>> import Clash.Prelude
+>>> 0xdeadbeef :: BitVector 64
+0b0000_0000_0000_0000_0000_0000_0000_0000_1101_1110_1010_1101_1011_1110_1110_1111
+>>> loadResult LoadShape{width = Byte, sign = Signed, offset = 0} 0xdeadbeef   -- lb
+0b1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1110_1111
+>>> loadResult LoadShape{width = Byte, sign = Unsigned, offset = 1} 0xdeadbeef -- lbu
+0b0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_1011_1110
+>>> loadResult LoadShape{width = Half, sign = Signed, offset = 2} 0xdeadbeef   -- lh
+0b1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1101_1110_1010_1101
+>>> loadResult LoadShape{width = Half, sign = Unsigned, offset = 0} 0xdeadbeef -- lhu
+0b0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_1011_1110_1110_1111
+>>> loadResult LoadShape{width = Word, sign = Signed, offset = 0} 0xdeadbeef   -- lw
+0b1111_1111_1111_1111_1111_1111_1111_1111_1101_1110_1010_1101_1011_1110_1110_1111
+-}
+loadResult :: LoadShape -> BitVector (MemDataBytes * 8) -> BitVector XLen
+loadResult LoadShape {width, sign, offset} busWord = case width of
+  Byte -> ext sign (truncateB shifted :: BitVector 8)
+  Half -> ext sign (truncateB shifted :: BitVector 16)
+  Word -> ext sign (truncateB shifted :: BitVector 32)
+  Double -> busWord
+  where
+    shifted = busWord `shiftR` bitOffset offset
+    ext Signed = signExtend
+    ext Unsigned = zeroExtend
 
 {- | Memory access request, carried on the bus as @Maybe (MemBusReq ...)@;
 @Nothing@ means no access.

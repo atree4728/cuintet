@@ -2,6 +2,7 @@ module Cuintet.Unit.Rob (RobStatic (..), RobDone (..), RobEntry (..), squashes, 
 
 import Clash.Prelude
 import Control.Monad (guard)
+import Cuintet.CoreCtrl (OpClass)
 import Cuintet.Eei (Addr, CommitWidth, DispatchWidth, Inst, Mapping, MemReq, NRob, RobAddr, SystemOp (..), TrapCause, WriteBackWidth, XLen)
 import Cuintet.Unit.MultiRam (multiRam)
 import Cuintet.Util (orNothing)
@@ -12,6 +13,7 @@ data RobStatic = RobStatic
   { pc :: Addr
   , mapping :: Maybe Mapping
   , systemOp :: Maybe SystemOp
+  , opClass :: OpClass
   , instBits :: Inst
   }
   deriving (Generic, NFDataX)

@@ -4,7 +4,7 @@ module Cuintet.Core (CoreIn (..), CoreOut (..), CoreTrace (..), core) where
 import Clash.Prelude
 import Control.Monad (guard)
 import Cuintet.Completion (regWrite, robWrite)
-import Cuintet.CoreCtrl (ExecUnit (..), InstCtrl, NExecUnits, Wakeup (..), execUnit, opClassOf, wakeup)
+import Cuintet.CoreCtrl (ExecUnit (..), InstCtrl, NExecUnits, Wakeup (..), execUnit, isStore, opClassOf, wakeup)
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), CommitWidth, DispatchWidth, FetchWidth, IssueWidth, MemReq, MemResp, PRegAddr, RobAddr, WriteBackWidth, XLen)
 import Cuintet.Forwarding qualified as F
 import Cuintet.Pipeline (Decoded (..), Executed (..), FetchBufBits, Fetched (..), Ready (..), Renamed (..), Retire (..))
@@ -19,13 +19,15 @@ import Cuintet.Unit.Btb (BtbReq (..), BtbResp, btb)
 import Cuintet.Unit.Csr (CsrFile (led), initCsrFile)
 import Cuintet.Unit.Fifo (FifoReq (..), FifoResp (..), fifo)
 import Cuintet.Unit.IssueQueue (IssueQueueReq (..), IssueQueueResp (..), issueQueue)
-import Cuintet.Unit.LoadStore (LoadStoreReq (..), LoadStoreState, loadStoreStep)
+import Cuintet.Unit.LoadStore (LoadState, LoadStoreReq (..), loadStoreStep)
 import Cuintet.Unit.LoadStore qualified as L
 import Cuintet.Unit.MulDiv (MulDivReq (..), MulDivState, mulDivStep)
 import Cuintet.Unit.MulDiv qualified as M
 import Cuintet.Unit.RegFile (RegReq (..), RegResp (..), regFile)
 import Cuintet.Unit.Ring (RingReq (..), RingResp (..), ring)
 import Cuintet.Unit.Rob (RobReq (..), RobResp (..), rob)
+import Cuintet.Unit.StoreQueue (StoreQueueReq (..), StoreQueueResp (..), storeQueue)
+import Data.Bool (bool)
 import Data.Maybe (isJust)
 import GHC.Records (HasField)
 
@@ -52,7 +54,7 @@ data CoreState = CoreState
   { fetchState :: FetchState
   , renameState :: RenameState
   , mulDivState :: MulDivState
-  , loadStoreState :: LoadStoreState
+  , loadState :: LoadState
   , csrFile :: CsrFile
   , pendingRedirect :: Maybe RobAddr
   -- ^ The oldest entry whose redirect IF has taken and Cm has not yet squashed.
@@ -60,7 +62,7 @@ data CoreState = CoreState
   deriving (Generic, NFDataX)
 
 initState :: CoreState
-initState = CoreState {fetchState = initFetchState, renameState = initRenameState, mulDivState = M.Idle, loadStoreState = L.Idle, csrFile = initCsrFile, pendingRedirect = Nothing}
+initState = CoreState {fetchState = initFetchState, renameState = initRenameState, mulDivState = M.Idle, loadState = L.Idle, csrFile = initCsrFile, pendingRedirect = Nothing}
 
 -- | From the ROB on, the stages are told by which entry each of them holds in the clock.
 data CoreTrace = CoreTrace
@@ -87,11 +89,12 @@ core ::
   Signal dom CoreOut
 core coreIn = coreOut
   where
-    (coreOut, regReq, btbReq, robReq, fetchedReq, decodedReq, issueReq, readyReq, executedReq) =
-      mealyB coreT initState (coreIn, regResp, btbResp, robResp, fetchedResp, decodedResp, issueResp, readyResp, executedResp)
+    (coreOut, regReq, btbReq, robReq, sqReq, fetchedReq, decodedReq, issueReq, readyReq, executedReq) =
+      mealyB coreT initState (coreIn, regResp, btbResp, robResp, sqResp, fetchedResp, decodedResp, issueResp, readyResp, executedResp)
     btbResp = btb btbReq
     regResp = regFile regReq
     robResp = rob robReq
+    sqResp = storeQueue sqReq
     fetchedResp = ring (SNat @FetchBufBits) fetchedReq
     decodedResp = fifo decodedReq
     issueResp = issueQueue issueReq
@@ -105,6 +108,7 @@ coreT ::
   , RegResp
   , BtbResp
   , RobResp
+  , StoreQueueResp
   , RingResp FetchBufBits DispatchWidth Fetched
   , FifoResp DispatchWidth Decoded
   , IssueQueueResp
@@ -116,6 +120,7 @@ coreT ::
     , RegReq
     , BtbReq
     , RobReq
+    , StoreQueueReq
     , RingReq FetchBufBits FetchWidth DispatchWidth Fetched
     , FifoReq DispatchWidth Decoded
     , IssueQueueReq
@@ -123,12 +128,12 @@ coreT ::
     , FifoReq IssueWidth Executed
     )
   )
-coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, decodedResp, issueResp, readyResp, executedResp) =
-  (state', (coreOut, regReq, btbReq, robReq, fetchedReq, decodedReq, issueReq, readyReq, executedReq))
+coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, sqResp, fetchedResp, decodedResp, issueResp, readyResp, executedResp) =
+  (state', (coreOut, regReq, btbReq, robReq, sqReq, fetchedReq, decodedReq, issueReq, readyReq, executedReq))
   where
     (fetchState', ifOut) = fetch fetchState FetchIn {iResp, buf = fetchedResp, redirect, btbResp}
     idOut = decode DecodeIn {entries = fetchedResp.rdata, wready = decodedResp.wready, stall = flush}
-    (renameState', rnOut) = rename renameState RenameIn {entries = decodedResp.rdata, committed = cmOut.renamed, nextRobAddr = robResp.tl, robFree = robResp.free, flush, drained = robResp.hd == robResp.tl}
+    (renameState', rnOut) = rename renameState RenameIn {entries = decodedResp.rdata, committed = cmOut.renamed, nextRobAddr = robResp.tl, robFree = robResp.free, nextSqAddr = sqResp.tl, sqFree = sqResp.free, flush, drained = robResp.hd == robResp.tl}
     rrOut = regRead RegReadIn {entries = issueResp.issue, rsData = regResp.rsData, forwards, wready = readyResp.wready}
     exOut = execute ExecuteIn {entries = readyResp.rdata, robHead = robResp.hd, pendingRedirect, wready = executedResp.wready}
     wbOut = writeback WriteBackIn {entries = executedResp.rdata, loadStoreDone = loadStoreResp.done, mulDivDone = mulDivResp.done, csrWrite = cmOut.csrWrite}
@@ -136,8 +141,8 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
 
     (mulDivState', mulDivResp) =
       mulDivStep mulDivState MulDivReq {job = exOut.mulDivJob, granted = wbOut.mulDivGranted, squash = cmOut.squash}
-    (loadStoreState', loadStoreResp) =
-      loadStoreStep loadStoreState LoadStoreReq {job = exOut.loadStoreJob, memResp = dResp, granted = wbOut.loadStoreGranted, squash = cmOut.squash}
+    (loadState', loadStoreResp) =
+      loadStoreStep loadState LoadStoreReq {job = exOut.loadJob, sq = sqResp, memResp = dResp, granted = wbOut.loadStoreGranted, squash = cmOut.squash}
 
     redirect = cmOut.redirect <|> (snd <$> exOut.redirect)
     flush = isJust redirect
@@ -161,6 +166,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
 
     regReq = RegReq {rsAddrs, writes = (regWrite =<<) <$> wbOut.completions}
     btbReq = BtbReq {lookupAddr = ifOut.btbLookup, prefetchAddr = ifOut.btbPrefetch, writes = exOut.btbWrites}
+    sqReq = StoreQueueReq {allocates = sum (bool 0 1 . maybe False (isStore . (.ctrl)) <$> rnOut.issue), write = exOut.storeWrite, commits = cmOut.stores, written = loadStoreResp.written, squash = cmOut.squash}
     robReq = RobReq {allocates = rnOut.allocates, completes = (robWrite =<<) <$> wbOut.completions, pop = cmOut.pop, squash = cmOut.squash}
     fetchedReq = RingReq {wdata = ifOut.issue, pop = idIssue, squash = flush}
     decodedReq = FifoReq {wdata = idOut.issue, rready = any isJust rnOut.issue, flush}
@@ -177,7 +183,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
         , rnIssue = rnOut.issue
         , rrIssue = fmap (.robAddr) <$> rrOut.issue
         , exHold = fmap (.robAddr) <$> readyResp.rdata
-        , unitHold = mulDivHolder mulDivState :> loadStoreHolder loadStoreState :> Nil
+        , unitHold = mulDivHolder mulDivState :> loadHolder loadState :> Nil
         , wbHold = fmap (.robAddr) <$> executedResp.rdata
         , wbComplete = fmap fst . (robWrite =<<) <$> wbOut.completions
         , robHead = robResp.hd
@@ -186,7 +192,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, fetchedResp, deco
         , flush
         }
 
-    state' = CoreState {fetchState = fetchState', renameState = renameState', mulDivState = mulDivState', loadStoreState = loadStoreState', csrFile = csrFile', pendingRedirect = pendingRedirect'}
+    state' = CoreState {fetchState = fetchState', renameState = renameState', mulDivState = mulDivState', loadState = loadState', csrFile = csrFile', pendingRedirect = pendingRedirect'}
 
 atIssue :: (HasField "ctrl" r InstCtrl, HasField "pdAddr" r (Maybe PRegAddr)) => Maybe r -> Maybe PRegAddr
 atIssue entry = do
@@ -200,9 +206,9 @@ mulDivHolder = \case
   M.Waiting c -> fst <$> robWrite c
   M.Idle -> Nothing
 
-loadStoreHolder :: LoadStoreState -> Maybe RobAddr
-loadStoreHolder = \case
-  L.WaitReady job _ -> Just job.robAddr
+loadHolder :: LoadState -> Maybe RobAddr
+loadHolder = \case
+  L.WaitReady job -> Just job.robAddr
   L.WaitValid job _ -> Just job.robAddr
   L.Waiting c -> fst <$> robWrite c
   L.Idle -> Nothing
