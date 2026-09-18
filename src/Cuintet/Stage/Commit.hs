@@ -1,16 +1,16 @@
--- | Cm: the CSR file, entering and leaving a trap, the register write, and the retire log.
+-- | Cm: entering and leaving a trap, and the retire log.
 module Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit) where
 
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard, mfilter)
 import Cuintet.CoreCtrl (OpClass (..))
-import Cuintet.Eei (Addr, CommitWidth, Mapping (..), PRegAddr, SystemOp (..), XLen)
+import Cuintet.Eei (Addr, CommitWidth, Mapping (..), SystemOp (..))
 import Cuintet.Pipeline (Retire (..))
-import Cuintet.Unit.Csr (CsrFile (..), CsrReq (..), CsrResp (..), TrapSpec (..), csrStep)
+import Cuintet.Unit.Csr (CsrFile (..), CsrReq (..), TrapSpec (..), csrStep)
 import Cuintet.Unit.Rob (RobDone (..), RobEntry (..), RobStatic (..), committedMapping, squashes)
 import Data.Bool (bool)
-import Data.Maybe (fromMaybe, isJust, isNothing)
+import Data.Maybe (isJust, isNothing)
 
 data CommitIn = CommitIn
   { entries :: Vec CommitWidth (Maybe RobEntry)
@@ -22,7 +22,6 @@ data CommitOut = CommitOut
   { retired :: Vec CommitWidth (Maybe Retire)
   , renamed :: Vec CommitWidth (Maybe Mapping)
   , redirect :: Maybe Addr
-  , csrWrite :: Maybe (PRegAddr, BitVector XLen)
   , pop :: Index (CommitWidth + 1)
   , stores :: Index (CommitWidth + 1)
   , loads :: Index (CommitWidth + 1)
@@ -62,38 +61,30 @@ commit csrFile CommitIn {..} = (csrFile', CommitOut {..})
     loads = counted Load commits
     stores = counted Store commits
 
-    (csrFile', csrResp) = csrStep csrFile (mkCsrReq =<< commit0)
-
-    readValue = case csrResp of Just (ReadValue v) -> Just v; _ -> Nothing
-    redirect = (case csrResp of Just (Redirect v) -> Just v; _ -> Nothing) <|> refetch
+    (csrFile', trapTarget) = csrStep csrFile (mkCsrReq =<< commit0)
+    redirect = trapTarget <|> refetch
 
     renamed = (committedMapping =<<) <$> commits
 
-    retired = zipWith (\v e -> mkRetire v =<< e) (readValue :> Nothing :> Nil) commits
-
-    csrWrite = do
-      value <- readValue
-      Mapping {pdAddr} <- committedMapping =<< commit0
-      pure (pdAddr, value)
+    retired = (mkRetire =<<) <$> commits
 {-# OPAQUE commit #-}
 
 mkCsrReq :: RobEntry -> Maybe CsrReq
 mkCsrReq RobEntry {..} = served =<< done
   where
-    served RobDone {exception, value}
+    served RobDone {exception}
       | Just (cause, tval) <- exception = Just $ TrapEnter TrapSpec {epc = static.pc, cause, value = tval}
-      | Just (SysCsr spec) <- static.systemOp = Just $ CsrAccess spec value
       | Just SysMret <- static.systemOp = Just TrapReturn
       | otherwise = Nothing
 
-mkRetire :: Maybe (BitVector XLen) -> RobEntry -> Maybe Retire
-mkRetire csrValue entry@RobEntry {static} = do
+mkRetire :: RobEntry -> Maybe Retire
+mkRetire entry@RobEntry {static} = do
   RobDone {exception, value, mem} <- entry.done
   pure
     Retire
       { pc = static.pc
       , instBits = static.instBits
-      , rd = (\m -> (m.rdAddr, fromMaybe value csrValue)) <$> committedMapping entry
+      , rd = (\m -> (m.rdAddr, value)) <$> committedMapping entry
       , mem
       , trap = fst <$> exception
       }

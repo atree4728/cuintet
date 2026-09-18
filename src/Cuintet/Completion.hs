@@ -5,20 +5,14 @@ import Clash.Prelude
 import Cuintet.Eei (PRegAddr, RobAddr, TrapCause, XLen)
 import Cuintet.Unit.Rob (RobDone (..))
 
-data Completion
-  = Complete RobAddr (Maybe PRegAddr) RobDone
-  | CsrValue PRegAddr (BitVector XLen)
+data Completion = Completion RobAddr (Maybe PRegAddr) RobDone
   deriving (Generic, NFDataX)
 
-robWrite :: Completion -> Maybe (RobAddr, RobDone)
-robWrite = \case
-  Complete robAddr _ done -> Just (robAddr, done)
-  CsrValue {} -> Nothing
+robWrite :: Completion -> (RobAddr, RobDone)
+robWrite (Completion robAddr _ done) = (robAddr, done)
 
 regWrite :: Completion -> Maybe (PRegAddr, BitVector XLen)
-regWrite = \case
-  Complete _ pdAddr done -> (,done.value) <$> pdAddr
-  CsrValue pdAddr value -> Just (pdAddr, value)
+regWrite (Completion _ pdAddr done) = (,done.value) <$> pdAddr
 
 trapped :: RobAddr -> (TrapCause, BitVector XLen) -> Completion
-trapped robAddr exception = Complete robAddr Nothing RobDone {exception = Just exception, mispredicted = False, value = 0, mem = Nothing}
+trapped robAddr exception = Completion robAddr Nothing RobDone {exception = Just exception, mispredicted = False, value = 0, mem = Nothing}

@@ -3,7 +3,7 @@ module Cuintet.Stage.Rename (RenameState (..), initRenameState, RenameIn (..), R
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
-import Cuintet.CoreCtrl (InstCtrl (..), isLoad, isStore, opClassOf)
+import Cuintet.CoreCtrl (InstCtrl (..), isCsrRead, isLoad, isStore, opClassOf)
 import Cuintet.Eei (CommitWidth, DispatchWidth, LoadQueueAddr, Mapping (..), NRegs, PRegAddr, RobAddr, StoreQueueAddr)
 import Cuintet.Pipeline (Decoded (..), Renamed (..))
 import Cuintet.Unit.Rob (RobStatic (..))
@@ -19,6 +19,8 @@ data RenameState = RenameState
   , archHead :: Unsigned 5
   , recovering :: Bool
   -- ^ Set by a flush, cleared once the stages behind EX have drained and @specRmt@ has been restored.
+  , serializing :: Bool
+  -- ^ Set by a CSR instruction, cleared once it has retired.
   }
   deriving (Generic, NFDataX)
 
@@ -31,6 +33,7 @@ initRenameState =
     , specHead = 0
     , archHead = 0
     , recovering = False
+    , serializing = False
     }
 
 data RenameIn = RenameIn
@@ -58,13 +61,18 @@ rename RenameState {..} RenameIn {..} = (state', RenameOut {..})
 
     storing = maybe False (isStore . (.ctrl))
     loading = maybe False (isLoad . (.ctrl))
+    accessesCsr = maybe False (isCsrRead . (.ctrl)) decoded0
 
     issued =
       any isJust entries
         && not flush
         && not recovering
-        && sum (bool 0 1 . isJust <$> entries) <= robFree
-        && sum (bool 0 1 . storing <$> entries) <= sqFree
+        && not serializing
+        && (drained || not accessesCsr)
+        && sum (bool 0 1 . isJust <$> entries)
+        <= robFree
+        && sum (bool 0 1 . storing <$> entries)
+        <= sqFree
     (lane0, lane1) = vecToTuple $ (guard issued *>) <$> entries
 
     rdAddr0 = (.rdAddr) =<< decoded0
@@ -120,6 +128,7 @@ rename RenameState {..} RenameIn {..} = (state', RenameOut {..})
         , specHead = if restore then archHead' else specHead'
         , archHead = archHead'
         , recovering = flush || (recovering && not drained)
+        , serializing = (issued && accessesCsr) || (serializing && not drained)
         }
 
     restore = recovering && drained && not flush

@@ -4,7 +4,7 @@ module Cuintet.Stage.Decode (decode, DecodeIn (..), DecodeOut (..), immI, immS, 
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
-import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), usesRs1, usesRs2)
+import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), isCsrRead, usesRs1, usesRs2)
 import Cuintet.Eei (AluOp, DispatchWidth, Inst, MemOp (..), Opcode (..), System12 (..), SystemOp (..), XLen, parseBranchOp, parseCsr, parseLoad, parseStore, pattern BREAKPOINT, pattern ENVIRONMENT_CALL_FROM_M_MODE, pattern ILLEGAL_INSTRUCTION)
 import Cuintet.Pipeline (Decoded (..), Fetched (..))
 import Cuintet.Util (orNothing, (<<$>>))
@@ -29,7 +29,7 @@ decode DecodeIn {..} = DecodeOut {issue = issue0 :> issue1 :> Nil}
     issue1 = do
       decoded0 <- issue0
       decoded1 <- entry1
-      guard $ not (hasRAW decoded0 decoded1)
+      guard $ not (hasRAW decoded0 decoded1 || isCsrRead decoded0.ctrl || isCsrRead decoded1.ctrl)
       pure decoded1
 
     hasRAW decoded0 decoded1 = maybe False readRd0 decoded0.rdAddr

@@ -2,10 +2,10 @@ module Cuintet.Unit.Csr (
   CsrAddr (..),
   CsrReq (..),
   TrapSpec (..),
-  CsrResp (..),
   CsrFile (led),
   initCsrFile,
   csrStep,
+  csrAccess,
 ) where
 
 import Clash.Prelude
@@ -32,14 +32,8 @@ data TrapSpec = TrapSpec
   deriving (Generic, NFDataX)
 
 data CsrReq
-  = CsrAccess CsrSpec (BitVector XLen)
-  | TrapEnter TrapSpec
+  = TrapEnter TrapSpec
   | TrapReturn
-  deriving (Generic, NFDataX)
-
-data CsrResp
-  = ReadValue (BitVector XLen)
-  | Redirect Addr
   deriving (Generic, NFDataX)
 
 csrWrite :: CsrOp -> BitVector XLen -> Maybe (BitVector XLen) -> BitVector XLen
@@ -47,8 +41,8 @@ csrWrite ReadWrite oldValue newValueM = fromMaybe oldValue newValueM
 csrWrite ReadSet oldValue newValueM = maybe oldValue (oldValue .|.) newValueM
 csrWrite ReadClear oldValue newValueM = maybe oldValue ((oldValue .&.) . complement) newValueM
 
--- | One clock of the CSR file.
-csrStep :: CsrFile -> Maybe CsrReq -> (CsrFile, Maybe CsrResp)
+-- | One clock of the CSR file: entering or leaving a trap, and where to fetch from next.
+csrStep :: CsrFile -> Maybe CsrReq -> (CsrFile, Maybe Addr)
 csrStep file = maybe (ticked, Nothing) (fmap Just . serve ticked)
   where
     ticked = file {mcycle = file.mcycle + 1}
@@ -56,30 +50,27 @@ csrStep file = maybe (ticked, Nothing) (fmap Just . serve ticked)
 aligned :: BitVector XLen -> BitVector XLen
 aligned bits = slice d63 d2 bits ++# zeroBits
 
-serve :: CsrFile -> CsrReq -> (CsrFile, CsrResp)
+serve :: CsrFile -> CsrReq -> (CsrFile, Addr)
 serve file (TrapEnter TrapSpec {..}) =
   ( file {mepc = aligned (pack epc), mcause = cause, mtval = value}
-  , Redirect $ unpack file.mtvec
+  , unpack file.mtvec
   )
-serve file TrapReturn = (file, Redirect $ unpack file.mepc)
-serve file (CsrAccess CsrSpec {..} rs1Data)
-  | MTVEC <- csrAddr =
-      let old = unpack file.mtvec
-       in (file {mtvec = aligned (written old)}, ReadValue old)
-  | MEPC <- csrAddr =
-      let old = unpack file.mepc
-       in (file {mepc = aligned (written old)}, ReadValue old)
+serve file TrapReturn = (file, unpack file.mepc)
+
+-- | A CSR instruction: the file it leaves and the value it reads.
+csrAccess :: CsrFile -> CsrSpec -> BitVector XLen -> (CsrFile, BitVector XLen)
+csrAccess file CsrSpec {..} rs1Data
+  | MTVEC <- csrAddr = (file {mtvec = aligned (written file.mtvec)}, file.mtvec)
+  | MEPC <- csrAddr = (file {mepc = aligned (written file.mepc)}, file.mepc)
   | MCAUSE <- csrAddr =
       let old = pack file.mcause.interrupt ++# zeroExtend file.mcause.code
-       in (file {mcause = trapCause (written old)}, ReadValue old)
-  | MTVAL <- csrAddr =
-      let old = unpack file.mtval
-       in (file {mtval = written old}, ReadValue old)
-  | LED <- csrAddr = (file {led = written file.led}, ReadValue file.led)
-  | MCYCLE <- csrAddr = (file {mcycle = written file.mcycle}, ReadValue file.mcycle)
-  | MSTATUS <- csrAddr = (file, ReadValue 0)
-  | MIE <- csrAddr = (file, ReadValue 0)
-  | MHARTID <- csrAddr = (file, ReadValue 0)
+       in (file {mcause = trapCause (written old)}, old)
+  | MTVAL <- csrAddr = (file {mtval = written file.mtval}, file.mtval)
+  | LED <- csrAddr = (file {led = written file.led}, file.led)
+  | MCYCLE <- csrAddr = (file {mcycle = written file.mcycle}, file.mcycle)
+  | MSTATUS <- csrAddr = (file, 0)
+  | MIE <- csrAddr = (file, 0)
+  | MHARTID <- csrAddr = (file, 0)
   where
     written old = csrWrite csrOp old (operand <$> csrSrc)
     operand Rs1 = rs1Data

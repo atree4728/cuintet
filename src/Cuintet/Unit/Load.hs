@@ -76,4 +76,4 @@ overlay (StoreLanes forwarded) w = bitCoerce (zipWith fromMaybe (bitCoerce w) (r
 
 completion :: LoadJob -> BitVector (MemDataBytes * 8) -> Completion
 completion LoadJob {..} word =
-  Complete robAddr pdAddr RobDone {exception = Nothing, mispredicted, value = loadResult shape word, mem = Just BusReq {addr, wdata = Nothing}}
+  Completion robAddr pdAddr RobDone {exception = Nothing, mispredicted, value = loadResult shape word, mem = Just BusReq {addr, wdata = Nothing}}

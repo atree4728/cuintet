@@ -8,8 +8,8 @@ import Cuintet.Unit.Btb (Prediction)
 import Cuintet.Unit.MultiRam (multiRam)
 import Cuintet.Util (orNothing, (<<$>>))
 
--- | AtIssue from both ALU ports, AtComplete from both units, AtCommit.
-type NBroadcast = 5
+-- | AtIssue from both ALU ports, AtComplete from both units.
+type NBroadcast = 4
 
 data IqTag = IqTag
   { ready1, ready2 :: Bool

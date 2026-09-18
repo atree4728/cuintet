@@ -1,10 +1,8 @@
--- | WB: the write ports. Each ALU port has its own, and so does the store port, which writes the ROB alone; the units and Cm share the last, Cm first, then the load, then the multiply\/divide.
+-- | WB: the write ports. Each ALU port has its own, and so does the store port, which writes the ROB alone; the units share the last, the load first.
 module Cuintet.Stage.WriteBack (writeback, WriteBackIn (..), WriteBackOut (..)) where
 
 import Clash.Prelude
-import Control.Monad (guard)
 import Cuintet.Completion (Completion (..), regWrite, robWrite)
-import Cuintet.CoreCtrl (Wakeup (..), opClassOf, wakeup)
 import Cuintet.Eei (NAluPorts, PRegAddr, RobAddr, WriteBackWidth, XLen)
 import Cuintet.Pipeline (Executed (..))
 import Cuintet.Unit.Rob (RobDone (..))
@@ -15,7 +13,6 @@ data WriteBackIn = WriteBackIn
   , store :: Maybe Executed
   , mulDivDone :: Maybe Completion
   , loadDone :: Maybe Completion
-  , csrWrite :: Maybe (PRegAddr, BitVector XLen)
   }
 
 data WriteBackOut = WriteBackOut
@@ -28,15 +25,13 @@ data WriteBackOut = WriteBackOut
 writeback :: WriteBackIn -> WriteBackOut
 writeback WriteBackIn {..} = WriteBackOut {..}
   where
-    completions = (fmap completed <$> alus) :< (uncurry CsrValue <$> csrWrite <|> loadDone <|> mulDivDone)
-    loadGranted = isNothing csrWrite
-    mulDivGranted = isNothing csrWrite && isNothing loadDone
+    completions = (fmap completed <$> alus) :< (loadDone <|> mulDivDone)
+    loadGranted = True
+    mulDivGranted = isNothing loadDone
 
     regWrites = (regWrite =<<) <$> completions
-    robWrites = ((robWrite =<<) <$> completions) :< (robWrite . completed =<< store)
+    robWrites = (fmap robWrite <$> completions) :< (robWrite . completed <$> store)
 
     completed entry@Executed {..} =
-      Complete entry.robAddr pd RobDone {exception, mispredicted, value = entry.wbData, mem}
-      where
-        pd = guard (wakeup (opClassOf ctrl) /= AtCommit) *> pdAddr
+      Completion entry.robAddr pdAddr RobDone {exception, mispredicted, value = entry.wbData, mem}
 {-# OPAQUE writeback #-}

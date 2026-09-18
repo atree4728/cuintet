@@ -112,12 +112,9 @@ data Wakeup
     AtIssue
   | -- | a unit wakes and bypasses while it holds the completion.
     AtComplete
-  | -- |  Cm wakes as WB writes.
-    AtCommit
   deriving (Generic, NFDataX, Eq)
 
 wakeup :: OpClass -> Wakeup
-wakeup Csr = AtCommit
 wakeup MulDiv = AtComplete
 wakeup Load = AtComplete
 wakeup _ = AtIssue
@@ -127,6 +124,7 @@ fitsPort port = \case
   MulDiv -> port == aluPorts
   Load -> port == aluPorts + 1
   Store -> port == aluPorts + 2
+  Csr -> port == 0
   _ -> port < aluPorts
   where
     aluPorts = natToNum @NAluPorts

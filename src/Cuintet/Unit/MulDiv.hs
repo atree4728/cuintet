@@ -40,7 +40,7 @@ data Phase = Loaded | Multiplying MulState | Dividing DivState
 
 completion :: MulDivJob -> BitVector XLen -> Completion
 completion MulDivJob {robAddr, pdAddr, mispredicted} value =
-  Complete robAddr pdAddr RobDone {exception = Nothing, mispredicted, value, mem = Nothing}
+  Completion robAddr pdAddr RobDone {exception = Nothing, mispredicted, value, mem = Nothing}
 
 mulDivStep :: MulDivState -> MulDivReq -> (MulDivState, MulDivResp)
 mulDivStep _ MulDivReq {squash = True} = (Idle, MulDivResp {busy = False, done = Nothing, bypass = Nothing})

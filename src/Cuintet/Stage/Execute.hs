@@ -1,13 +1,14 @@
--- | EX: one port per kind of instruction. The ALU ports compute and branch; the others hand their instruction to a unit or the store queue.
+-- | EX: one port per kind of instruction. The ALU ports compute and branch, and the first also accesses the CSR file; the others hand their instruction to a unit or the store queue.
 module Cuintet.Stage.Execute (execute, ExecuteIn (..), ExecuteOut (..)) where
 
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
 import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), isCsrRead)
-import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), BusReq (..), IssueWidth, LoadQueueAddr, NAluPorts, LoadShape (..), MemOp (..), RobAddr, StoreQueueAddr, SystemOp (..), TrapCause, XLen, laneMask, laneOffset, misalignedCause, storeLanes, pattern INSTRUCTION_ADDRESS_MISALIGNED)
+import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), BusReq (..), IssueWidth, LoadQueueAddr, LoadShape (..), MemOp (..), NAluPorts, RobAddr, StoreQueueAddr, SystemOp (..), TrapCause, XLen, laneMask, laneOffset, misalignedCause, storeLanes, pattern INSTRUCTION_ADDRESS_MISALIGNED)
 import Cuintet.Pipeline (Executed (..), Ready (..))
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
+import Cuintet.Unit.Csr (CsrFile, csrAccess)
 import Cuintet.Unit.Load (LoadJob (..))
 import Cuintet.Unit.LoadQueue (LoadQueueEntry (..))
 import Cuintet.Unit.MulDiv (MulDivJob (..))
@@ -34,13 +35,18 @@ data ExecuteOut = ExecuteOut
   , btbWrites :: Vec IssueWidth (Maybe BtbWrite)
   }
 
-execute :: ExecuteIn -> ExecuteOut
-execute ExecuteIn {..} = ExecuteOut {..}
+execute :: CsrFile -> ExecuteIn -> (CsrFile, ExecuteOut)
+execute csrFile ExecuteIn {..} = (csrFile', ExecuteOut {..})
   where
     (aluEntries, rest) = splitAtI entries
     (mulDivEntry, loadEntry, storeEntry) = vecToTuple rest
 
-    (aluCompleted, aluRedirects, aluBtbWrites) = unzip3 (maybe (Nothing, Nothing, Nothing) ((\(e, r, w) -> (Just e, r, w)) . executeAlu) <$> aluEntries)
+    -- A CSR instruction issues alone, and only to the first port.
+    (csrFile', csrValue) = case head aluEntries of
+      Just Ready {ctrl = InstCtrl {systemOp = Just (SysCsr spec)}, rs1Data} -> csrAccess csrFile spec rs1Data
+      _ -> (csrFile, deepErrorX "Execute.csrValue")
+
+    (aluCompleted, aluRedirects, aluBtbWrites) = unzip3 (maybe (Nothing, Nothing, Nothing) ((\(e, r, w) -> (Just e, r, w)) . executeAlu csrValue) <$> aluEntries)
     wbData = maybe (deepErrorX "Execute.wbData") (.wbData) <$> aluCompleted
 
     mulDivException = mulDivEntry >>= (.exception)
@@ -130,14 +136,15 @@ memAddr :: Ready -> Addr
 memAddr Ready {rs1Data, imm} = unpack (rs1Data + imm)
 
 memException :: Ready -> Maybe (TrapCause, BitVector XLen)
-memException r@Ready {ctrl, exception} = exception <|> do
-  memOp <- ctrl.memOp
-  cause <- misalignedCause memOp (memAddr r)
-  pure (cause, pack (memAddr r))
+memException r@Ready {ctrl, exception} =
+  exception <|> do
+    memOp <- ctrl.memOp
+    cause <- misalignedCause memOp (memAddr r)
+    pure (cause, pack (memAddr r))
 
 -- | An ALU port: the entry WB takes, the redirect and the BTB training.
-executeAlu :: Ready -> (Executed, Maybe Addr, Maybe BtbWrite)
-executeAlu Ready {..} = (executed, redirect, btbWrite)
+executeAlu :: BitVector XLen -> Ready -> (Executed, Maybe Addr, Maybe BtbWrite)
+executeAlu csrValue Ready {..} = (executed, redirect, btbWrite)
   where
     executed = Executed {exception = exception', pdAddr = guard (isNothing exception') *> pdAddr, mispredicted = isJust redirect, mem = Nothing, ..}
 
@@ -146,7 +153,7 @@ executeAlu Ready {..} = (executed, redirect, btbWrite)
     branchTaken = maybe False (\cond -> branchUnit cond op1 op2) ctrl.branchOp
 
     wbData
-      | isCsrRead ctrl = rs1Data
+      | isCsrRead ctrl = csrValue
       | ctrl.isLui = imm
       | ctrl.isJump = bitCoerce (pc + 4)
       | otherwise = aluResult
@@ -163,12 +170,12 @@ executeAlu Ready {..} = (executed, redirect, btbWrite)
 
     exception' = exception <|> targetException
 
-    redirect = orNothing (not (isSerializing executed) && nextPc /= predicted pc prediction) nextPc
+    redirect = orNothing (not (squashesAtCommit executed) && nextPc /= predicted pc prediction) nextPc
 
     btbWrite = guard (isNothing exception') >> train pc prediction (orNothing (nextPc /= pc + 4) nextPc)
 
-isSerializing :: Executed -> Bool
-isSerializing executed = isJust executed.exception || executed.ctrl.systemOp == Just SysMret
+squashesAtCommit :: Executed -> Bool
+squashesAtCommit executed = isJust executed.exception || executed.ctrl.systemOp == Just SysMret
 
 -- | Extract the two operands according to the instruction form.
 operands ::

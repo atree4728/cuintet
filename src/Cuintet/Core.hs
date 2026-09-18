@@ -133,9 +133,9 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, sqResp, lqResp, f
     idOut = decode DecodeIn {entries = fetchedResp.rdata, wready = decodedResp.wready, stall = flush}
     (renameState', rnOut) = rename renameState RenameIn {entries = decodedResp.rdata, committed = cmOut.renamed, nextRobAddr = robResp.tl, robFree = robResp.free, nextSqAddr = sqResp.tl, sqFree = sqResp.free, nextLqAddr = lqResp.tl, flush, drained = robResp.hd == robResp.tl}
     rrOut = regRead RegReadIn {entries = issueResp.issue, rsData = regResp.rsData, bypasses}
-    exOut = execute ExecuteIn {entries = ready, robHead = robResp.hd, pendingRedirect}
-    wbOut = writeback WriteBackIn {alus = executed, store = storeExecuted, loadDone = loadResp.done, mulDivDone = mulDivResp.done, csrWrite = cmOut.csrWrite}
-    (csrFile', cmOut) = commit csrFile CommitIn {entries = robResp.entries, orderFail = lqResp.orderFail}
+    (csrFile', exOut) = execute csrFile ExecuteIn {entries = ready, robHead = robResp.hd, pendingRedirect}
+    wbOut = writeback WriteBackIn {alus = executed, store = storeExecuted, loadDone = loadResp.done, mulDivDone = mulDivResp.done}
+    (csrFile'', cmOut) = commit csrFile' CommitIn {entries = robResp.entries, orderFail = lqResp.orderFail}
 
     (mulDivState', mulDivResp) =
       mulDivStep mulDivState MulDivReq {job = exOut.mulDivJob, granted = wbOut.mulDivGranted, squash = cmOut.squash}
@@ -146,10 +146,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, sqResp, lqResp, f
     flush = isJust redirect
     pendingRedirect' = guard (not cmOut.squash) *> ((fst <$> exOut.redirect) <|> pendingRedirect)
 
-    -- AtIssue: RR wakes, then EX and WB bypass until the register file has it; only the ALU ports have such instructions.
-    -- AtComplete: a unit wakes and bypasses while it holds the completion.
-    -- AtCommit: Cm wakes as WB writes.
-    wakeups = (atIssue <$> takeI rrOut.issue) ++ (fst <<$>> unitBypasses) ++ (fst <$> cmOut.csrWrite) :> Nil
+    wakeups = (atIssue <$> takeI rrOut.issue) ++ (fst <<$>> unitBypasses)
     bypasses =
       reverse unitBypasses
         ++ zipWith (liftA2 (,)) (atIssue <$> executed) ((.wbData) <<$>> executed)
@@ -199,7 +196,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, sqResp, lqResp, f
         , storeExecuted = guard (not cmOut.squash) *> exOut.storeCompleted
         , mulDivState = mulDivState'
         , loadState = loadState'
-        , csrFile = csrFile'
+        , csrFile = csrFile''
         , pendingRedirect = pendingRedirect'
         }
 
@@ -212,12 +209,12 @@ atIssue entry = do
 mulDivHolder :: MulDivState -> Maybe RobAddr
 mulDivHolder = \case
   M.Busy job _ -> Just job.robAddr
-  M.Waiting c -> fst <$> robWrite c
+  M.Waiting c -> Just (fst (robWrite c))
   M.Idle -> Nothing
 
 loadHolder :: LoadState -> Maybe RobAddr
 loadHolder = \case
   L.WaitReady job -> Just job.robAddr
   L.WaitValid job _ -> Just job.robAddr
-  L.Waiting c -> fst <$> robWrite c
+  L.Waiting c -> Just (fst (robWrite c))
   L.Idle -> Nothing
