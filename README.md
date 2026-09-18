@@ -2,63 +2,43 @@
 
 [![CI](https://github.com/atree4728/cuintet/actions/workflows/ci.yml/badge.svg)](https://github.com/atree4728/cuintet/actions/workflows/ci.yml)
 
-*Cuintet* is a *5*-stage pipelined RISC-V CPU written in *Clash*, which implements `RV64IM_Zicsr`.
+*Cuintet* is a:
+- 8-stage pipelined,
+- 2-way superscalar,
+- out-of-order,
+- RISC-V (`RV64IM_Zicsr`) CPU
+- written in [Clash](https://clash-lang.org/).
+
+![Block diagram](docs/cuintet.svg)
 
 ## Building and testing
 
-To build the project, use:
-
 ```sh
 cabal build
+cabal test             # unit tests (riscv-tests etc.) and doctests
+cabal bench            # cycles and IPC of each benchmark
+cabal run clashi       # REPL
+cabal haddock --open   # API docs
 ```
 
-To run the tests defined in `tests/` and `bench/`, use:
+## Debugging
 
-```bash
-cabal run unittests
-cabal run doctests
-cabal run bench
-```
-
-To open the REPL, use:
-
-```
-cabal run clashi
-```
-
-To see the document, use:
-
-```
-cabal haddock --open
-```
-
-To log the core as Kanata format, use:
+The recipes below need [just](https://github.com/casey/just).
 
 ```sh
-just konata IMAGE.elf
-```
-
-To diff a linked ELF's retire trace against spike's, use:
-
-```sh
-just tracediff IMAGE.elf
+just konata IMAGE.elf     # write a Kanata log to build/konata/
+just tracediff IMAGE.elf  # diff the retire trace against spike's
 ```
 
 ## Synthesis
 
-Each top entity lives in its own module under `Cuintet.Top`. To compile one to
-SystemVerilog, run:
+Each top entity lives in its own module under `Cuintet.Top`. The recipes below
+write to `build/`, and all but `hdl` need
+[oss-cad-suite](https://github.com/YosysHQ/oss-cad-suite-build) on `PATH`.
 
-```bash
-cabal run clash -- Cuintet.Top.TangNano9k --systemverilog
-```
-
-You can find the SystemVerilog files in `systemverilog/`.
-
-Synthesising for the Tang Nano 9K needs [just](https://github.com/casey/just) and
-[oss-cad-suite](https://github.com/YosysHQ/oss-cad-suite-build) on `PATH`:
-
-```bash
-just prog   # build the bitstream and load it into SRAM
-just flash  # build the bitstream and write it to the on-board flash
+```sh
+just tangnano9k::hdl     # SystemVerilog, in build/systemverilog/
+just timing::fmax        # fmax and critical path on an ECP5
+just tangnano9k::prog    # load the bitstream into the Tang Nano 9K's SRAM
+just tangnano9k::flash   # write it to the on-board flash
 ```

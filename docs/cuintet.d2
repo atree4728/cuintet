@@ -1,0 +1,130 @@
+vars: {
+  d2-config: {
+    layout-engine: tala
+  }
+}
+
+classes: {
+  stage: {width: 1200; style.double-border: true}
+  resource: {width: 605}
+  update: {style: {stroke: "#1e8449"; font-color: "#1e8449"}}
+  redirect: {style: {stroke: "#c0392b"; font-color: "#c0392b"}}
+  frame: {label: ""; style: {fill: transparent; stroke: transparent}}
+}
+
+**.horizontal-gap: 200
+**.vertical-gap: 50
+**: {
+  &leaf: true
+  style.font-size: 36
+}
+**: {
+  &leaf: false
+  style.font-size: 40
+}
+(** -> **)[*].style: {font-size: 36; stroke-width: 4}
+
+vertical-gap: 200
+
+frontend: "Frontend" {
+  grid-rows: 3
+  grid-columns: 2
+
+  if: "Instruction Fetch (IF)\n8 B/cycle" {class: stage}
+  btb: "BTB\nbimodal, 2 banks × 128 entries" {class: resource}
+  id: "2-wide Decode (ID)" {class: stage}
+  fb: "Fetch Buffer\n8 entries" {class: resource}
+  rn: "Rename (RN)" {class: stage}
+  rmt: {
+    class: [frame; resource]
+    grid-rows: 2
+    horizontal-gap: 0
+    vertical-gap: 80
+    free: "Free List\n32 entries"
+    table: {
+      class: frame
+      grid-columns: 3
+      horizontal-gap: 0
+      vertical-gap: 0
+      spec: "Speculative\nRMT" {width: 235}
+      _gap: {class: frame; width: 135}
+      arch: "Architectural\nRMT" {width: 235}
+    }
+
+    free -> table.spec: pop {class: update}
+    table.arch -> free: push {class: update}
+    table.arch -> table.spec: restore {class: redirect}
+  }
+
+  btb -> if: predict
+  if -> fb -> id -> rn
+  rmt.table.spec -> rn
+}
+
+issue: "Issue" {
+  grid-columns: 2
+
+  is: "Issue (IS)\n5 issues/cycle" {class: stage}
+  iq: "Issue Queue\n16 entries" {class: resource}
+
+  iq -> is
+}
+
+backend: "Backend" {
+  grid-rows: 4
+  grid-columns: 2
+
+  rr: "Register Read (RR)\nbypass from EX / WB / units" {class: stage}
+  prf: "Physical Register File\n64 × 64 bit, 10 R / 3 W" {class: resource}
+  ex: "Execute (EX)" {
+    class: stage
+    grid-columns: 5
+    horizontal-gap: 35
+    vertical-gap: 120
+    p0: "ALU\nBranch\nCSR"
+    p1: "ALU\nBranch"
+    p2: "MulDiv\nmulti-cycle"
+    p3: "Store"
+    p4: "Load"
+  }
+  lsq: "Load/Store Queue" {
+    class: resource
+    grid-columns: 1
+    sq: "Store Queue\n16 entries"
+    lq: "Load Queue\n16 entries"
+  }
+  wb: "WriteBack (WB)\n 3 ports (ALU x 2, shared)" {class: stage}
+  rob: "Reorder Buffer (ROB)\n16 entries" {class: resource}
+  cm: "Commit (Cm)\n2 commits/cycle" {class: stage}
+  _cm: {class: [frame; resource]}
+
+  rr -> ex.p0
+  rr -> ex.p1
+  rr -> ex.p2
+  rr -> ex.p3
+  rr -> ex.p4
+  ex.p0 -> wb
+  ex.p1 -> wb
+  ex.p2 -> wb
+  ex.p3 -> wb
+  ex.p4 -> wb
+  ex.p3 -> lsq
+  lsq -> ex.p4: forward
+  ex.p4 -> lsq
+  prf -> rr: read
+  wb -> prf: write {class: update}
+  wb -> rob: complete {class: update}
+  rob -> cm
+  cm -> lsq: commit {class: update}
+  # lsq -> cm: order fail {class: redirect}
+}
+
+frontend -> issue: dispatch
+frontend.rn -> backend.rob: allocate {class: update}
+frontend.rn -> backend.lsq: allocate {class: update}
+issue -> backend: issue
+backend.rr -> issue: wakeup (at issue) {class: update}
+backend.ex -> issue: wakeup (at completion) {class: update}
+backend.cm -> frontend.rmt.table.arch: commit {class: update}
+backend.cm -> frontend.if: redirect {class: redirect}
+backend.ex -> frontend.if: redirect {class: redirect}
