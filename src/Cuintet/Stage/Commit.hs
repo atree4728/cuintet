@@ -9,7 +9,7 @@ import Cuintet.Eei (Addr, CommitWidth, Mapping (..), SystemOp (..))
 import Cuintet.Pipeline (Retire (..))
 import Cuintet.Unit.Csr (CsrFile (..), CsrReq (..), TrapSpec (..), csrStep)
 import Cuintet.Unit.Rob (RobDone (..), RobEntry (..), RobStatic (..), committedMapping, squashes)
-import Data.Bool (bool)
+import Cuintet.Util (count)
 import Data.Maybe (isJust, isNothing)
 
 data CommitIn = CommitIn
@@ -20,7 +20,7 @@ data CommitIn = CommitIn
 
 data CommitOut = CommitOut
   { retired :: Vec CommitWidth (Maybe Retire)
-  , renamed :: Vec CommitWidth (Maybe Mapping)
+  , mappings :: Vec CommitWidth (Maybe Mapping)
   , redirect :: Maybe Addr
   , pop :: Index (CommitWidth + 1)
   , stores :: Index (CommitWidth + 1)
@@ -34,14 +34,14 @@ commit csrFile CommitIn {..} = (csrFile', CommitOut {..})
     (entry0, entry1) = vecToTuple entries
     (fail0, fail1) = vecToTuple orderFail
 
-    isLoadEntry e = e.static.opClass == Load
+    is opClass e = e.static.opClass == opClass
 
     -- The head of the load queue is lane 0's load, or lane 1's when lane 0 holds no load.
-    refetch0 = mfilter (\e -> isLoadEntry e && fail0) entry0
+    refetch0 = mfilter (\e -> is Load e && fail0) entry0
     refetch1 = do
       e0 <- commit0
       guard (not (squashes e0))
-      mfilter (\e -> isLoadEntry e && if isLoadEntry e0 then fail1 else fail0) entry1
+      mfilter (\e -> is Load e && if is Load e0 then fail1 else fail0) entry1
 
     commit0 = guard (isNothing refetch0) *> mfilter (isJust . (.done)) entry0
     commit1 = do
@@ -50,21 +50,18 @@ commit csrFile CommitIn {..} = (csrFile', CommitOut {..})
       mfilter (\e -> isJust e.done && isNothing (mkCsrReq e)) entry1
     commits = commit0 :> commit1 :> Nil
 
-    pop
-      | isJust commit1 = 2
-      | isJust commit0 = 1
-      | otherwise = 0
+    pop = count isJust commits
 
     refetch = (.static.pc) <$> (refetch0 <|> refetch1)
     squash = maybe False squashes (commit1 <|> commit0) || isJust refetch
 
-    loads = counted Load commits
-    stores = counted Store commits
+    loads = counted (is Load) commits
+    stores = counted (is Store) commits
 
     (csrFile', trapTarget) = csrStep csrFile (mkCsrReq =<< commit0)
     redirect = trapTarget <|> refetch
 
-    renamed = (committedMapping =<<) <$> commits
+    mappings = (committedMapping =<<) <$> commits
 
     retired = (mkRetire =<<) <$> commits
 {-# OPAQUE commit #-}
@@ -89,7 +86,6 @@ mkRetire entry@RobEntry {static} = do
       , trap = fst <$> exception
       }
 
-counted :: OpClass -> Vec CommitWidth (Maybe RobEntry) -> Index (CommitWidth + 1)
-counted opClass = sum . fmap (bool 0 1 . maybe False retiring)
-  where
-    retiring RobEntry {..} = static.opClass == opClass && any (isNothing . (.exception)) done
+-- | The entries that satisfy @p@ and leave without a trap.
+counted :: (RobEntry -> Bool) -> Vec CommitWidth (Maybe RobEntry) -> Index (CommitWidth + 1)
+counted p = count (maybe False (\e -> p e && any (isNothing . (.exception)) e.done))

@@ -1,4 +1,4 @@
-module Cuintet.Unit.Btb (BtbReq (..), BtbResp (..), BtbWrite (..), Prediction (..), btb, predicted, train, bankOf, isTaken) where
+module Cuintet.Unit.Btb (BtbReq (..), BtbResp (..), BtbWrite (..), Prediction (..), btb, takenTarget, predicted, train, bankOf) where
 
 import Clash.Prelude
 import Control.Monad (guard)
@@ -42,9 +42,6 @@ data BtbEntry = BtbEntry
   }
   deriving (Generic, NFDataX, Show, Eq)
 
-mkBtbEntry :: Addr -> Addr -> Hint -> BtbEntry
-mkBtbEntry pc target hint = BtbEntry {tag = tagOf pc, target = packTarget target, hint}
-
 data BtbWrite = BtbWrite
   { pc :: Addr
   , target :: Addr
@@ -78,7 +75,7 @@ unpackTarget :: Addr -> PackedTarget -> Addr
 unpackTarget pc t = unpack (slice d63 d32 (pack pc) ++# t ++# (0 :: BitVector 2))
 
 btb :: (HiddenClockResetEnable dom) => Signal dom BtbReq -> Signal dom BtbResp
-btb req = BtbResp <$> (lookupPair <$> armed <*> ((.lookupAddr) <$> req) <*> bundle entries)
+btb req = BtbResp <$> mux armed (lookupGroup . (.lookupAddr) <$> req <*> bundle entries) (pure (repeat Nothing))
   where
     -- the blockRam output is undefined for the first clock out of reset
     armed = register False (pure True)
@@ -91,21 +88,22 @@ btb req = BtbResp <$> (lookupPair <$> armed <*> ((.lookupAddr) <$> req) <*> bund
 
     toWrite i ws = do
       BtbWrite {..} <- fold (<|>) (inBank i <$> ws)
-      pure (idxOf pc, Just (mkBtbEntry pc target hint))
+      pure (idxOf pc, Just BtbEntry {tag = tagOf pc, target = packTarget target, hint})
       where
         inBank j w = do bw <- w; guard (bankOf bw.pc == j); pure bw
 
-    lookupPair ready base = imap (\i e -> hit ready (base .&. complement 0b111 + 4 * numConvert i) e)
-    hit ready pc e
-      | not ready = Nothing
-      | otherwise = do
-          BtbEntry {..} <- e
-          guard $ tag == tagOf pc
-          pure $ Prediction {target = unpackTarget pc target, hint}
+    lookupGroup base = imap (\i -> hit (base .&. complement 0b111 + 4 * numConvert i))
+    hit pc e = do
+      BtbEntry {..} <- e
+      guard $ tag == tagOf pc
+      pure $ Prediction {target = unpackTarget pc target, hint}
 
 -- | Where a prediction says the instruction at @pc@ goes next.
 predicted :: Addr -> Maybe Prediction -> Addr
-predicted pc prediction = fromMaybe (pc + 4) $ do
+predicted pc = fromMaybe (pc + 4) . takenTarget
+
+takenTarget :: Maybe Prediction -> Maybe Addr
+takenTarget prediction = do
   Prediction {target, hint} <- prediction
   orNothing (isTaken hint) target
 

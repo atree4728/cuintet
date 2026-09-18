@@ -2,8 +2,8 @@ module Cuintet.Unit.RegFile (ReadPorts, RegReq (..), RegResp (..), regFile) wher
 
 import Clash.Prelude
 import Cuintet.Eei (IssueWidth, PRegAddr, WriteBackWidth, XLen)
-import Cuintet.Forwarding (bypass)
 import Cuintet.Unit.MultiRam (multiRam)
+import Cuintet.Util (bypass)
 
 type ReadPorts = 2 * IssueWidth
 

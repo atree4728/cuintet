@@ -6,11 +6,12 @@ import Cuintet.Completion (Completion (..), regWrite, robWrite)
 import Cuintet.Eei (NAluPorts, PRegAddr, RobAddr, WriteBackWidth, XLen)
 import Cuintet.Pipeline (Executed (..))
 import Cuintet.Unit.Rob (RobDone (..))
+import Cuintet.Util ((<<$>>))
 import Data.Maybe (isNothing)
 
 data WriteBackIn = WriteBackIn
-  { alus :: Vec NAluPorts (Maybe Executed)
-  , store :: Maybe Executed
+  { aluExecuted :: Vec NAluPorts (Maybe Executed)
+  , storeExecuted :: Maybe Executed
   , mulDivDone :: Maybe Completion
   , loadDone :: Maybe Completion
   }
@@ -25,12 +26,12 @@ data WriteBackOut = WriteBackOut
 writeback :: WriteBackIn -> WriteBackOut
 writeback WriteBackIn {..} = WriteBackOut {..}
   where
-    completions = (fmap completed <$> alus) :< (loadDone <|> mulDivDone)
+    completions = (completed <<$>> aluExecuted) :< (loadDone <|> mulDivDone)
     loadGranted = True
     mulDivGranted = isNothing loadDone
 
     regWrites = (regWrite =<<) <$> completions
-    robWrites = (fmap robWrite <$> completions) :< (robWrite . completed <$> store)
+    robWrites = (robWrite <<$>> completions) :< (robWrite . completed <$> storeExecuted)
 
     completed entry@Executed {..} =
       Completion entry.robAddr pdAddr RobDone {exception, mispredicted, value = entry.wbData, mem}

@@ -5,10 +5,9 @@ import Clash.Prelude
 import Control.Monad (guard)
 import Cuintet.Eei (Addr, BusReadReq (..), BusReadResp (..), DispatchWidth, FetchWidth, MemReadResp, instSlice, resetVector)
 import Cuintet.Pipeline (FetchBufBits, Fetched (..))
-import Cuintet.Unit.Btb (BtbResp (..), Prediction (..), bankOf, isTaken)
+import Cuintet.Unit.Btb (BtbResp (..), Prediction, bankOf, takenTarget)
 import Cuintet.Unit.Ring (RingResp (..))
-import Cuintet.Util (orNothing)
-import Data.Bool (bool)
+import Cuintet.Util (count, orNothing)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 
 -- | A fetch in flight: the address, and what the BTB said about it at the time.
@@ -68,7 +67,7 @@ fetch FetchState {..} FetchIn {..} =
   , FetchOut {issue, iReq, btbLookup = next, btbPrefetch = next'}
   )
   where
-    nStaged = sum (bool 0 1 . isJust <$> staged)
+    nStaged = count isJust staged
     room = buf.free >= nStaged + natToNum @FetchWidth
     iReq = orNothing (room && isNothing restart) BusReadReq {addr = next}
     accepted = isJust iReq && iResp.ready
@@ -97,10 +96,6 @@ fetch FetchState {..} FetchIn {..} =
           instBits <- inst
           guard (maybe True (i <=) cut)
           pure Fetched {pc = pc + 4 * numConvert i, instBits, prediction}
-
-    takenTarget p = do
-      Prediction {target, hint} <- p
-      orNothing (isTaken hint) target
 
     pushed = buf.free >= nStaged
     issue = if pushed then staged else repeat Nothing

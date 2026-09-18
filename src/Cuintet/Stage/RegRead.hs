@@ -1,26 +1,37 @@
-module Cuintet.Stage.RegRead (RegReadIn (..), RegReadOut (..), regRead) where
+module Cuintet.Stage.RegRead (NBypasses, RegReadIn (..), RegReadOut (..), regRead) where
 
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
-import Cuintet.Eei (IssueWidth, PRegAddr, XLen)
-import Cuintet.Forwarding (NBypasses, bypass)
+import Cuintet.CoreCtrl (NExecUnits)
+import Cuintet.Eei (IssueWidth, NAluPorts, PRegAddr, XLen)
 import Cuintet.Pipeline (Ready (..), Renamed (..))
+import Cuintet.Unit.RegFile (ReadPorts)
+import Cuintet.Util (bypass)
+
+-- | The units, then each ALU port at WB and at EX.
+type NBypasses = NExecUnits + 2 * NAluPorts
 
 data RegReadIn = RegReadIn
   { entries :: Vec IssueWidth (Maybe Renamed)
-  , rsData :: Vec (2 * IssueWidth) (BitVector XLen)
+  , rsData :: Vec ReadPorts (BitVector XLen)
   , bypasses :: Vec NBypasses (Maybe (PRegAddr, BitVector XLen))
   }
 
-newtype RegReadOut = RegReadOut {issue :: Vec IssueWidth (Maybe Ready)}
+data RegReadOut = RegReadOut
+  { issue :: Vec IssueWidth (Maybe Ready)
+  , rsAddrs :: Vec ReadPorts PRegAddr
+  }
 
 regRead :: RegReadIn -> RegReadOut
-regRead RegReadIn {..} = RegReadOut {issue = zipWith (\entry rs -> readLane bypasses rs <$> entry) entries (unconcat d2 rsData)}
+regRead RegReadIn {..} = RegReadOut {issue, rsAddrs}
+  where
+    issue = zipWith (\entry rs -> readLane bypasses rs <$> entry) entries (unconcat d2 rsData)
+    rsAddrs = concatMap (maybe (repeat 0) (\Renamed {..} -> ps1Addr :> ps2Addr :> Nil)) entries
 {-# OPAQUE regRead #-}
 
 readLane :: Vec NBypasses (Maybe (PRegAddr, BitVector XLen)) -> Vec 2 (BitVector XLen) -> Renamed -> Ready
-readLane forwards rsData Renamed {..} = Ready {..}
+readLane bypasses rsData Renamed {..} = Ready {..}
   where
     (rs1Read, rs2Read) = vecToTuple rsData
-    rs1Data = bypass forwards ps1Addr rs1Read
-    rs2Data = bypass forwards ps2Addr rs2Read
+    rs1Data = bypass bypasses ps1Addr rs1Read
+    rs2Data = bypass bypasses ps2Addr rs2Read

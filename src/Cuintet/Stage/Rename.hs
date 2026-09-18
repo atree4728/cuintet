@@ -1,13 +1,12 @@
 module Cuintet.Stage.Rename (RenameState (..), initRenameState, RenameIn (..), RenameOut (..), rename) where
 
 import Clash.Prelude
-import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
-import Cuintet.CoreCtrl (InstCtrl (..), isCsrRead, isLoad, isStore, opClassOf)
+import Cuintet.CoreCtrl (InstCtrl (..), isCsr, isLoad, isStore, opClassOf)
 import Cuintet.Eei (CommitWidth, DispatchWidth, LoadQueueAddr, Mapping (..), NRegs, PRegAddr, RobAddr, StoreQueueAddr)
 import Cuintet.Pipeline (Decoded (..), Renamed (..))
 import Cuintet.Unit.Rob (RobStatic (..))
-import Data.Bool (bool)
+import Cuintet.Util (count)
 import Data.Maybe (isJust)
 
 data RenameState = RenameState
@@ -52,16 +51,17 @@ data RenameIn = RenameIn
 data RenameOut = RenameOut
   { issue :: Vec DispatchWidth (Maybe Renamed)
   , allocates :: Vec DispatchWidth (Maybe (RobAddr, RobStatic))
+  , sqAllocates :: Index (DispatchWidth + 1)
+  , lqAllocates :: Index (DispatchWidth + 1)
   }
 
 rename :: RenameState -> RenameIn -> (RenameState, RenameOut)
 rename RenameState {..} RenameIn {..} = (state', RenameOut {..})
   where
-    (decoded0, decoded1) = vecToTuple entries
-
     storing = maybe False (isStore . (.ctrl))
     loading = maybe False (isLoad . (.ctrl))
-    accessesCsr = maybe False (isCsrRead . (.ctrl)) decoded0
+    writing = maybe False (isJust . (.rdAddr))
+    accessesCsr = maybe False (isCsr . (.ctrl)) (head entries)
 
     issued =
       any isJust entries
@@ -69,50 +69,47 @@ rename RenameState {..} RenameIn {..} = (state', RenameOut {..})
         && not recovering
         && not serializing
         && (drained || not accessesCsr)
-        && sum (bool 0 1 . isJust <$> entries)
+        && count isJust entries
         <= robFree
-        && sum (bool 0 1 . storing <$> entries)
+        && count storing entries
         <= sqFree
-    (lane0, lane1) = vecToTuple $ (guard issued *>) <$> entries
+    lanes = (guard issued *>) <$> entries
 
-    rdAddr0 = (.rdAddr) =<< decoded0
-    rdAddr1 = (.rdAddr) =<< decoded1
+    -- What each lane takes, the lanes before it having taken theirs.
+    offsets :: (Num a) => (Maybe Decoded -> Bool) -> a -> Vec DispatchWidth a
+    offsets p start = init (scanl (\a e -> if p e then a + 1 else a) start entries)
+    freePds = (freeList !!) <$> offsets writing specHead
+    robAddrs = offsets (const True) nextRobAddr
+    sqAddrs = offsets storing nextSqAddr
+    lqAddrs = offsets loading nextLqAddr
 
-    freePd0 = freeList !! specHead
-    freePd1 = freeList !! (specHead + if isJust rdAddr0 then 1 else 0)
+    issue = imap renamedLane lanes
+    renamedLane i = fmap $ \Decoded {..} ->
+      Renamed
+        { pdAddr = freePds !! i <$ rdAddr
+        , robAddr = robAddrs !! i
+        , sqAddr = sqAddrs !! i
+        , lqAddr = lqAddrs !! i
+        , ps1Addr = specRmt !! rs1Addr
+        , ps2Addr = specRmt !! rs2Addr
+        , ..
+        }
 
-    pdAddr0 = freePd0 <$ rdAddr0
-    pdAddr1 = freePd1 <$ rdAddr1
-
-    robAddr0 = nextRobAddr
-    robAddr1 = nextRobAddr + 1
-
-    sqAddr0 = nextSqAddr
-    sqAddr1 = nextSqAddr + bool 0 1 (storing decoded0)
-
-    lqAddr0 = nextLqAddr
-    lqAddr1 = nextLqAddr + bool 0 1 (loading decoded0)
-
-    robStatic rd pd Decoded {..} =
+    allocates = imap (\i -> fmap ((robAddrs !! i,) . robStatic (freePds !! i))) lanes
+    robStatic pd Decoded {..} =
       RobStatic
         { pc
-        , mapping = (\r -> Mapping {rdAddr = r, pdAddr = pd}) <$> rd
+        , mapping = (\r -> Mapping {rdAddr = r, pdAddr = pd}) <$> rdAddr
         , systemOp = ctrl.systemOp
         , opClass = opClassOf ctrl
         , instBits
         }
 
-    issue = (renamedLane pdAddr0 robAddr0 sqAddr0 lqAddr0 <$> lane0) :> (renamedLane pdAddr1 robAddr1 sqAddr1 lqAddr1 <$> lane1) :> Nil
-    renamedLane pdAddr robAddr sqAddr lqAddr Decoded {..} = Renamed {..}
-      where
-        ps1Addr = specRmt !! rs1Addr
-        ps2Addr = specRmt !! rs2Addr
+    sqAllocates = count storing lanes
+    lqAllocates = count loading lanes
 
-    allocates = ((robAddr0,) . robStatic rdAddr0 freePd0 <$> lane0) :> ((robAddr1,) . robStatic rdAddr1 freePd1 <$> lane1) :> Nil
-
-    taken = (lane0 *> ((,freePd0) <$> rdAddr0)) :> (lane1 *> ((,freePd1) <$> rdAddr1)) :> Nil
-    takenCnt = sum $ bool 0 1 . isJust <$> taken
-    specHead' = specHead + takenCnt
+    taken = zipWith (\lane pd -> (,pd) <$> ((.rdAddr) =<< lane)) lanes freePds
+    specHead' = specHead + count isJust taken
 
     specUpdate rmt = maybe rmt $ \(rd, pd) -> replace rd pd rmt
     specRmt' = foldl specUpdate specRmt taken

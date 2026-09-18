@@ -1,12 +1,11 @@
 -- | Load unit: reads the data read bus, and takes from the store queue what the older stores have not yet written.
-module Cuintet.Unit.Load (LoadJob (..), LoadState (..), LoadReq (..), LoadResp (..), loadStep) where
+module Cuintet.Unit.Load (LoadJob (..), LoadState (..), LoadReq (..), LoadResp (..), loadStep, holder) where
 
 import Clash.Prelude
-import Cuintet.Completion (Completion (..), regWrite, trapped)
+import Cuintet.Completion (Completion (..), regWrite, robWrite, trapped)
 import Cuintet.Eei (Addr, BusReadReq (..), BusReadResp (..), LoadQueueAddr, LoadShape, MemAccess (..), MemDataBytes, MemReadResp, PRegAddr, RobAddr, StoreLanes (..), StoreQueueAddr, TrapCause, XLen, loadResult)
-import Cuintet.Forwarding (memForward)
 import Cuintet.Unit.Rob (RobDone (..))
-import Cuintet.Unit.StoreQueue (StoreQueueResp)
+import Cuintet.Unit.StoreQueue (StoreQueueResp, memForward)
 import Data.Maybe (fromMaybe)
 
 -- | One load for the unit to carry out.
@@ -77,3 +76,11 @@ overlay (StoreLanes forwarded) w = bitCoerce (zipWith fromMaybe (bitCoerce w) (r
 completion :: LoadJob -> BitVector (MemDataBytes * 8) -> Completion
 completion LoadJob {..} word =
   Completion robAddr pdAddr RobDone {exception = Nothing, mispredicted, value = loadResult shape word, mem = Just (LoadAccess addr)}
+
+-- | The entry the unit holds, for the trace.
+holder :: LoadState -> Maybe RobAddr
+holder = \case
+  WaitReady job -> Just job.robAddr
+  WaitValid job _ -> Just job.robAddr
+  Waiting c -> Just (fst (robWrite c))
+  Idle -> Nothing

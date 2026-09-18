@@ -3,10 +3,9 @@ module Cuintet.CoreCtrl (
   InstCtrl (..),
   isLoad,
   isStore,
-  isCsrRead,
+  isCsr,
   usesRs1,
   usesRs2,
-  isJalr,
   OpClass (..),
   opClassOf,
   NExecUnits,
@@ -36,8 +35,8 @@ data InstFormat
 data InstCtrl = InstCtrl
   { format :: InstFormat
   -- ^ Instruction format.
-  , rwbEn :: Bool
-  -- ^ Whether to enable to write back.
+  , writesRd :: Bool
+  -- ^ Whether the instruction writes @rd@.
   , isLui :: Bool
   -- ^ Whether to be LUI instruction.
   , aluOp :: Maybe AluOp
@@ -64,9 +63,9 @@ isStore :: InstCtrl -> Bool
 isStore InstCtrl {memOp = Just (Eei.Store _)} = True
 isStore _ = False
 
-isCsrRead :: InstCtrl -> Bool
-isCsrRead InstCtrl {systemOp = Just (SysCsr _)} = True
-isCsrRead _ = False
+isCsr :: InstCtrl -> Bool
+isCsr InstCtrl {systemOp = Just (SysCsr _)} = True
+isCsr _ = False
 
 isJalr :: InstCtrl -> Bool
 isJalr InstCtrl {isJump, format} = isJump && format == IType

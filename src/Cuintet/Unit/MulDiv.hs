@@ -1,7 +1,7 @@
-module Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState (..), MulDivJob (..), mulDivStep) where
+module Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState (..), MulDivJob (..), mulDivStep, holder) where
 
 import Clash.Prelude
-import Cuintet.Completion (Completion (..), regWrite, trapped)
+import Cuintet.Completion (Completion (..), regWrite, robWrite, trapped)
 import Cuintet.Eei (DivOp (..), MulDivOp (..), MulOp (..), PRegAddr, RobAddr, Sign (..), TrapCause, XLen)
 import Cuintet.Unit.MulDiv.Div (DivOperands (..), DivResult (..), DivState, divInit, divResult, divStep)
 import Cuintet.Unit.MulDiv.Mul (MulOperands (..), MulResult (..), MulState, mulInit, mulResult, mulStep)
@@ -43,55 +43,70 @@ completion MulDivJob {robAddr, pdAddr, mispredicted} value =
   Completion robAddr pdAddr RobDone {exception = Nothing, mispredicted, value, mem = Nothing}
 
 mulDivStep :: MulDivState -> MulDivReq -> (MulDivState, MulDivResp)
-mulDivStep _ MulDivReq {squash = True} = (Idle, MulDivResp {busy = False, done = Nothing, bypass = Nothing})
-mulDivStep Idle MulDivReq {job} =
-  (maybe Idle start job, MulDivResp {busy = False, done = Nothing, bypass = Nothing})
+mulDivStep state MulDivReq {..} = (state', MulDivResp {busy, done, bypass = regWrite =<< done})
   where
+    (state', done)
+      | squash = (Idle, Nothing)
+      | otherwise = case state of
+          Idle -> (maybe Idle start job, Nothing)
+          Busy j phase -> case advance j phase of
+            Left phase' -> (Busy j phase', Nothing)
+            Right value -> settle (completion j value)
+          Waiting c -> settle c
+
     start j = maybe (Busy j Loaded) (Waiting . trapped j.robAddr) j.exception
-mulDivStep (Waiting c) MulDivReq {granted} =
-  (if granted then Idle else Waiting c, MulDivResp {busy = True, done = Just c, bypass = regWrite c})
-mulDivStep (Busy job phase) MulDivReq {granted} = (state', MulDivResp {busy = True, done, bypass})
-  where
-    done = completion job <$> result
-    bypass = (,) <$> job.pdAddr <*> result
 
-    state' = case result of
-      Just v
-        | granted -> Idle
-        | otherwise -> Waiting (completion job v)
-      Nothing -> Busy job stepped
+    settle c = (if granted then Idle else Waiting c, Just c)
 
-    (result, stepped) = case job.mulDivOp of
-      Multiply op -> (finish <$> (mulResult =<< running), Multiplying next)
-        where
-          running = case phase of
-            Multiplying st -> Just st
-            _ -> Nothing
-          (signs, pick) = case op of
-            MulLow -> ((Signed, Signed), snd)
-            MulHighHom sign -> ((sign, sign), fst)
-            MulHighHetero -> ((Signed, Unsigned), fst)
-          ops = mulOperands signs job
-          next = maybe (mulInit ops) (mulStep ops) running
-          finish mres = sextWord job.isOp32 $ pick (bitCoerce mres.product)
-      Division op -> (finish <$> (divResult =<< running), Dividing next)
-        where
-          running = case phase of
-            Dividing st -> Just st
-            _ -> Nothing
-          (sign, pick) = case op of
-            Div s -> (s, fst)
-            Rem s -> (s, snd)
-          (dividend, divisor) = magnitudes sign job
-          ops = DivOperands {dividend = dividend.value, divisor = divisor.value}
-          next = maybe (divInit ops) (divStep ops) running
-          finish DivResult {quotient = q, remainder = r} = sextWord job.isOp32 . pack $ pick (quotient, remainder)
-            where
-              quotient
-                | divisor.value == 0 = maxBound
-                | otherwise = applyWhen (dividend.negative /= divisor.negative) negate q
-              remainder = applyWhen dividend.negative negate r
+    busy =
+      not squash && case state of
+        Idle -> False
+        _ -> True
 {-# OPAQUE mulDivStep #-}
+
+-- | The result, once the phase holds it; the next phase until then.
+advance :: MulDivJob -> Phase -> Either Phase (BitVector XLen)
+advance job phase = case job.mulDivOp of
+  Multiply op -> advanceMul op job $ case phase of
+    Multiplying st -> Just st
+    _ -> Nothing
+  Division op -> advanceDiv op job $ case phase of
+    Dividing st -> Just st
+    _ -> Nothing
+
+advanceMul :: MulOp -> MulDivJob -> Maybe MulState -> Either Phase (BitVector XLen)
+advanceMul op job running = maybe (Left (Multiplying next)) (Right . finish) (mulResult =<< running)
+  where
+    (signs, pick) = case op of
+      MulLow -> ((Signed, Signed), snd)
+      MulHighHom sign -> ((sign, sign), fst)
+      MulHighHetero -> ((Signed, Unsigned), fst)
+    ops = mulOperands signs job
+    next = maybe (mulInit ops) (mulStep ops) running
+    finish mres = sextWord job.isOp32 $ pick (bitCoerce mres.product)
+
+advanceDiv :: DivOp -> MulDivJob -> Maybe DivState -> Either Phase (BitVector XLen)
+advanceDiv op job running = maybe (Left (Dividing next)) (Right . finish) (divResult =<< running)
+  where
+    (sign, pick) = case op of
+      Div s -> (s, fst)
+      Rem s -> (s, snd)
+    (dividend, divisor) = magnitudes sign job
+    ops = DivOperands {dividend = dividend.value, divisor = divisor.value}
+    next = maybe (divInit ops) (divStep ops) running
+    finish DivResult {quotient = q, remainder = r} = sextWord job.isOp32 . pack $ pick (quotient, remainder)
+      where
+        quotient
+          | divisor.value == 0 = maxBound
+          | otherwise = applyWhen (dividend.negative /= divisor.negative) negate q
+        remainder = applyWhen dividend.negative negate r
+
+-- | The entry the unit holds, for the trace.
+holder :: MulDivState -> Maybe RobAddr
+holder = \case
+  Busy job _ -> Just job.robAddr
+  Waiting c -> Just (fst (robWrite c))
+  Idle -> Nothing
 
 mulOperands :: (Sign, Sign) -> MulDivJob -> MulOperands
 mulOperands (sign1, sign2) MulDivJob {op1, op2} =

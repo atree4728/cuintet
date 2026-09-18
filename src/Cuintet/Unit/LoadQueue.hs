@@ -2,8 +2,9 @@
 module Cuintet.Unit.LoadQueue (LoadQueueEntry (..), LoadQueueReq (..), LoadQueueResp (..), loadQueue) where
 
 import Clash.Prelude
-import Cuintet.Eei (Addr, CommitWidth, DispatchWidth, LoadQueueAddr, MemDataBytes, NLoadQueue, StoreLanes (..))
-import Cuintet.Unit.StoreQueue (StoreQueueEntry (..), overlaps)
+import Cuintet.Eei (Addr, BusWriteReq (..), CommitWidth, DispatchWidth, LoadQueueAddr, MemDataBytes, MemWriteReq, NLoadQueue, StoreLanes (..))
+import Cuintet.Unit.StoreQueue (overlaps)
+import Cuintet.Util (isOlder)
 import Data.Maybe (isJust)
 
 data LoadQueueEntry = LoadQueueEntry {addr :: Addr, mask :: Vec MemDataBytes Bool}
@@ -12,9 +13,9 @@ data LoadQueueEntry = LoadQueueEntry {addr :: Addr, mask :: Vec MemDataBytes Boo
 data LoadQueueReq = LoadQueueReq
   { allocates :: Index (DispatchWidth + 1)
   , record :: Maybe (LoadQueueAddr, LoadQueueEntry)
-  , store :: Maybe (LoadQueueAddr, StoreQueueEntry)
+  , store :: Maybe (LoadQueueAddr, MemWriteReq)
   -- ^ An executing store, with the first load younger than it.
-  , pops :: Index (CommitWidth + 1)
+  , pop :: Index (CommitWidth + 1)
   , squash :: Bool
   }
 
@@ -41,15 +42,15 @@ loadQueue = mealy (\s req -> (step s req, resp s)) LoadQueueState {entries = rep
 step :: LoadQueueState -> LoadQueueReq -> LoadQueueState
 step LoadQueueState {..} LoadQueueReq {..} = LoadQueueState {entries = entries', orderFail = orderFail', hd = hd', tl = tl'}
   where
-    hd' = hd + numConvert pops
+    hd' = hd + numConvert pop
     tl'
       | squash = hd'
       | otherwise = tl + numConvert allocates
     allocated i = not squash && i - tl < numConvert allocates
 
     violates i entry = case (store, entry) of
-      (Just (first, StoreQueueEntry {addr, lanes = StoreLanes bytes}), Just LoadQueueEntry {addr = loadAddr, mask}) ->
-        i - first < tl - first && overlaps loadAddr mask addr (isJust <$> bytes)
+      (Just (first, BusWriteReq {addr, wdata = StoreLanes bytes}), Just LoadQueueEntry {addr = loadAddr, mask}) ->
+        isOlder i tl first && overlaps loadAddr mask addr (isJust <$> bytes)
       _ -> False
 
     recorded = maybe entries (\(a, e) -> replace a (Just e) entries) record

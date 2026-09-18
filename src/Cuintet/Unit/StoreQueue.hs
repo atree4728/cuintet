@@ -1,27 +1,22 @@
-module Cuintet.Unit.StoreQueue (StoreQueueEntry (..), StoreQueueReq (..), StoreQueueResp (..), storeQueue, overlaps) where
+module Cuintet.Unit.StoreQueue (StoreQueueReq (..), StoreQueueResp (..), storeQueue, overlaps, memForward) where
 
 import Clash.Prelude
 import Control.Monad (guard)
 import Cuintet.Eei (Addr, BusWriteReq (..), BusWriteResp (..), CommitWidth, DispatchWidth, MemDataBytes, MemWriteReq, NStoreQueue, StoreLanes (..), StoreQueueAddr)
+import Cuintet.Util (isOlder)
 import Data.Function (applyWhen)
 import Data.Maybe (isJust)
 
-data StoreQueueEntry = StoreQueueEntry
-  { addr :: Addr
-  , lanes :: StoreLanes MemDataBytes
-  }
-  deriving (Generic, NFDataX)
-
 data StoreQueueReq = StoreQueueReq
   { allocates :: Index (DispatchWidth + 1)
-  , write :: Maybe (StoreQueueAddr, StoreQueueEntry)
+  , write :: Maybe (StoreQueueAddr, MemWriteReq)
   , commits :: Index (CommitWidth + 1)
   , dWriteResp :: BusWriteResp
   , squash :: Bool
   }
 
 data StoreQueueResp = StoreQueueResp
-  { entries :: Vec NStoreQueue (Maybe StoreQueueEntry)
+  { entries :: Vec NStoreQueue (Maybe MemWriteReq)
   -- ^ 'Nothing' until the store executes.
   , hd :: StoreQueueAddr
   , cm :: StoreQueueAddr
@@ -32,7 +27,7 @@ data StoreQueueResp = StoreQueueResp
   }
 
 data StoreQueueState = StoreQueueState
-  { entries :: Vec NStoreQueue (Maybe StoreQueueEntry)
+  { entries :: Vec NStoreQueue (Maybe MemWriteReq)
   , hd :: StoreQueueAddr
   , cm :: StoreQueueAddr
   , tl :: StoreQueueAddr
@@ -63,13 +58,25 @@ step s@StoreQueueState {..} StoreQueueReq {..} = StoreQueueState {entries = entr
 
 -- | The committed store at the head, as the data bus takes it.
 storeReq :: StoreQueueState -> Maybe MemWriteReq
-storeReq StoreQueueState {..} = do
-  guard (hd /= cm)
-  StoreQueueEntry {..} <- entries !! hd
-  pure BusWriteReq {addr, wdata = lanes}
+storeReq StoreQueueState {..} = guard (hd /= cm) *> entries !! hd
 
 -- | Whether two accesses share a byte: the same bus word, and a lane both cover.
 overlaps :: Addr -> Vec MemDataBytes Bool -> Addr -> Vec MemDataBytes Bool -> Bool
-overlaps a m b n = word a == word b && or (zipWith (&&) m n)
+overlaps a m b n = wordAddr a == wordAddr b && or (zipWith (&&) m n)
+
+-- | Store-to-load forwarding
+memForward :: StoreQueueResp -> StoreQueueAddr -> Addr -> StoreLanes MemDataBytes
+memForward StoreQueueResp {entries, hd} sqAddr addr = StoreLanes (byte <$> indicesI)
   where
-    word x = x `shiftR` natToNum @(CLog 2 MemDataBytes)
+    stores = imap hits entries
+    hits i e = do
+      BusWriteReq {addr = storeAddr, wdata = StoreLanes bytes} <- e
+      guard (isOlder (numConvert i) sqAddr hd && wordAddr storeAddr == wordAddr addr)
+      pure bytes
+
+    byte k = youngest ((>>= (!! k)) <$> below) <|> youngest ((>>= (!! k)) <$> stores)
+    below = imap (\i s -> guard (numConvert i < sqAddr) *> s) stores
+    youngest = fold (flip (<|>))
+
+wordAddr :: Addr -> Addr
+wordAddr x = x `shiftR` natToNum @(CLog 2 MemDataBytes)

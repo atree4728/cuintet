@@ -1,5 +1,4 @@
 module Cuintet.Unit.Csr (
-  CsrAddr (..),
   CsrReq (..),
   TrapSpec (..),
   CsrFile (led),
