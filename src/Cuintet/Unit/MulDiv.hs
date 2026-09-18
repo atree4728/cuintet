@@ -1,8 +1,8 @@
 module Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState (..), MulDivJob (..), mulDivStep) where
 
 import Clash.Prelude
-import Cuintet.Completion (Completion (..), regWrite)
-import Cuintet.Eei (DivOp (..), MulDivOp (..), MulOp (..), PRegAddr, RobAddr, Sign (..), XLen)
+import Cuintet.Completion (Completion (..), regWrite, trapped)
+import Cuintet.Eei (DivOp (..), MulDivOp (..), MulOp (..), PRegAddr, RobAddr, Sign (..), TrapCause, XLen)
 import Cuintet.Unit.MulDiv.Div (DivOperands (..), DivResult (..), DivState, divInit, divResult, divStep)
 import Cuintet.Unit.MulDiv.Mul (MulOperands (..), MulResult (..), MulState, mulInit, mulResult, mulStep)
 import Cuintet.Unit.Rob (RobDone (..))
@@ -16,6 +16,7 @@ data MulDivJob = MulDivJob
   , pdAddr :: Maybe PRegAddr
   , robAddr :: RobAddr
   , mispredicted :: Bool
+  , exception :: Maybe (TrapCause, BitVector XLen)
   }
   deriving (Generic, NFDataX)
 
@@ -44,7 +45,9 @@ completion MulDivJob {robAddr, pdAddr, mispredicted} value =
 mulDivStep :: MulDivState -> MulDivReq -> (MulDivState, MulDivResp)
 mulDivStep _ MulDivReq {squash = True} = (Idle, MulDivResp {busy = False, done = Nothing, bypass = Nothing})
 mulDivStep Idle MulDivReq {job} =
-  (maybe Idle (`Busy` Loaded) job, MulDivResp {busy = False, done = Nothing, bypass = Nothing})
+  (maybe Idle start job, MulDivResp {busy = False, done = Nothing, bypass = Nothing})
+  where
+    start j = maybe (Busy j Loaded) (Waiting . trapped j.robAddr) j.exception
 mulDivStep (Waiting c) MulDivReq {granted} =
   (if granted then Idle else Waiting c, MulDivResp {busy = True, done = Just c, bypass = regWrite c})
 mulDivStep (Busy job phase) MulDivReq {granted} = (state', MulDivResp {busy = True, done, bypass})

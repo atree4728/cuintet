@@ -1,35 +1,35 @@
--- | EX: the entry of every unit. Operand selection, the ALU and the branch condition happen here, and the multiply\/divide and load\/store jobs leave from here.
+-- | EX: one port per kind of instruction. The ALU ports compute and branch; the others hand their instruction to a unit or the store queue.
 module Cuintet.Stage.Execute (execute, ExecuteIn (..), ExecuteOut (..)) where
 
 import Clash.Prelude
+import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
-import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), execUnit, isCsrRead, opClassOf)
-import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), BusReq (..), IssueWidth, LoadQueueAddr, LoadShape (..), MemOp (..), RobAddr, StoreQueueAddr, SystemOp (..), XLen, laneMask, laneOffset, misalignedCause, storeLanes, pattern INSTRUCTION_ADDRESS_MISALIGNED)
+import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), isCsrRead)
+import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), BusReq (..), IssueWidth, LoadQueueAddr, NAluPorts, LoadShape (..), MemOp (..), RobAddr, StoreQueueAddr, SystemOp (..), TrapCause, XLen, laneMask, laneOffset, misalignedCause, storeLanes, pattern INSTRUCTION_ADDRESS_MISALIGNED)
 import Cuintet.Pipeline (Executed (..), Ready (..))
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
 import Cuintet.Unit.Load (LoadJob (..))
 import Cuintet.Unit.LoadQueue (LoadQueueEntry (..))
 import Cuintet.Unit.MulDiv (MulDivJob (..))
 import Cuintet.Unit.StoreQueue (StoreQueueEntry (..))
-import Cuintet.Util (orNothing, (<<$>>))
+import Cuintet.Util (orNothing)
 import Data.Maybe (isJust, isNothing)
 
 data ExecuteIn = ExecuteIn
   { entries :: Vec IssueWidth (Maybe Ready)
   , robHead :: RobAddr
   , pendingRedirect :: Maybe RobAddr
-  , wready :: Bool
   }
 
 data ExecuteOut = ExecuteOut
-  { completed :: Vec IssueWidth (Maybe Executed)
+  { aluCompleted :: Vec NAluPorts (Maybe Executed)
+  , storeCompleted :: Maybe Executed
   , mulDivJob :: Maybe MulDivJob
   , loadJob :: Maybe LoadJob
   , storeWrite :: Maybe (StoreQueueAddr, StoreQueueEntry)
   , loadRecord :: Maybe (LoadQueueAddr, LoadQueueEntry)
   , storeSearch :: Maybe (LoadQueueAddr, StoreQueueEntry)
-  , issued :: Bool
-  , wbData :: Vec IssueWidth (BitVector XLen)
+  , wbData :: Vec NAluPorts (BitVector XLen)
   , redirect :: Maybe (RobAddr, Addr)
   , btbWrites :: Vec IssueWidth (Maybe BtbWrite)
   }
@@ -37,85 +37,109 @@ data ExecuteOut = ExecuteOut
 execute :: ExecuteIn -> ExecuteOut
 execute ExecuteIn {..} = ExecuteOut {..}
   where
-    issued = any isJust entries && wready
+    (aluEntries, rest) = splitAtI entries
+    (mulDivEntry, loadEntry, storeEntry) = vecToTuple rest
 
-    lanes = executeLane <<$>> entries
+    (aluCompleted, aluRedirects, aluBtbWrites) = unzip3 (maybe (Nothing, Nothing, Nothing) ((\(e, r, w) -> (Just e, r, w)) . executeAlu) <$> aluEntries)
+    wbData = maybe (deepErrorX "Execute.wbData") (.wbData) <$> aluCompleted
 
-    completed = zipWith keep entries lanes
-      where
-        keep entry lane = do
-          guard issued
-          Ready {ctrl} <- entry
-          Lane {executed} <- lane
-          guard (isNothing (execUnit (opClassOf ctrl)) || isJust executed.exception)
-          pure executed
+    mulDivException = mulDivEntry >>= (.exception)
+    loadException = loadEntry >>= memException
+    storeException = storeEntry >>= memException
+    (mulDivRedirect, mulDivBtbWrite) = resolveSequential mulDivException mulDivEntry
+    (loadRedirect, loadBtbWrite) = resolveSequential loadException loadEntry
+    (storeRedirect, storeBtbWrite) = resolveSequential storeException storeEntry
 
-    wbData = maybe (deepErrorX "Execute.wbData") (\lane -> lane.executed.wbData) <$> lanes
-
-    port0 = do
-      guard issued
-      ready <- head entries
-      lane <- head lanes
-      guard (isNothing lane.executed.exception)
-      pure (ready, lane)
-
+    -- A unit takes its instruction even when it traps, and completes it on the port it shares.
     mulDivJob = do
-      (Ready {ctrl, rs1Data, rs2Data, pdAddr, robAddr}, Lane {executed}) <- port0
+      Ready {ctrl, rs1Data, rs2Data, pdAddr, robAddr} <- mulDivEntry
       mulDivOp <- ctrl.mulDivOp
-      pure MulDivJob {mulDivOp, isOp32 = ctrl.isOp32, op1 = rs1Data, op2 = rs2Data, pdAddr, robAddr, mispredicted = executed.mispredicted}
+      pure MulDivJob {mulDivOp, isOp32 = ctrl.isOp32, op1 = rs1Data, op2 = rs2Data, pdAddr, robAddr, mispredicted = isJust mulDivRedirect, exception = mulDivException}
 
     loadJob = do
-      (Ready {ctrl, sqAddr, lqAddr, pdAddr, robAddr}, Lane {executed, aluResult}) <- port0
+      r@Ready {ctrl, sqAddr, lqAddr, pdAddr, robAddr} <- loadEntry
       Load width sign <- ctrl.memOp
-      let addr = unpack aluResult
-      pure LoadJob {addr, shape = LoadShape {width, sign, offset = laneOffset addr}, sqAddr, lqAddr, pdAddr, robAddr, mispredicted = executed.mispredicted}
+      let addr = memAddr r
+      pure LoadJob {addr, shape = LoadShape {width, sign, offset = laneOffset addr}, sqAddr, lqAddr, pdAddr, robAddr, mispredicted = isJust loadRedirect, exception = loadException}
+
+    storeCompleted = do
+      r@Ready {ctrl, rs2Data, robAddr} <- storeEntry
+      Store width <- ctrl.memOp
+      let addr = memAddr r
+      pure
+        Executed
+          { ctrl
+          , exception = storeException
+          , pdAddr = Nothing
+          , robAddr
+          , mispredicted = isJust storeRedirect
+          , wbData = pack addr
+          , mem = orNothing (isNothing storeException) BusReq {addr, wdata = Just (storeLanes width (laneOffset addr) rs2Data)}
+          }
 
     storeWrite = do
-      (Ready {sqAddr}, Lane {executed}) <- port0
-      BusReq {addr, wdata = Just bytes} <- executed.mem
+      Ready {sqAddr} <- storeEntry
+      Executed {mem} <- storeCompleted
+      BusReq {addr, wdata = Just bytes} <- mem
       pure (sqAddr, StoreQueueEntry {addr, lanes = bytes})
 
     loadRecord = do
-      LoadJob {addr, shape = LoadShape {width, offset}, lqAddr} <- loadJob
+      LoadJob {addr, shape = LoadShape {width, offset}, lqAddr, exception} <- loadJob
+      guard (isNothing exception)
       pure (lqAddr, LoadQueueEntry {addr, mask = laneMask width offset})
 
     storeSearch = do
-      (Ready {lqAddr}, _) <- port0
+      Ready {lqAddr} <- storeEntry
       (_, entry) <- storeWrite
       pure (lqAddr, entry)
 
+    redirects = aluRedirects ++ mulDivRedirect :> loadRedirect :> storeRedirect :> Nil
+    btbWrites = aluBtbWrites ++ mulDivBtbWrite :> loadBtbWrite :> storeBtbWrite :> Nil
+
     -- A younger redirect than a pending one comes from the wrong path.
     redirect = do
-      guard issued
-      (age, r) <- fold pickOlder (zipWith mk entries lanes)
+      (age, r) <- fold pickOlder (zipWith mk entries redirects)
       guard (maybe True (\p -> age < p - robHead) pendingRedirect)
       pure r
       where
-        mk entry lane = do
+        mk entry target = do
           Ready {robAddr} <- entry
-          nextPc <- lane >>= (.redirect)
+          nextPc <- target
           pure (robAddr - robHead, (robAddr, nextPc))
         pickOlder l r = case (l, r) of
           (Just (x, _), Just (y, _)) -> if y < x then r else l
           (Nothing, _) -> r
           _ -> l
-
-    btbWrites = (>>= \lane -> guard issued >> lane.btbWrite) <$> lanes
 {-# OPAQUE execute #-}
 
--- | What one port produced: the entry WB may take, plus what only EX itself needs.
-data Lane = Lane
-  { executed :: Executed
-  , aluResult :: BitVector XLen
-  -- ^ The load\/store address, which no later stage recomputes.
-  , redirect :: Maybe Addr
-  , btbWrite :: Maybe BtbWrite
-  }
-
-executeLane :: Ready -> Lane
-executeLane Ready {..} = Lane {executed, aluResult, redirect, btbWrite}
+-- | A port without the ALU never branches, but the BTB can still predict its instruction taken by an aliased tag.
+resolveSequential :: Maybe (TrapCause, BitVector XLen) -> Maybe Ready -> (Maybe Addr, Maybe BtbWrite)
+resolveSequential exception entry = (redirect, btbWrite)
   where
-    executed = Executed {exception = exception', pdAddr = guard (isNothing exception') *> pdAddr, mispredicted = isJust redirect, ..}
+    redirect = do
+      Ready {pc, prediction} <- entry
+      guard (isNothing exception)
+      orNothing (pc + 4 /= predicted pc prediction) (pc + 4)
+    btbWrite = do
+      Ready {pc, prediction} <- entry
+      guard (isNothing exception)
+      train pc prediction Nothing
+
+-- | The address of a load or store: the adder alone.
+memAddr :: Ready -> Addr
+memAddr Ready {rs1Data, imm} = unpack (rs1Data + imm)
+
+memException :: Ready -> Maybe (TrapCause, BitVector XLen)
+memException r@Ready {ctrl, exception} = exception <|> do
+  memOp <- ctrl.memOp
+  cause <- misalignedCause memOp (memAddr r)
+  pure (cause, pack (memAddr r))
+
+-- | An ALU port: the entry WB takes, the redirect and the BTB training.
+executeAlu :: Ready -> (Executed, Maybe Addr, Maybe BtbWrite)
+executeAlu Ready {..} = (executed, redirect, btbWrite)
+  where
+    executed = Executed {exception = exception', pdAddr = guard (isNothing exception') *> pdAddr, mispredicted = isJust redirect, mem = Nothing, ..}
 
     (op1, op2) = operands ctrl imm rs1Data rs2Data pc
     aluResult = alu ctrl op1 op2
@@ -137,22 +161,11 @@ executeLane Ready {..} = Lane {executed, aluResult, redirect, btbWrite}
         ((truncateB (pack nextPc) :: BitVector 2) /= 0)
         (INSTRUCTION_ADDRESS_MISALIGNED, pack nextPc)
 
-    accessException = do
-      memOp <- ctrl.memOp
-      cause <- misalignedCause memOp (unpack aluResult)
-      pure (cause, aluResult)
-
-    exception' = exception <|> targetException <|> accessException
+    exception' = exception <|> targetException
 
     redirect = orNothing (not (isSerializing executed) && nextPc /= predicted pc prediction) nextPc
 
     btbWrite = guard (isNothing exception') >> train pc prediction (orNothing (nextPc /= pc + 4) nextPc)
-
-    mem = do
-      guard (isNothing exception')
-      Store width <- ctrl.memOp
-      let addr = unpack aluResult
-      pure BusReq {addr, wdata = Just (storeLanes width (laneOffset addr) rs2Data)}
 
 isSerializing :: Executed -> Bool
 isSerializing executed = isJust executed.exception || executed.ctrl.systemOp == Just SysMret

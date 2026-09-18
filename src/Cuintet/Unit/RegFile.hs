@@ -1,11 +1,11 @@
 module Cuintet.Unit.RegFile (ReadPorts, RegReq (..), RegResp (..), regFile) where
 
 import Clash.Prelude
-import Cuintet.Eei (DispatchWidth, PRegAddr, WriteBackWidth, XLen)
+import Cuintet.Eei (IssueWidth, PRegAddr, WriteBackWidth, XLen)
 import Cuintet.Forwarding (bypass)
 import Cuintet.Unit.MultiRam (multiRam)
 
-type ReadPorts = 2 * DispatchWidth
+type ReadPorts = 2 * IssueWidth
 
 data RegReq = RegReq
   { rsAddrs :: Vec ReadPorts PRegAddr

@@ -18,7 +18,7 @@ module Cuintet.CoreCtrl (
 ) where
 
 import Clash.Prelude
-import Cuintet.Eei (AluOp, BranchOp, IssueWidth, MemOp, MulDivOp, SystemOp (..))
+import Cuintet.Eei (AluOp, BranchOp, IssueWidth, MemOp, MulDivOp, NAluPorts, SystemOp (..))
 import Cuintet.Eei qualified as Eei (MemOp (Load, Store))
 import Data.Maybe (isJust)
 
@@ -123,10 +123,10 @@ wakeup Load = AtComplete
 wakeup _ = AtIssue
 
 fitsPort :: Index IssueWidth -> OpClass -> Bool
-fitsPort port opClass
-  | port == 0 = True
-  | otherwise = case opClass of
-      Alu -> True
-      Branch -> True
-      Jal -> True
-      _ -> False
+fitsPort port = \case
+  MulDiv -> port == aluPorts
+  Load -> port == aluPorts + 1
+  Store -> port == aluPorts + 2
+  _ -> port < aluPorts
+  where
+    aluPorts = natToNum @NAluPorts

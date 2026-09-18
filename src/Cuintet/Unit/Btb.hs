@@ -2,7 +2,7 @@ module Cuintet.Unit.Btb (BtbReq (..), BtbResp (..), BtbWrite (..), Prediction (.
 
 import Clash.Prelude
 import Control.Monad (guard)
-import Cuintet.Eei (Addr, DispatchWidth, FetchWidth)
+import Cuintet.Eei (Addr, FetchWidth, IssueWidth)
 import Cuintet.Util (orNothing)
 import Data.Maybe (fromMaybe, isJust)
 
@@ -55,7 +55,7 @@ data BtbWrite = BtbWrite
 data BtbReq = BtbReq
   { lookupAddr :: Addr
   , prefetchAddr :: Addr
-  , writes :: Vec DispatchWidth (Maybe BtbWrite)
+  , writes :: Vec IssueWidth (Maybe BtbWrite)
   }
   deriving (Generic, NFDataX)
 

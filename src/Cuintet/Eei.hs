@@ -64,6 +64,7 @@ module Cuintet.Eei (
   misalignedCause,
   FetchWidth,
   DispatchWidth,
+  NAluPorts,
   IssueWidth,
   WriteBackWidth,
   CommitWidth,
@@ -511,8 +512,10 @@ misalignedCause memOp addr = orNothing (not $ aligned width $ laneOffset addr) c
 
 type DispatchWidth = 2
 
-type IssueWidth = 2
+type NAluPorts = 2
 
-type WriteBackWidth = 2
+type IssueWidth = NAluPorts + 3 -- ALUs, MulDiv, Load, Store
+
+type WriteBackWidth = NAluPorts + 1
 
 type CommitWidth = 2

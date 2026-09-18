@@ -8,7 +8,7 @@ import Cuintet.Unit.Btb (Prediction)
 import Cuintet.Unit.MultiRam (multiRam)
 import Cuintet.Util (orNothing, (<<$>>))
 
--- | AtIssue from both ports, AtComplete from both units, AtCommit.
+-- | AtIssue from both ALU ports, AtComplete from both units, AtCommit.
 type NBroadcast = 5
 
 data IqTag = IqTag
@@ -73,7 +73,7 @@ step IssueQueueState {..} IssueQueueReq {..} = (IssueQueueState {tags = tags', r
     candidates port = (>>= \e -> orNothing (candidate port e) e) <$> entries
     pick0 = oldest robHead (candidates 0)
     pick1 = oldest robHead (maybe id (without . fst) pick0 (candidates 1))
-    selected = pick0 :> pick1 :> Nil
+    selected = pick0 :> pick1 :> map (oldest robHead . candidates) (2 :> 3 :> 4 :> Nil)
 
     leaving = zipWith (\ok e -> if ok then fst <$> e else Nothing) accepted selected
 

@@ -3,9 +3,9 @@ module Cuintet.Core (CoreIn (..), CoreOut (..), CoreTrace (..), core) where
 
 import Clash.Prelude
 import Control.Monad (guard)
-import Cuintet.Completion (regWrite, robWrite)
+import Cuintet.Completion (robWrite)
 import Cuintet.CoreCtrl (ExecUnit (..), InstCtrl, NExecUnits, Wakeup (..), execUnit, isLoad, isStore, opClassOf, wakeup)
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), CommitWidth, DispatchWidth, FetchWidth, IssueWidth, MemReq, MemResp, PRegAddr, RobAddr, WriteBackWidth, XLen)
+import Cuintet.Eei (Addr, BusReq (..), BusResp (..), CommitWidth, DispatchWidth, FetchWidth, IssueWidth, MemReq, MemResp, NAluPorts, PRegAddr, RobAddr, WriteBackWidth, XLen)
 import Cuintet.Pipeline (Decoded (..), Executed (..), FetchBufBits, Fetched (..), Ready (..), Renamed (..), Retire (..))
 import Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit)
 import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
@@ -51,6 +51,9 @@ data CoreOut = CoreOut
 data CoreState = CoreState
   { fetchState :: FetchState
   , renameState :: RenameState
+  , ready :: Vec IssueWidth (Maybe Ready)
+  , executed :: Vec NAluPorts (Maybe Executed)
+  , storeExecuted :: Maybe Executed
   , mulDivState :: MulDivState
   , loadState :: LoadState
   , csrFile :: CsrFile
@@ -60,7 +63,7 @@ data CoreState = CoreState
   deriving (Generic, NFDataX)
 
 initState :: CoreState
-initState = CoreState {fetchState = initFetchState, renameState = initRenameState, mulDivState = M.Idle, loadState = L.Idle, csrFile = initCsrFile, pendingRedirect = Nothing}
+initState = CoreState {fetchState = initFetchState, renameState = initRenameState, ready = repeat Nothing, executed = repeat Nothing, storeExecuted = Nothing, mulDivState = M.Idle, loadState = L.Idle, csrFile = initCsrFile, pendingRedirect = Nothing}
 
 -- | From the ROB on, the stages are told by which entry each of them holds in the clock.
 data CoreTrace = CoreTrace
@@ -71,8 +74,8 @@ data CoreTrace = CoreTrace
   , rrIssue :: Vec IssueWidth (Maybe RobAddr)
   , exHold :: Vec IssueWidth (Maybe RobAddr)
   , unitHold :: Vec NExecUnits (Maybe RobAddr)
-  , wbHold :: Vec IssueWidth (Maybe RobAddr)
-  , wbComplete :: Vec WriteBackWidth (Maybe RobAddr)
+  , wbHold :: Vec 3 (Maybe RobAddr)
+  , wbComplete :: Vec (WriteBackWidth + 1) (Maybe RobAddr)
   , robHead :: RobAddr
   , robTail :: RobAddr
   , cmRetire :: Vec CommitWidth (Maybe Retire)
@@ -87,8 +90,8 @@ core ::
   Signal dom CoreOut
 core coreIn = coreOut
   where
-    (coreOut, regReq, btbReq, robReq, sqReq, lqReq, fetchedReq, decodedReq, issueReq, readyReq, executedReq) =
-      mealyB coreT initState (coreIn, regResp, btbResp, robResp, sqResp, lqResp, fetchedResp, decodedResp, issueResp, readyResp, executedResp)
+    (coreOut, regReq, btbReq, robReq, sqReq, lqReq, fetchedReq, decodedReq, issueReq) =
+      mealyB coreT initState (coreIn, regResp, btbResp, robResp, sqResp, lqResp, fetchedResp, decodedResp, issueResp)
     btbResp = btb btbReq
     regResp = regFile regReq
     robResp = rob robReq
@@ -97,8 +100,6 @@ core coreIn = coreOut
     fetchedResp = ring (SNat @FetchBufBits) fetchedReq
     decodedResp = fifo decodedReq
     issueResp = issueQueue issueReq
-    readyResp = fifo readyReq
-    executedResp = fifo executedReq
 
 -- | One clock of every stage.
 coreT ::
@@ -112,8 +113,6 @@ coreT ::
   , RingResp FetchBufBits DispatchWidth Fetched
   , FifoResp DispatchWidth Decoded
   , IssueQueueResp
-  , FifoResp IssueWidth Ready
-  , FifoResp IssueWidth Executed
   ) ->
   ( CoreState
   , ( CoreOut
@@ -125,19 +124,17 @@ coreT ::
     , RingReq FetchBufBits FetchWidth DispatchWidth Fetched
     , FifoReq DispatchWidth Decoded
     , IssueQueueReq
-    , FifoReq IssueWidth Ready
-    , FifoReq IssueWidth Executed
     )
   )
-coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, sqResp, lqResp, fetchedResp, decodedResp, issueResp, readyResp, executedResp) =
-  (state', (coreOut, regReq, btbReq, robReq, sqReq, lqReq, fetchedReq, decodedReq, issueReq, readyReq, executedReq))
+coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, sqResp, lqResp, fetchedResp, decodedResp, issueResp) =
+  (state', (coreOut, regReq, btbReq, robReq, sqReq, lqReq, fetchedReq, decodedReq, issueReq))
   where
     (fetchState', ifOut) = fetch fetchState FetchIn {iResp, buf = fetchedResp, redirect, btbResp}
     idOut = decode DecodeIn {entries = fetchedResp.rdata, wready = decodedResp.wready, stall = flush}
     (renameState', rnOut) = rename renameState RenameIn {entries = decodedResp.rdata, committed = cmOut.renamed, nextRobAddr = robResp.tl, robFree = robResp.free, nextSqAddr = sqResp.tl, sqFree = sqResp.free, nextLqAddr = lqResp.tl, flush, drained = robResp.hd == robResp.tl}
-    rrOut = regRead RegReadIn {entries = issueResp.issue, rsData = regResp.rsData, bypasses, wready = readyResp.wready}
-    exOut = execute ExecuteIn {entries = readyResp.rdata, robHead = robResp.hd, pendingRedirect, wready = executedResp.wready}
-    wbOut = writeback WriteBackIn {entries = executedResp.rdata, loadDone = loadResp.done, mulDivDone = mulDivResp.done, csrWrite = cmOut.csrWrite}
+    rrOut = regRead RegReadIn {entries = issueResp.issue, rsData = regResp.rsData, bypasses}
+    exOut = execute ExecuteIn {entries = ready, robHead = robResp.hd, pendingRedirect}
+    wbOut = writeback WriteBackIn {alus = executed, store = storeExecuted, loadDone = loadResp.done, mulDivDone = mulDivResp.done, csrWrite = cmOut.csrWrite}
     (csrFile', cmOut) = commit csrFile CommitIn {entries = robResp.entries, orderFail = lqResp.orderFail}
 
     (mulDivState', mulDivResp) =
@@ -149,30 +146,31 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, sqResp, lqResp, f
     flush = isJust redirect
     pendingRedirect' = guard (not cmOut.squash) *> ((fst <$> exOut.redirect) <|> pendingRedirect)
 
-    wakeups = (atIssue <$> rrOut.issue) ++ (fst <<$>> unitBypasses) ++ (fst <$> cmOut.csrWrite) :> Nil
+    -- AtIssue: RR wakes, then EX and WB bypass until the register file has it; only the ALU ports have such instructions.
+    -- AtComplete: a unit wakes and bypasses while it holds the completion.
+    -- AtCommit: Cm wakes as WB writes.
+    wakeups = (atIssue <$> takeI rrOut.issue) ++ (fst <<$>> unitBypasses) ++ (fst <$> cmOut.csrWrite) :> Nil
     bypasses =
       reverse unitBypasses
-        ++ zipWith (liftA2 (,)) (atIssue <$> executedResp.rdata) ((.wbData) <<$>> executedResp.rdata)
-        ++ zipWith (liftA2 (,)) (atIssue <$> readyResp.rdata) ((<$ guard exOut.issued) <$> exOut.wbData)
+        ++ zipWith (liftA2 (,)) (atIssue <$> executed) ((.wbData) <<$>> executed)
+        ++ zipWith (liftA2 (,)) (atIssue <$> takeI ready) (Just <$> exOut.wbData)
     unitBypasses = mulDivResp.bypass :> loadResp.bypass :> Nil
 
     busy = (mulDivResp.busy || inflightTo MulDivUnit) :> (loadResp.busy || inflightTo LoadUnit) :> Nil
       where
-        inflightTo unit = any (maybe False ((== Just unit) . execUnit . opClassOf . (.ctrl))) readyResp.rdata
+        inflightTo unit = any (maybe False ((== Just unit) . execUnit . opClassOf . (.ctrl))) ready
     rsAddrs = concatMap (maybe (repeat 0) (\Renamed {..} -> ps1Addr :> ps2Addr :> Nil)) issueResp.issue
     idIssue = sum $ bool 0 1 . isJust <$> idOut.issue
 
-    regReq = RegReq {rsAddrs, writes = (regWrite =<<) <$> wbOut.completions}
+    regReq = RegReq {rsAddrs, writes = wbOut.regWrites}
     btbReq = BtbReq {lookupAddr = ifOut.btbLookup, prefetchAddr = ifOut.btbPrefetch, writes = exOut.btbWrites}
     renamedCount p = sum (bool 0 1 . maybe False (p . (.ctrl)) <$> rnOut.issue)
     sqReq = StoreQueueReq {allocates = renamedCount isStore, write = exOut.storeWrite, commits = cmOut.stores, dWriteResp, squash = cmOut.squash}
     lqReq = LoadQueueReq {allocates = renamedCount isLoad, record = exOut.loadRecord, store = exOut.storeSearch, pops = cmOut.loads, squash = cmOut.squash}
-    robReq = RobReq {allocates = rnOut.allocates, completes = (robWrite =<<) <$> wbOut.completions, pop = cmOut.pop, squash = cmOut.squash}
+    robReq = RobReq {allocates = rnOut.allocates, completes = wbOut.robWrites, pop = cmOut.pop, squash = cmOut.squash}
     fetchedReq = RingReq {wdata = ifOut.issue, pop = idIssue, squash = flush}
     decodedReq = FifoReq {wdata = idOut.issue, rready = any isJust rnOut.issue, flush}
     issueReq = IssueQueueReq {dispatch = rnOut.issue, accepted = isJust <$> rrOut.issue, robHead = robResp.hd, busy, wakeup = wakeups, squash = cmOut.squash}
-    readyReq = FifoReq {wdata = rrOut.issue, rready = exOut.issued, flush = cmOut.squash}
-    executedReq = FifoReq {wdata = exOut.completed, rready = wbOut.issued, flush = cmOut.squash}
 
     coreOut = CoreOut {iReq = ifOut.iReq, dReadReq = loadResp.dReadReq, dWriteReq = sqResp.storeReq, retired = cmOut.retired, led = csrFile.led, coreTrace}
     coreTrace =
@@ -182,17 +180,28 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, sqResp, lqResp, f
         , idIssue
         , rnIssue = rnOut.issue
         , rrIssue = (.robAddr) <<$>> rrOut.issue
-        , exHold = (.robAddr) <<$>> readyResp.rdata
+        , exHold = (.robAddr) <<$>> ready
         , unitHold = mulDivHolder mulDivState :> loadHolder loadState :> Nil
-        , wbHold = (.robAddr) <<$>> executedResp.rdata
-        , wbComplete = fmap fst . (robWrite =<<) <$> wbOut.completions
+        , wbHold = ((.robAddr) <<$>> executed) :< ((.robAddr) <$> storeExecuted)
+        , wbComplete = fmap fst <$> wbOut.robWrites
         , robHead = robResp.hd
         , robTail = robResp.tl
         , cmRetire = cmOut.retired
         , flush
         }
 
-    state' = CoreState {fetchState = fetchState', renameState = renameState', mulDivState = mulDivState', loadState = loadState', csrFile = csrFile', pendingRedirect = pendingRedirect'}
+    state' =
+      CoreState
+        { fetchState = fetchState'
+        , renameState = renameState'
+        , ready = if cmOut.squash then repeat Nothing else rrOut.issue
+        , executed = if cmOut.squash then repeat Nothing else exOut.aluCompleted
+        , storeExecuted = guard (not cmOut.squash) *> exOut.storeCompleted
+        , mulDivState = mulDivState'
+        , loadState = loadState'
+        , csrFile = csrFile'
+        , pendingRedirect = pendingRedirect'
+        }
 
 atIssue :: (HasField "ctrl" stage InstCtrl, HasField "pdAddr" stage (Maybe PRegAddr)) => Maybe stage -> Maybe PRegAddr
 atIssue entry = do

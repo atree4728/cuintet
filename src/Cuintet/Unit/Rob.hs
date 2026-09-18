@@ -34,7 +34,7 @@ data RobEntry = RobEntry
 
 data RobReq = RobReq
   { allocates :: Vec DispatchWidth (Maybe (RobAddr, RobStatic))
-  , completes :: Vec WriteBackWidth (Maybe (RobAddr, RobDone))
+  , completes :: Vec (WriteBackWidth + 1) (Maybe (RobAddr, RobDone))
   , pop :: Index (CommitWidth + 1)
   , squash :: Bool
   }

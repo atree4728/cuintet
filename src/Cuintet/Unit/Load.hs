@@ -2,8 +2,8 @@
 module Cuintet.Unit.Load (LoadJob (..), LoadState (..), LoadReq (..), LoadResp (..), loadStep) where
 
 import Clash.Prelude
-import Cuintet.Completion (Completion (..), regWrite)
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), LoadQueueAddr, LoadShape, MemDataBytes, MemReq, MemResp, PRegAddr, RobAddr, StoreLanes (..), StoreQueueAddr, XLen, loadResult)
+import Cuintet.Completion (Completion (..), regWrite, trapped)
+import Cuintet.Eei (Addr, BusReq (..), BusResp (..), LoadQueueAddr, LoadShape, MemDataBytes, MemReq, MemResp, PRegAddr, RobAddr, StoreLanes (..), StoreQueueAddr, TrapCause, XLen, loadResult)
 import Cuintet.Forwarding (memForward)
 import Cuintet.Unit.Rob (RobDone (..))
 import Cuintet.Unit.StoreQueue (StoreQueueResp)
@@ -18,6 +18,7 @@ data LoadJob = LoadJob
   , pdAddr :: Maybe PRegAddr
   , robAddr :: RobAddr
   , mispredicted :: Bool
+  , exception :: Maybe (TrapCause, BitVector XLen)
   }
   deriving (Generic, NFDataX)
 
@@ -49,7 +50,7 @@ loadStep state LoadReq {..} = (state', LoadResp {bypass = regWrite =<< done, ..}
     (state', dReadReq, done)
       | squash = (Idle, Nothing, Nothing)
       | otherwise = case state of
-          Idle -> (maybe Idle WaitReady job, Nothing, Nothing)
+          Idle -> (maybe Idle start job, Nothing, Nothing)
           WaitReady j ->
             ( if dReadResp.ready then WaitValid j (memForward sq j.sqAddr j.addr) else state
             , Just BusReq {addr = j.addr, wdata = Nothing}
@@ -59,6 +60,8 @@ loadStep state LoadReq {..} = (state', LoadResp {bypass = regWrite =<< done, ..}
             Nothing -> (state, Nothing, Nothing)
             Just w -> settle (completion j (overlay forwarded w))
           Waiting c -> settle c
+
+    start j = maybe (WaitReady j) (Waiting . trapped j.robAddr) j.exception
 
     settle c = (if granted then Idle else Waiting c, Nothing, Just c)
 
