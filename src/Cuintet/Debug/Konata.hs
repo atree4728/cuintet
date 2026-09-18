@@ -23,13 +23,13 @@ data Inflight = Inflight
   , instBits :: Maybe Inst
   }
 
-data Stage = IF | ID | RN | IQ | RR | EX | MD | LS | WB | Cm
+data Stage = IF | ID | RN | IQ | RR | EX | MD | LD | WB | Cm
   deriving (Eq, Show)
 
 unitStage :: ExecUnit -> Stage
 unitStage = \case
   MulDivUnit -> MD
-  MemUnit -> LS
+  LoadUnit -> LD
 
 data Tracked = Tracked
   { robAddr :: RobAddr

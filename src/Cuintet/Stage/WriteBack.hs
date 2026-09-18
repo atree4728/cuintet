@@ -15,7 +15,7 @@ import Data.Maybe (isJust)
 data WriteBackIn = WriteBackIn
   { entries :: Vec IssueWidth (Maybe Executed)
   , mulDivDone :: Maybe Completion
-  , loadStoreDone :: Maybe Completion
+  , loadDone :: Maybe Completion
   , csrWrite :: Maybe (PRegAddr, BitVector XLen)
   }
 
@@ -23,7 +23,7 @@ data WriteBackOut = WriteBackOut
   { issued :: Bool
   , completions :: Vec WriteBackWidth (Maybe Completion)
   , mulDivGranted :: Bool
-  , loadStoreGranted :: Bool
+  , loadGranted :: Bool
   }
 
 writeback :: WriteBackIn -> WriteBackOut
@@ -32,7 +32,7 @@ writeback WriteBackIn {..} = WriteBackOut {..}
     (entry0, entry1) = vecToTuple entries
 
     taken, wanted :: Unsigned 3
-    taken = sum $ bool 0 1 . isJust <$> (csrRequest :> loadStoreDone :> mulDivDone :> Nil)
+    taken = sum $ bool 0 1 . isJust <$> (csrRequest :> loadDone :> mulDivDone :> Nil)
     wanted = sum $ bool 0 1 . isJust <$> entries
 
     issued = wanted > 0 && taken + wanted <= natToNum @WriteBackWidth
@@ -46,8 +46,8 @@ writeback WriteBackIn {..} = WriteBackOut {..}
     port0Request = guard issued *> (completed <$> entry0)
     port1Request = guard issued *> (completed <$> entry1)
 
-    (grants, completions) = arbitrate (csrRequest :> loadStoreDone :> mulDivDone :> port0Request :> port1Request :> Nil)
-    loadStoreGranted = grants !! (1 :: Index 4)
+    (grants, completions) = arbitrate (csrRequest :> loadDone :> mulDivDone :> port0Request :> port1Request :> Nil)
+    loadGranted = grants !! (1 :: Index 4)
     mulDivGranted = grants !! (2 :: Index 5)
 {-# OPAQUE writeback #-}
 

@@ -14,5 +14,5 @@ system ::
   Signal dom CoreOut
 system lanes = coreOut
   where
-    coreOut = core (CoreIn <$> iResp <*> dResp)
-    (iResp, dResp) = ram lanes ((.iReq) <$> coreOut) ((.dReq) <$> coreOut)
+    coreOut = core (CoreIn <$> iResp <*> dReadResp <*> dWriteResp)
+    (iResp, dReadResp, dWriteResp) = ram lanes ((.iReq) <$> coreOut) ((.dReadReq) <$> coreOut) ((.dWriteReq) <$> coreOut)

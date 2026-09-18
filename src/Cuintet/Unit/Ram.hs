@@ -3,7 +3,7 @@ module Cuintet.Unit.Ram (RamLane, ram, blockRamLanes, initRamLanes) where
 import Clash.Prelude
 import Cuintet.Eei (Addr, BusReq (..), BusResp (BusResp), StoreLanes (StoreLanes))
 import Cuintet.Util (orNothing)
-import Data.Maybe (isNothing)
+import Data.Maybe (isJust)
 
 -- | A single byte lane of the memory.
 newtype RamLane dom ramAddrWidth
@@ -16,7 +16,6 @@ newtype RamLane dom ramAddrWidth
         Signal dom (BitVector 8)
       )
 
--- | Two copies of a one-cycle-delayed memory, one per bus, so that fetches and loads never wait on each other. A store on the data bus writes both.
 ram ::
   forall dom nBytes ramAddrWidth.
   ( HiddenClockResetEnable dom
@@ -26,13 +25,15 @@ ram ::
   ) =>
   -- | one-cycle-delayed BRAM component by @blockRam@ family, one per byte lane.
   Vec nBytes (RamLane dom ramAddrWidth) ->
-  -- | Instruction bus: reads only.
+  -- | Instruction bus.
   Signal dom (Maybe (BusReq nBytes)) ->
-  -- | Data bus: a read or a write.
+  -- | Data read bus.
   Signal dom (Maybe (BusReq nBytes)) ->
-  -- | The word read on each bus, requested at the previous clock.
-  (Signal dom (BusResp nBytes), Signal dom (BusResp nBytes))
-ram lanes iReq dReq = (copy iReq, copy dReq)
+  -- | Data write bus.
+  Signal dom (Maybe (BusReq nBytes)) ->
+  -- | The word read on each read bus, requested at the previous clock; the write bus takes every write.
+  (Signal dom (BusResp nBytes), Signal dom (BusResp nBytes), Signal dom (BusResp nBytes))
+ram lanes iReq dReadReq dWriteReq = (copy iReq, copy dReadReq, pure $ BusResp True Nothing)
   where
     toRamAddr :: Addr -> Unsigned ramAddrWidth
     toRamAddr a = resize (a `shiftR` natToNum @(CLog 2 nBytes))
@@ -44,10 +45,10 @@ ram lanes iReq dReq = (copy iReq, copy dReq)
 
     copy req = BusResp True <$> rdata
       where
-        runLane laneIndex (RamLane lane) = lane raddr (laneWrite laneIndex <$> dReq)
+        runLane laneIndex (RamLane lane) = lane raddr (laneWrite laneIndex <$> dWriteReq)
         raddr = maybe (errorX "memory: no request") (toRamAddr . (.addr)) <$> req
         prevRdata = pack . reverse <$> bundle (imap runLane lanes)
-        rready = delay False $ maybe False (isNothing . (.wdata)) <$> req
+        rready = delay False (isJust <$> req)
         rdata = orNothing <$> rready <*> prevRdata
 
 -- | Uninitialized byte lanes of a given size.

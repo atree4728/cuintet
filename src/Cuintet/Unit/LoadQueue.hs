@@ -14,8 +14,6 @@ data LoadQueueReq = LoadQueueReq
   , record :: Maybe (LoadQueueAddr, LoadQueueEntry)
   , store :: Maybe (LoadQueueAddr, StoreQueueEntry)
   -- ^ An executing store, with the first load younger than it.
-  , failed :: Maybe LoadQueueAddr
-  -- ^ A load that met a store it can neither forward from nor wait for.
   , pops :: Index (CommitWidth + 1)
   , squash :: Bool
   }
@@ -56,4 +54,4 @@ step LoadQueueState {..} LoadQueueReq {..} = LoadQueueState {entries = entries',
 
     recorded = maybe entries (\(a, e) -> replace a (Just e) entries) record
     entries' = imap (\i e -> if allocated (numConvert i) then Nothing else e) recorded
-    orderFail' = izipWith (\i f e -> let a = numConvert i in not (allocated a) && (f || violates a e || failed == Just a)) orderFail entries
+    orderFail' = izipWith (\i f e -> let a = numConvert i in not (allocated a) && (f || violates a e)) orderFail entries

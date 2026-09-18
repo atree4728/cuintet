@@ -97,14 +97,14 @@ opClassOf ctrl
   | isJust ctrl.branchOp = Branch
   | otherwise = Alu
 
-data ExecUnit = MulDivUnit | MemUnit
+data ExecUnit = MulDivUnit | LoadUnit
   deriving (Generic, NFDataX, Eq, Enum)
 
 type NExecUnits = 2
 
 execUnit :: OpClass -> Maybe ExecUnit
 execUnit MulDiv = Just MulDivUnit
-execUnit Load = Just MemUnit
+execUnit Load = Just LoadUnit
 execUnit _ = Nothing
 
 data Wakeup
