@@ -1,7 +1,7 @@
 module Cuintet.Unit.Ram (RamLane, ram, blockRamLanes, initRamLanes) where
 
 import Clash.Prelude
-import Cuintet.Eei (Addr, BusReq (..), BusResp (BusResp), StoreLanes (StoreLanes))
+import Cuintet.Eei (Addr, BusReadReq (..), BusReadResp (BusReadResp), BusWriteReq (..), BusWriteResp (BusWriteResp), StoreLanes (StoreLanes))
 import Cuintet.Util (orNothing)
 import Data.Maybe (isJust)
 
@@ -26,24 +26,23 @@ ram ::
   -- | one-cycle-delayed BRAM component by @blockRam@ family, one per byte lane.
   Vec nBytes (RamLane dom ramAddrWidth) ->
   -- | Instruction bus.
-  Signal dom (Maybe (BusReq nBytes)) ->
+  Signal dom (Maybe BusReadReq) ->
   -- | Data read bus.
-  Signal dom (Maybe (BusReq nBytes)) ->
+  Signal dom (Maybe BusReadReq) ->
   -- | Data write bus.
-  Signal dom (Maybe (BusReq nBytes)) ->
+  Signal dom (Maybe (BusWriteReq nBytes)) ->
   -- | The word read on each read bus, requested at the previous clock; the write bus takes every write.
-  (Signal dom (BusResp nBytes), Signal dom (BusResp nBytes), Signal dom (BusResp nBytes))
-ram lanes iReq dReadReq dWriteReq = (copy iReq, copy dReadReq, pure $ BusResp True Nothing)
+  (Signal dom (BusReadResp nBytes), Signal dom (BusReadResp nBytes), Signal dom BusWriteResp)
+ram lanes iReq dReadReq dWriteReq = (copy iReq, copy dReadReq, pure $ BusWriteResp True)
   where
     toRamAddr :: Addr -> Unsigned ramAddrWidth
     toRamAddr a = resize (a `shiftR` natToNum @(CLog 2 nBytes))
 
     laneWrite laneIndex mreq = do
-      BusReq {addr, wdata} <- mreq
-      StoreLanes bytes <- wdata
+      BusWriteReq {addr, wdata = StoreLanes bytes} <- mreq
       (toRamAddr addr,) <$> bytes !! laneIndex
 
-    copy req = BusResp True <$> rdata
+    copy req = BusReadResp True <$> rdata
       where
         runLane laneIndex (RamLane lane) = lane raddr (laneWrite laneIndex <$> dWriteReq)
         raddr = maybe (errorX "memory: no request") (toRamAddr . (.addr)) <$> req

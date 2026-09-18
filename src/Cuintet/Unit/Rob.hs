@@ -3,7 +3,7 @@ module Cuintet.Unit.Rob (RobStatic (..), RobDone (..), RobEntry (..), squashes, 
 import Clash.Prelude
 import Control.Monad (guard)
 import Cuintet.CoreCtrl (OpClass)
-import Cuintet.Eei (Addr, CommitWidth, DispatchWidth, Inst, Mapping, MemReq, NRob, RobAddr, SystemOp (..), TrapCause, WriteBackWidth, XLen)
+import Cuintet.Eei (Addr, CommitWidth, DispatchWidth, Inst, Mapping, MemAccess, NRob, RobAddr, SystemOp (..), TrapCause, WriteBackWidth, XLen)
 import Cuintet.Unit.MultiRam (multiRam)
 import Cuintet.Util (orNothing, (<<$>>))
 import Data.Bool (bool)
@@ -22,7 +22,7 @@ data RobDone = RobDone
   { exception :: Maybe (TrapCause, BitVector XLen)
   , mispredicted :: Bool
   , value :: BitVector XLen
-  , mem :: Maybe MemReq
+  , mem :: Maybe MemAccess
   }
   deriving (Generic, NFDataX)
 

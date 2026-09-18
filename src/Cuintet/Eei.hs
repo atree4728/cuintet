@@ -21,11 +21,14 @@ module Cuintet.Eei (
   LoadShape (..),
   storeLanes,
   loadResult,
-  BusReq (..),
-  BusResp (..),
+  BusReadReq (..),
+  BusWriteReq (..),
+  BusReadResp (..),
+  BusWriteResp (..),
   MemDataBytes,
-  MemReq,
-  MemResp,
+  MemWriteReq,
+  MemReadResp,
+  MemAccess (..),
   Opcode (LUI, AUIPC, JAL, JALR, BRANCH, LOAD, STORE, OP_IMM, OP_REG, OP_IMM_32, OP_REG_32, MISC_MEM, SYSTEM),
   AluOp (..),
   BranchOp (..),
@@ -238,34 +241,36 @@ loadResult LoadShape {width, sign, offset} busWord = case width of
     ext Signed = signExtend
     ext Unsigned = zeroExtend
 
-{- | Memory access request, carried on the bus as @Maybe (MemBusReq ...)@;
-@Nothing@ means no access.
--}
-data BusReq nBytes = BusReq
+newtype BusReadReq = BusReadReq {addr :: Addr}
+  deriving stock (Generic)
+  deriving anyclass (NFDataX)
+
+data BusWriteReq nBytes = BusWriteReq
   { addr :: Addr
-  -- ^ The address to access.
-  , wdata :: Maybe (StoreLanes nBytes)
-  -- ^ 'Just' the data to write for stores, 'Nothing' for loads.
+  , wdata :: StoreLanes nBytes
   }
   deriving (Generic, NFDataX, Eq)
 
--- | The memory's half of the bus: whether it takes a request this cycle, and the word read for one it took earlier.
-data BusResp nBytes = BusResp
+data BusReadResp nBytes = BusReadResp
   { ready :: Bool
-  -- ^ Whether to accept a memory access request.
   , rdata :: Maybe (BitVector (nBytes * 8))
-  -- ^ Data read.
   }
   deriving (Generic, NFDataX)
+
+newtype BusWriteResp = BusWriteResp {ready :: Bool}
+  deriving stock (Generic)
+  deriving anyclass (NFDataX)
 
 -- | The width of the memory bus, in bytes.
 type MemDataBytes = XLenBytes
 
--- | 'BusReq' at the width the memory bus is.
-type MemReq = BusReq MemDataBytes
+type MemWriteReq = BusWriteReq MemDataBytes
 
--- | 'BusResp' at the width the memory bus is.
-type MemResp = BusResp MemDataBytes
+type MemReadResp = BusReadResp MemDataBytes
+
+-- | The memory access an instruction made, as the trace records it.
+data MemAccess = LoadAccess Addr | StoreAccess MemWriteReq
+  deriving (Generic, NFDataX, Eq)
 
 type FetchWidth = MemDataBytes * 8 `Div` ILen
 

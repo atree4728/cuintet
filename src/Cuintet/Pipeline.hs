@@ -3,7 +3,7 @@ module Cuintet.Pipeline (FetchBufBits, Fetched (..), Decoded (..), Renamed (..),
 
 import Clash.Prelude
 import Cuintet.CoreCtrl (InstCtrl (..))
-import Cuintet.Eei (Addr, Inst, LoadQueueAddr, MemReq, PRegAddr, RegAddr, RobAddr, StoreQueueAddr, TrapCause, XLen)
+import Cuintet.Eei (Addr, Inst, LoadQueueAddr, MemAccess, PRegAddr, RegAddr, RobAddr, StoreQueueAddr, TrapCause, XLen)
 import Cuintet.Unit.Btb (Prediction)
 
 type FetchBufBits = 3
@@ -65,7 +65,7 @@ data Executed = Executed
   , robAddr :: RobAddr
   , mispredicted :: Bool
   , wbData :: BitVector XLen
-  , mem :: Maybe MemReq
+  , mem :: Maybe MemAccess
   }
   deriving (Generic, NFDataX)
 
@@ -73,7 +73,7 @@ data Retire = Retire
   { pc :: Addr
   , instBits :: Inst
   , rd :: Maybe (RegAddr, BitVector XLen)
-  , mem :: Maybe MemReq
+  , mem :: Maybe MemAccess
   , trap :: Maybe TrapCause
   }
   deriving (Generic, NFDataX, Eq)

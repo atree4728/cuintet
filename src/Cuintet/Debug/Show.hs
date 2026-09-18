@@ -1,7 +1,7 @@
 module Cuintet.Debug.Show (retireLines, hex) where
 
 import Clash.Prelude
-import Cuintet.Eei (BusReq (..), MemReq, StoreLanes (..), TrapCause (..))
+import Cuintet.Eei (BusWriteReq (..), MemAccess (..), StoreLanes (..), TrapCause (..))
 import Cuintet.Pipeline (Retire (..))
 import Text.Printf (printf)
 
@@ -12,10 +12,10 @@ retireLines l =
       <> foldMap (\r -> [memLine r]) l.mem
       <> foldMap (\c -> [trapLine c]) l.trap
 
-memLine :: MemReq -> String
-memLine BusReq {addr, wdata} = case wdata of
-  Nothing -> printf "  mem[%s] load" (hex addr)
-  Just (StoreLanes bytes) -> printf "  mem[%s] <= %s" (hex addr) (foldMap byte (reverse bytes))
+memLine :: MemAccess -> String
+memLine = \case
+  LoadAccess addr -> printf "  mem[%s] load" (hex addr)
+  StoreAccess BusWriteReq {addr, wdata = StoreLanes bytes} -> printf "  mem[%s] <= %s" (hex addr) (foldMap byte (reverse bytes))
   where
     byte = maybe "--" (printf "%02x" . toInteger)
 

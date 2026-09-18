@@ -3,7 +3,7 @@ module Cuintet.Unit.Load (LoadJob (..), LoadState (..), LoadReq (..), LoadResp (
 
 import Clash.Prelude
 import Cuintet.Completion (Completion (..), regWrite, trapped)
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), LoadQueueAddr, LoadShape, MemDataBytes, MemReq, MemResp, PRegAddr, RobAddr, StoreLanes (..), StoreQueueAddr, TrapCause, XLen, loadResult)
+import Cuintet.Eei (Addr, BusReadReq (..), BusReadResp (..), LoadQueueAddr, LoadShape, MemAccess (..), MemDataBytes, MemReadResp, PRegAddr, RobAddr, StoreLanes (..), StoreQueueAddr, TrapCause, XLen, loadResult)
 import Cuintet.Forwarding (memForward)
 import Cuintet.Unit.Rob (RobDone (..))
 import Cuintet.Unit.StoreQueue (StoreQueueResp)
@@ -32,7 +32,7 @@ data LoadState
 data LoadReq = LoadReq
   { job :: Maybe LoadJob
   , sq :: StoreQueueResp
-  , dReadResp :: MemResp
+  , dReadResp :: MemReadResp
   , granted :: Bool
   , squash :: Bool
   }
@@ -41,7 +41,7 @@ data LoadResp = LoadResp
   { busy :: Bool
   , done :: Maybe Completion
   , bypass :: Maybe (PRegAddr, BitVector XLen)
-  , dReadReq :: Maybe MemReq
+  , dReadReq :: Maybe BusReadReq
   }
 
 loadStep :: LoadState -> LoadReq -> (LoadState, LoadResp)
@@ -53,7 +53,7 @@ loadStep state LoadReq {..} = (state', LoadResp {bypass = regWrite =<< done, ..}
           Idle -> (maybe Idle start job, Nothing, Nothing)
           WaitReady j ->
             ( if dReadResp.ready then WaitValid j (memForward sq j.sqAddr j.addr) else state
-            , Just BusReq {addr = j.addr, wdata = Nothing}
+            , Just BusReadReq {addr = j.addr}
             , Nothing
             )
           WaitValid j forwarded -> case dReadResp.rdata of
@@ -76,4 +76,4 @@ overlay (StoreLanes forwarded) w = bitCoerce (zipWith fromMaybe (bitCoerce w) (r
 
 completion :: LoadJob -> BitVector (MemDataBytes * 8) -> Completion
 completion LoadJob {..} word =
-  Completion robAddr pdAddr RobDone {exception = Nothing, mispredicted, value = loadResult shape word, mem = Just BusReq {addr, wdata = Nothing}}
+  Completion robAddr pdAddr RobDone {exception = Nothing, mispredicted, value = loadResult shape word, mem = Just (LoadAccess addr)}

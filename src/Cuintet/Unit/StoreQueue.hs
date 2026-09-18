@@ -2,7 +2,7 @@ module Cuintet.Unit.StoreQueue (StoreQueueEntry (..), StoreQueueReq (..), StoreQ
 
 import Clash.Prelude
 import Control.Monad (guard)
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), CommitWidth, DispatchWidth, MemDataBytes, MemReq, MemResp, NStoreQueue, StoreLanes (..), StoreQueueAddr)
+import Cuintet.Eei (Addr, BusWriteReq (..), BusWriteResp (..), CommitWidth, DispatchWidth, MemDataBytes, MemWriteReq, NStoreQueue, StoreLanes (..), StoreQueueAddr)
 import Data.Function (applyWhen)
 import Data.Maybe (isJust)
 
@@ -16,7 +16,7 @@ data StoreQueueReq = StoreQueueReq
   { allocates :: Index (DispatchWidth + 1)
   , write :: Maybe (StoreQueueAddr, StoreQueueEntry)
   , commits :: Index (CommitWidth + 1)
-  , dWriteResp :: MemResp
+  , dWriteResp :: BusWriteResp
   , squash :: Bool
   }
 
@@ -28,7 +28,7 @@ data StoreQueueResp = StoreQueueResp
   -- ^ @[hd, cm)@ is committed, @[cm, tl)@ speculative.
   , tl :: StoreQueueAddr
   , free :: StoreQueueAddr
-  , storeReq :: Maybe MemReq
+  , storeReq :: Maybe MemWriteReq
   }
 
 data StoreQueueState = StoreQueueState
@@ -62,11 +62,11 @@ step s@StoreQueueState {..} StoreQueueReq {..} = StoreQueueState {entries = entr
     entries' = imap (\i e -> if allocated (numConvert i) then Nothing else e) executed
 
 -- | The committed store at the head, as the data bus takes it.
-storeReq :: StoreQueueState -> Maybe MemReq
+storeReq :: StoreQueueState -> Maybe MemWriteReq
 storeReq StoreQueueState {..} = do
   guard (hd /= cm)
   StoreQueueEntry {..} <- entries !! hd
-  pure BusReq {addr, wdata = Just lanes}
+  pure BusWriteReq {addr, wdata = lanes}
 
 -- | Whether two accesses share a byte: the same bus word, and a lane both cover.
 overlaps :: Addr -> Vec MemDataBytes Bool -> Addr -> Vec MemDataBytes Bool -> Bool

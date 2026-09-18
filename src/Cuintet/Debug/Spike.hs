@@ -7,7 +7,7 @@ import Clash.Prelude (BitVector)
 import Control.Applicative (empty, (<|>))
 import Control.Monad (guard)
 import Cuintet.Debug.Show (retireLines)
-import Cuintet.Eei (Addr, BusReq (..), MemReq, RegAddr, Width (..), XLen, laneOffset, resetVector, storeLanes)
+import Cuintet.Eei (Addr, BusWriteReq (..), MemAccess (..), RegAddr, Width (..), XLen, laneOffset, resetVector, storeLanes)
 import Cuintet.Pipeline (Retire (..))
 import Data.Attoparsec.ByteString (match)
 import Data.Attoparsec.ByteString.Char8 (Parser, char, decimal, endOfInput, hexadecimal, many', option, parseOnly, skipSpace, skipWhile, string)
@@ -52,12 +52,12 @@ reg = ((,) . fromInteger <$> (char 'x' *> decimal)) <*> (fromInteger <$> (skipSp
 csr :: Parser Integer
 csr = char 'c' *> skipWhile (not . isSpace) *> skipSpace *> hex
 
-access :: Parser MemReq
+access :: Parser MemAccess
 access = do
   addr <- fromInteger <$> hex
-  option BusReq {addr, wdata = Nothing} (skipSpace *> stored addr)
+  option (LoadAccess addr) (skipSpace *> stored addr)
 
-stored :: Addr -> Parser MemReq
+stored :: Addr -> Parser MemAccess
 stored addr = do
   (digits, v) <- string "0x" *> match hexadecimal
   width <- case BS.length digits of
@@ -66,7 +66,7 @@ stored addr = do
     8 -> pure Word
     16 -> pure Double
     _ -> empty
-  pure BusReq {addr, wdata = Just (storeLanes width (laneOffset addr) (fromInteger v :: BitVector XLen))}
+  pure (StoreAccess BusWriteReq {addr, wdata = storeLanes width (laneOffset addr) (fromInteger v :: BitVector XLen)})
 
 hex :: Parser Integer
 hex = string "0x" *> hexadecimal

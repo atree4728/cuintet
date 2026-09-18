@@ -5,7 +5,7 @@ import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
 import Control.Monad (guard)
 import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), isCsrRead)
-import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), BusReq (..), IssueWidth, LoadQueueAddr, LoadShape (..), MemOp (..), NAluPorts, RobAddr, StoreQueueAddr, SystemOp (..), TrapCause, XLen, laneMask, laneOffset, misalignedCause, storeLanes, pattern INSTRUCTION_ADDRESS_MISALIGNED)
+import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), BusWriteReq (..), IssueWidth, LoadQueueAddr, LoadShape (..), MemAccess (..), MemOp (..), NAluPorts, RobAddr, StoreQueueAddr, SystemOp (..), TrapCause, XLen, laneMask, laneOffset, misalignedCause, storeLanes, pattern INSTRUCTION_ADDRESS_MISALIGNED)
 import Cuintet.Pipeline (Executed (..), Ready (..))
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
 import Cuintet.Unit.Csr (CsrFile, csrAccess)
@@ -80,14 +80,14 @@ execute csrFile ExecuteIn {..} = (csrFile', ExecuteOut {..})
           , robAddr
           , mispredicted = isJust storeRedirect
           , wbData = pack addr
-          , mem = orNothing (isNothing storeException) BusReq {addr, wdata = Just (storeLanes width (laneOffset addr) rs2Data)}
+          , mem = orNothing (isNothing storeException) (StoreAccess BusWriteReq {addr, wdata = storeLanes width (laneOffset addr) rs2Data})
           }
 
     storeWrite = do
       Ready {sqAddr} <- storeEntry
       Executed {mem} <- storeCompleted
-      BusReq {addr, wdata = Just bytes} <- mem
-      pure (sqAddr, StoreQueueEntry {addr, lanes = bytes})
+      StoreAccess BusWriteReq {addr, wdata} <- mem
+      pure (sqAddr, StoreQueueEntry {addr, lanes = wdata})
 
     loadRecord = do
       LoadJob {addr, shape = LoadShape {width, offset}, lqAddr, exception} <- loadJob

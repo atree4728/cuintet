@@ -3,7 +3,7 @@ module Cuintet.Stage.Fetch (FetchState (..), initFetchState, FetchIn (..), Fetch
 
 import Clash.Prelude
 import Control.Monad (guard)
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), DispatchWidth, FetchWidth, MemReq, MemResp, instSlice, resetVector)
+import Cuintet.Eei (Addr, BusReadReq (..), BusReadResp (..), DispatchWidth, FetchWidth, MemReadResp, instSlice, resetVector)
 import Cuintet.Pipeline (FetchBufBits, Fetched (..))
 import Cuintet.Unit.Btb (BtbResp (..), Prediction (..), bankOf, isTaken)
 import Cuintet.Unit.Ring (RingResp (..))
@@ -43,7 +43,7 @@ initFetchState =
     }
 
 data FetchIn = FetchIn
-  { iResp :: MemResp
+  { iResp :: MemReadResp
   -- ^ Response to a fetch request issued on an earlier clock.
   , buf :: RingResp FetchBufBits DispatchWidth Fetched
   -- ^ The fetch buffer, for the room it has.
@@ -55,7 +55,7 @@ data FetchIn = FetchIn
 data FetchOut = FetchOut
   { issue :: Vec FetchWidth (Maybe Fetched)
   -- ^ What the fetch buffer takes this clock.
-  , iReq :: Maybe MemReq
+  , iReq :: Maybe BusReadReq
   -- ^ Instruction fetch request.
   , btbLookup :: Addr
   , btbPrefetch :: Addr
@@ -70,7 +70,7 @@ fetch FetchState {..} FetchIn {..} =
   where
     nStaged = sum (bool 0 1 . isJust <$> staged)
     room = buf.free >= nStaged + natToNum @FetchWidth
-    iReq = orNothing (room && isNothing restart) BusReq {addr = next, wdata = Nothing}
+    iReq = orNothing (room && isNothing restart) BusReadReq {addr = next}
     accepted = isJust iReq && iResp.ready
 
     next'

@@ -5,7 +5,7 @@ import Clash.Prelude
 import Control.Monad (guard)
 import Cuintet.Completion (robWrite)
 import Cuintet.CoreCtrl (ExecUnit (..), InstCtrl, NExecUnits, Wakeup (..), execUnit, isLoad, isStore, opClassOf, wakeup)
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), CommitWidth, DispatchWidth, FetchWidth, IssueWidth, MemReq, MemResp, NAluPorts, PRegAddr, RobAddr, WriteBackWidth, XLen)
+import Cuintet.Eei (Addr, BusReadReq (..), BusReadResp (..), BusWriteResp, CommitWidth, DispatchWidth, FetchWidth, IssueWidth, MemReadResp, MemWriteReq, NAluPorts, PRegAddr, RobAddr, WriteBackWidth, XLen)
 import Cuintet.Pipeline (Decoded (..), Executed (..), FetchBufBits, Fetched (..), Ready (..), Renamed (..), Retire (..))
 import Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit)
 import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
@@ -33,15 +33,15 @@ import Data.Maybe (isJust)
 import GHC.Records (HasField)
 
 data CoreIn = CoreIn
-  { iResp :: MemResp
-  , dReadResp :: MemResp
-  , dWriteResp :: MemResp
+  { iResp :: MemReadResp
+  , dReadResp :: MemReadResp
+  , dWriteResp :: BusWriteResp
   }
 
 data CoreOut = CoreOut
-  { iReq :: Maybe MemReq
-  , dReadReq :: Maybe MemReq
-  , dWriteReq :: Maybe MemReq
+  { iReq :: Maybe BusReadReq
+  , dReadReq :: Maybe BusReadReq
+  , dWriteReq :: Maybe MemWriteReq
   , retired :: Vec CommitWidth (Maybe Retire)
   , led :: BitVector XLen
   , coreTrace :: CoreTrace
