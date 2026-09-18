@@ -8,7 +8,7 @@ import Cuintet.Eei (Addr, BusReadReq (..), BusReadResp (..), BusWriteResp, Commi
 import Cuintet.Pipeline (Decoded (..), Executed (..), FetchBufBits, Fetched (..), Ready (..), Renamed (..), Retire (..))
 import Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit)
 import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
-import Cuintet.Stage.Execute (ExecuteIn (..), ExecuteOut (..), execute)
+import Cuintet.Stage.Execute (ExecuteIn (..), ExecuteOut (..), RedirectState, execute, initRedirectState)
 import Cuintet.Stage.Fetch (FetchIn (..), FetchOut (..), FetchState (..), fetch, initFetchState)
 import Cuintet.Stage.RegRead (RegReadIn (..), RegReadOut (..), regRead)
 import Cuintet.Stage.Rename (RenameIn (..), RenameOut (..), RenameState, initRenameState, rename)
@@ -55,13 +55,12 @@ data CoreState = CoreState
   , mulDivState :: MulDivState
   , loadState :: LoadState
   , csrFile :: CsrFile
-  , pendingRedirect :: Maybe RobAddr
-  -- ^ The oldest entry whose redirect IF has taken and Cm has not yet squashed.
+  , redirectState :: RedirectState
   }
   deriving (Generic, NFDataX)
 
 initState :: CoreState
-initState = CoreState {fetchState = initFetchState, renameState = initRenameState, ready = repeat Nothing, aluExecuted = repeat Nothing, storeExecuted = Nothing, mulDivState = M.Idle, loadState = L.Idle, csrFile = initCsrFile, pendingRedirect = Nothing}
+initState = CoreState {fetchState = initFetchState, renameState = initRenameState, ready = repeat Nothing, aluExecuted = repeat Nothing, storeExecuted = Nothing, mulDivState = M.Idle, loadState = L.Idle, csrFile = initCsrFile, redirectState = initRedirectState}
 
 -- | From the ROB on, the stages are told by which entry each of them holds in the clock.
 data CoreTrace = CoreTrace
@@ -131,7 +130,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, sqResp, lqResp, f
     idOut = decode DecodeIn {entries = fetchedResp.rdata, wready = decodedResp.wready, stall = flush}
     (renameState', rnOut) = rename renameState RenameIn {entries = decodedResp.rdata, committed = cmOut.mappings, nextRobAddr = robResp.tl, robFree = robResp.free, nextSqAddr = sqResp.tl, sqFree = sqResp.free, nextLqAddr = lqResp.tl, flush, drained = robResp.hd == robResp.tl}
     rrOut = regRead RegReadIn {entries = issueResp.issue, rsData = regResp.rsData, bypasses}
-    (csrFile', exOut) = execute csrFile ExecuteIn {entries = ready, robHead = robResp.hd, pendingRedirect}
+    ((csrFile', redirectState'), exOut) = execute (csrFile, redirectState) ExecuteIn {entries = ready, robHead = robResp.hd, squash = cmOut.squash}
     wbOut = writeback WriteBackIn {aluExecuted, storeExecuted, loadDone = loadResp.done, mulDivDone = mulDivResp.done}
     (csrFile'', cmOut) = commit csrFile' CommitIn {entries = robResp.entries, orderFail = lqResp.orderFail}
 
@@ -140,9 +139,8 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, sqResp, lqResp, f
     (loadState', loadResp) =
       loadStep loadState LoadReq {job = exOut.loadJob, sq = sqResp, dReadResp, granted = wbOut.loadGranted, squash = cmOut.squash}
 
-    redirect = cmOut.redirect <|> (snd <$> exOut.redirect)
+    redirect = cmOut.redirect <|> exOut.redirect
     flush = isJust redirect
-    pendingRedirect' = guard (not cmOut.squash) *> ((fst <$> exOut.redirect) <|> pendingRedirect)
 
     wakeups = (atIssue <$> takeI rrOut.issue) ++ (fst <<$>> unitBypasses)
     bypasses =
@@ -193,7 +191,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, sqResp, lqResp, f
         , mulDivState = mulDivState'
         , loadState = loadState'
         , csrFile = csrFile''
-        , pendingRedirect = pendingRedirect'
+        , redirectState = redirectState'
         }
 
 atIssue :: (HasField "ctrl" stage InstCtrl, HasField "pdAddr" stage (Maybe PRegAddr)) => Maybe stage -> Maybe PRegAddr

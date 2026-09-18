@@ -1,5 +1,5 @@
 -- | EX: one port per kind of instruction. The ALU ports compute and branch, and the first also accesses the CSR file; the others hand their instruction to a unit or the store queue.
-module Cuintet.Stage.Execute (execute, ExecuteIn (..), ExecuteOut (..)) where
+module Cuintet.Stage.Execute (RedirectState (..), initRedirectState, execute, ExecuteIn (..), ExecuteOut (..)) where
 
 import Clash.Prelude
 import Clash.Sized.Vector.ToTuple (vecToTuple)
@@ -15,10 +15,22 @@ import Cuintet.Unit.MulDiv (MulDivJob (..))
 import Cuintet.Util (isOlder, oldest, orNothing)
 import Data.Maybe (isJust, isNothing)
 
+-- | The redirects EX has resolved and Cm has not yet squashed.
+data RedirectState = RedirectState
+  { latched :: Maybe Addr
+  -- ^ The last clock's redirect, which the front end takes one clock later to keep EX out of its cone.
+  , pending :: Maybe RobAddr
+  -- ^ The oldest entry whose redirect the front end has taken.
+  }
+  deriving (Generic, NFDataX)
+
+initRedirectState :: RedirectState
+initRedirectState = RedirectState {latched = Nothing, pending = Nothing}
+
 data ExecuteIn = ExecuteIn
   { entries :: Vec IssueWidth (Maybe Ready)
   , robHead :: RobAddr
-  , pendingRedirect :: Maybe RobAddr
+  , squash :: Bool
   }
 
 data ExecuteOut = ExecuteOut
@@ -29,12 +41,12 @@ data ExecuteOut = ExecuteOut
   , storeWrite :: Maybe (StoreQueueAddr, MemWriteReq)
   , loadRecord :: Maybe (LoadQueueAddr, LoadQueueEntry)
   , storeSearch :: Maybe (LoadQueueAddr, MemWriteReq)
-  , redirect :: Maybe (RobAddr, Addr)
+  , redirect :: Maybe Addr
   , btbWrites :: Vec IssueWidth (Maybe BtbWrite)
   }
 
-execute :: CsrFile -> ExecuteIn -> (CsrFile, ExecuteOut)
-execute csrFile ExecuteIn {..} = (csrFile', ExecuteOut {..})
+execute :: (CsrFile, RedirectState) -> ExecuteIn -> ((CsrFile, RedirectState), ExecuteOut)
+execute (csrFile, RedirectState {..}) ExecuteIn {..} = ((csrFile', redirectState'), ExecuteOut {..})
   where
     (aluPorts, rest) = splitAtI entries
     (mulDivPort, loadPort, storePort) = vecToTuple rest
@@ -67,11 +79,17 @@ execute csrFile ExecuteIn {..} = (csrFile', ExecuteOut {..})
     redirects = aluRedirects ++ mulDivRedirect :> loadRedirect :> storeRedirect :> Nil
     btbWrites = aluBtbWrites ++ mulDivBtbWrite :> loadBtbWrite :> storeBtbWrite :> Nil
 
-    -- A younger redirect than a pending one comes from the wrong path.
-    redirect = do
+    resolved = do
       r@(robAddr, _) <- oldest robHead (zipWith (\entry target -> liftA2 (,) ((.robAddr) <$> entry) target) entries redirects)
-      guard (maybe True (\p -> isOlder robAddr p robHead) pendingRedirect)
+      guard (maybe True (\p -> isOlder robAddr p robHead) pending)
       pure r
+
+    redirect = latched
+    redirectState' =
+      RedirectState
+        { latched = guard (not squash) *> (snd <$> resolved)
+        , pending = guard (not squash) *> ((fst <$> resolved) <|> pending)
+        }
 {-# OPAQUE execute #-}
 
 unport :: Maybe (a, Maybe b, Maybe c) -> (Maybe a, Maybe b, Maybe c)
