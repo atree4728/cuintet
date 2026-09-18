@@ -1,10 +1,8 @@
 module Cuintet.Unit.MulDiv (MulDivReq (..), MulDivResp (..), MulDivState (..), MulDivJob (..), mulDivStep) where
 
 import Clash.Prelude
-import Cuintet.Completion (Completion (..))
+import Cuintet.Completion (Completion (..), regWrite)
 import Cuintet.Eei (DivOp (..), MulDivOp (..), MulOp (..), PRegAddr, RobAddr, Sign (..), XLen)
-import Cuintet.Forwarding (Forwarding)
-import Cuintet.Forwarding qualified as F
 import Cuintet.Unit.MulDiv.Div (DivOperands (..), DivResult (..), DivState, divInit, divResult, divStep)
 import Cuintet.Unit.MulDiv.Mul (MulOperands (..), MulResult (..), MulState, mulInit, mulResult, mulStep)
 import Cuintet.Unit.Rob (RobDone (..))
@@ -30,7 +28,7 @@ data MulDivReq = MulDivReq
 data MulDivResp = MulDivResp
   { busy :: Bool
   , done :: Maybe Completion
-  , forwarding :: Forwarding
+  , bypass :: Maybe (PRegAddr, BitVector XLen)
   }
 
 data MulDivState = Idle | Busy MulDivJob Phase | Waiting Completion
@@ -44,15 +42,15 @@ completion MulDivJob {robAddr, pdAddr, mispredicted} value =
   Complete robAddr pdAddr RobDone {exception = Nothing, mispredicted, value, mem = Nothing}
 
 mulDivStep :: MulDivState -> MulDivReq -> (MulDivState, MulDivResp)
-mulDivStep _ MulDivReq {squash = True} = (Idle, MulDivResp {busy = False, done = Nothing, forwarding = F.Idle})
+mulDivStep _ MulDivReq {squash = True} = (Idle, MulDivResp {busy = False, done = Nothing, bypass = Nothing})
 mulDivStep Idle MulDivReq {job} =
-  (maybe Idle (`Busy` Loaded) job, MulDivResp {busy = False, done = Nothing, forwarding = F.Idle})
+  (maybe Idle (`Busy` Loaded) job, MulDivResp {busy = False, done = Nothing, bypass = Nothing})
 mulDivStep (Waiting c) MulDivReq {granted} =
-  (if granted then Idle else Waiting c, MulDivResp {busy = True, done = Just c, forwarding = F.broadcast c})
-mulDivStep (Busy job phase) MulDivReq {granted} = (state', MulDivResp {busy = True, done, forwarding})
+  (if granted then Idle else Waiting c, MulDivResp {busy = True, done = Just c, bypass = regWrite c})
+mulDivStep (Busy job phase) MulDivReq {granted} = (state', MulDivResp {busy = True, done, bypass})
   where
     done = completion job <$> result
-    forwarding = F.forwarding job.pdAddr result
+    bypass = (,) <$> job.pdAddr <*> result
 
     state' = case result of
       Just v

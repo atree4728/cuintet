@@ -2,10 +2,8 @@
 module Cuintet.Unit.LoadStore (LoadJob (..), LoadState (..), LoadStoreReq (..), LoadStoreResp (..), loadStoreStep) where
 
 import Clash.Prelude
-import Cuintet.Completion (Completion (..))
-import Cuintet.Eei (Addr, BusReq (..), BusResp (..), LoadQueueAddr, LoadShape, MemDataBytes, MemReq, MemResp, PRegAddr, RobAddr, StoreQueueAddr, loadResult)
-import Cuintet.Forwarding (Forwarding)
-import Cuintet.Forwarding qualified as F
+import Cuintet.Completion (Completion (..), regWrite)
+import Cuintet.Eei (Addr, BusReq (..), BusResp (..), LoadQueueAddr, LoadShape, MemDataBytes, MemReq, MemResp, PRegAddr, RobAddr, StoreQueueAddr, XLen, loadResult)
 import Cuintet.Unit.Rob (RobDone (..))
 import Cuintet.Unit.StoreQueue (Forward (..), StoreQueueResp, loadForward, storeReq)
 import Data.Maybe (isJust, isNothing)
@@ -41,7 +39,7 @@ data LoadStoreReq = LoadStoreReq
 data LoadStoreResp = LoadStoreResp
   { busy :: Bool
   , done :: Maybe Completion
-  , forwarding :: Forwarding
+  , bypass :: Maybe (PRegAddr, BitVector XLen)
   , memReq :: Maybe MemReq
   , written :: Bool
   , failed :: Maybe LoadQueueAddr
@@ -64,10 +62,11 @@ loadStoreStep state LoadStoreReq {..} = (state', LoadStoreResp {..})
       _ -> Nothing
 
     memReq = store <|> loadReq
-    forwarding = maybe F.Idle F.broadcast done
-    busy = not squash && case state of
-      Idle -> False
-      _ -> True
+    bypass = regWrite =<< done
+    busy =
+      not squash && case state of
+        Idle -> False
+        _ -> True
 
 -- | One clock of the load path, on the bus as the load sees it: a store writing takes the readiness away.
 loadStep :: LoadState -> Maybe LoadJob -> StoreQueueResp -> MemResp -> Bool -> (LoadState, Maybe MemReq, Maybe Completion)

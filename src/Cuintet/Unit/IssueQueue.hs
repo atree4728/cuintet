@@ -6,7 +6,7 @@ import Cuintet.Eei (Addr, DispatchWidth, IssueWidth, LoadQueueAddr, NPRegs, NRob
 import Cuintet.Pipeline (Renamed (..))
 import Cuintet.Unit.Btb (Prediction)
 import Cuintet.Unit.MultiRam (multiRam)
-import Cuintet.Util (orNothing)
+import Cuintet.Util (orNothing, (<<$>>))
 
 -- | AtIssue from both ports, AtComplete from both units, AtCommit.
 type NBroadcast = 5
@@ -102,7 +102,7 @@ step IssueQueueState {..} IssueQueueReq {..} = (IssueQueueState {tags = tags', r
 
     tags'
       | squash = repeat Nothing
-      | otherwise = foldl insert (fmap woken <$> cleared) dispatch
+      | otherwise = foldl insert (woken <<$>> cleared) dispatch
       where
         cleared = foldl (\ts -> maybe ts (\a -> replace a Nothing ts)) tags leaving
         insert ts = maybe ts (\r -> replace r.robAddr (Just (tagOf r)) ts)
@@ -117,5 +117,5 @@ issueQueue req = mkOut <$> selection <*> multiRam (addrs <$> selection) (writes 
 
     addrs Select {selected} = maybe 0 fst <$> selected
 
-    writes IssueQueueReq {dispatch} = fmap payloadOf <$> dispatch
+    writes IssueQueueReq {dispatch} = payloadOf <<$>> dispatch
     payloadOf Renamed {..} = (robAddr, IqPayload {..})

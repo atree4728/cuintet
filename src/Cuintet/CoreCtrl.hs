@@ -107,8 +107,13 @@ execUnit MulDiv = Just MulDivUnit
 execUnit Load = Just MemUnit
 execUnit _ = Nothing
 
--- | When an 'OpClass' broadcasts its destination tag.
-data Wakeup = AtIssue | AtComplete | AtCommit
+data Wakeup
+  = -- | RR wakes, then EX and WB bypass until the register file has it.
+    AtIssue
+  | -- | a unit wakes and bypasses while it holds the completion.
+    AtComplete
+  | -- |  Cm wakes as WB writes.
+    AtCommit
   deriving (Generic, NFDataX, Eq)
 
 wakeup :: OpClass -> Wakeup

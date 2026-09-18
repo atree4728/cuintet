@@ -6,7 +6,6 @@ import Control.Monad (guard)
 import Cuintet.Completion (regWrite, robWrite)
 import Cuintet.CoreCtrl (ExecUnit (..), InstCtrl, NExecUnits, Wakeup (..), execUnit, isLoad, isStore, opClassOf, wakeup)
 import Cuintet.Eei (Addr, BusReq (..), BusResp (..), CommitWidth, DispatchWidth, FetchWidth, IssueWidth, MemReq, MemResp, PRegAddr, RobAddr, WriteBackWidth, XLen)
-import Cuintet.Forwarding qualified as F
 import Cuintet.Pipeline (Decoded (..), Executed (..), FetchBufBits, Fetched (..), Ready (..), Renamed (..), Retire (..))
 import Cuintet.Stage.Commit (CommitIn (..), CommitOut (..), commit)
 import Cuintet.Stage.Decode (DecodeIn (..), DecodeOut (..), decode)
@@ -28,6 +27,7 @@ import Cuintet.Unit.RegFile (RegReq (..), RegResp (..), regFile)
 import Cuintet.Unit.Ring (RingReq (..), RingResp (..), ring)
 import Cuintet.Unit.Rob (RobReq (..), RobResp (..), rob)
 import Cuintet.Unit.StoreQueue (StoreQueueReq (..), StoreQueueResp (..), storeQueue)
+import Cuintet.Util ((<<$>>))
 import Data.Bool (bool)
 import Data.Maybe (isJust)
 import GHC.Records (HasField)
@@ -138,7 +138,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, sqResp, lqResp, f
     (fetchState', ifOut) = fetch fetchState FetchIn {iResp, buf = fetchedResp, redirect, btbResp}
     idOut = decode DecodeIn {entries = fetchedResp.rdata, wready = decodedResp.wready, stall = flush}
     (renameState', rnOut) = rename renameState RenameIn {entries = decodedResp.rdata, committed = cmOut.renamed, nextRobAddr = robResp.tl, robFree = robResp.free, nextSqAddr = sqResp.tl, sqFree = sqResp.free, nextLqAddr = lqResp.tl, flush, drained = robResp.hd == robResp.tl}
-    rrOut = regRead RegReadIn {entries = issueResp.issue, rsData = regResp.rsData, forwards, wready = readyResp.wready}
+    rrOut = regRead RegReadIn {entries = issueResp.issue, rsData = regResp.rsData, bypasses, wready = readyResp.wready}
     exOut = execute ExecuteIn {entries = readyResp.rdata, robHead = robResp.hd, pendingRedirect, wready = executedResp.wready}
     wbOut = writeback WriteBackIn {entries = executedResp.rdata, loadStoreDone = loadStoreResp.done, mulDivDone = mulDivResp.done, csrWrite = cmOut.csrWrite}
     (csrFile', cmOut) = commit csrFile CommitIn {entries = robResp.entries, orderFail = lqResp.orderFail}
@@ -152,21 +152,18 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, sqResp, lqResp, f
     flush = isJust redirect
     pendingRedirect' = guard (not cmOut.squash) *> ((fst <$> exOut.redirect) <|> pendingRedirect)
 
-    -- AtIssue: RR wakes, then EX and WB forward until the register file has it.
-    -- AtComplete: a unit wakes and forwards while it holds the completion.
-    -- AtCommit: Cm wakes as WB writes.
-    wakeups = (atIssue <$> rrOut.issue) ++ (F.dest <$> unitForwards) ++ (fst <$> cmOut.csrWrite) :> Nil
-    forwards =
-      reverse (zipWith F.forwarding (atIssue <$> readyResp.rdata) ((<$ guard exOut.issued) <$> exOut.wbData))
-        ++ reverse (zipWith F.forwarding (atIssue <$> executedResp.rdata) (fmap (.wbData) <$> executedResp.rdata))
-        ++ unitForwards
-    unitForwards = mulDivResp.forwarding :> loadStoreResp.forwarding :> Nil
+    wakeups = (atIssue <$> rrOut.issue) ++ (fst <<$>> unitBypasses) ++ (fst <$> cmOut.csrWrite) :> Nil
+    bypasses =
+      reverse unitBypasses
+        ++ zipWith (liftA2 (,)) (atIssue <$> executedResp.rdata) ((.wbData) <<$>> executedResp.rdata)
+        ++ zipWith (liftA2 (,)) (atIssue <$> readyResp.rdata) ((<$ guard exOut.issued) <$> exOut.wbData)
+    unitBypasses = mulDivResp.bypass :> loadStoreResp.bypass :> Nil
 
     busy = (mulDivResp.busy || inflightTo MulDivUnit) :> (loadStoreResp.busy || inflightTo MemUnit) :> Nil
       where
         inflightTo unit = any (maybe False ((== Just unit) . execUnit . opClassOf . (.ctrl))) readyResp.rdata
     rsAddrs = concatMap (maybe (repeat 0) (\Renamed {..} -> ps1Addr :> ps2Addr :> Nil)) issueResp.issue
-    idIssue = sum . fmap (\entry -> if isJust entry then 1 else 0) $ idOut.issue
+    idIssue = sum $ bool 0 1 . isJust <$> idOut.issue
 
     regReq = RegReq {rsAddrs, writes = (regWrite =<<) <$> wbOut.completions}
     btbReq = BtbReq {lookupAddr = ifOut.btbLookup, prefetchAddr = ifOut.btbPrefetch, writes = exOut.btbWrites}
@@ -187,10 +184,10 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, sqResp, lqResp, f
         , ifIssue = if flush then repeat Nothing else ifOut.issue
         , idIssue
         , rnIssue = rnOut.issue
-        , rrIssue = fmap (.robAddr) <$> rrOut.issue
-        , exHold = fmap (.robAddr) <$> readyResp.rdata
+        , rrIssue = (.robAddr) <<$>> rrOut.issue
+        , exHold = (.robAddr) <<$>> readyResp.rdata
         , unitHold = mulDivHolder mulDivState :> loadHolder loadState :> Nil
-        , wbHold = fmap (.robAddr) <$> executedResp.rdata
+        , wbHold = (.robAddr) <<$>> executedResp.rdata
         , wbComplete = fmap fst . (robWrite =<<) <$> wbOut.completions
         , robHead = robResp.hd
         , robTail = robResp.tl
@@ -200,7 +197,7 @@ coreT CoreState {..} (~CoreIn {..}, regResp, btbResp, robResp, sqResp, lqResp, f
 
     state' = CoreState {fetchState = fetchState', renameState = renameState', mulDivState = mulDivState', loadState = loadState', csrFile = csrFile', pendingRedirect = pendingRedirect'}
 
-atIssue :: (HasField "ctrl" r InstCtrl, HasField "pdAddr" r (Maybe PRegAddr)) => Maybe r -> Maybe PRegAddr
+atIssue :: (HasField "ctrl" stage InstCtrl, HasField "pdAddr" stage (Maybe PRegAddr)) => Maybe stage -> Maybe PRegAddr
 atIssue entry = do
   e <- entry
   guard (wakeup (opClassOf e.ctrl) == AtIssue)

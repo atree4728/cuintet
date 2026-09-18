@@ -4,14 +4,14 @@ module Cuintet.Stage.Execute (execute, ExecuteIn (..), ExecuteOut (..)) where
 import Clash.Prelude
 import Control.Monad (guard)
 import Cuintet.CoreCtrl (InstCtrl (..), InstFormat (..), execUnit, isCsrRead, opClassOf)
-import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), BusReq (..), IssueWidth, LoadQueueAddr, LoadShape (..), MemOp (..), RobAddr, StoreQueueAddr, SystemOp (..), XLen, laneOffset, laneMask, misalignedCause, storeLanes, pattern INSTRUCTION_ADDRESS_MISALIGNED)
+import Cuintet.Eei (Addr, AluOp (..), BranchOp (..), BusReq (..), IssueWidth, LoadQueueAddr, LoadShape (..), MemOp (..), RobAddr, StoreQueueAddr, SystemOp (..), XLen, laneMask, laneOffset, misalignedCause, storeLanes, pattern INSTRUCTION_ADDRESS_MISALIGNED)
 import Cuintet.Pipeline (Executed (..), Ready (..))
 import Cuintet.Unit.Btb (BtbWrite, predicted, train)
 import Cuintet.Unit.LoadQueue (LoadQueueEntry (..))
 import Cuintet.Unit.LoadStore (LoadJob (..))
 import Cuintet.Unit.MulDiv (MulDivJob (..))
 import Cuintet.Unit.StoreQueue (StoreQueueEntry (..))
-import Cuintet.Util (orNothing)
+import Cuintet.Util (orNothing, (<<$>>))
 import Data.Maybe (isJust, isNothing)
 
 data ExecuteIn = ExecuteIn
@@ -39,7 +39,7 @@ execute ExecuteIn {..} = ExecuteOut {..}
   where
     issued = any isJust entries && wready
 
-    lanes = fmap executeLane <$> entries
+    lanes = executeLane <<$>> entries
 
     completed = zipWith keep entries lanes
       where

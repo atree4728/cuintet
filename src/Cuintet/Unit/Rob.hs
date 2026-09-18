@@ -5,7 +5,7 @@ import Control.Monad (guard)
 import Cuintet.CoreCtrl (OpClass)
 import Cuintet.Eei (Addr, CommitWidth, DispatchWidth, Inst, Mapping, MemReq, NRob, RobAddr, SystemOp (..), TrapCause, WriteBackWidth, XLen)
 import Cuintet.Unit.MultiRam (multiRam)
-import Cuintet.Util (orNothing)
+import Cuintet.Util (orNothing, (<<$>>))
 import Data.Bool (bool)
 import Data.Maybe (isJust, isNothing)
 
@@ -89,7 +89,7 @@ rob req = mkResp <$> cur <*> multiRam addrs allocs <*> dones
     completed = mealy flagStep (repeat @NRob False) (bundle (allocs, (.completes) <$> req))
     flagStep flags (as, cs) = (foldl assign flags (clears ++ sets), flags)
       where
-        clears = fmap (\(robAddr, _) -> (robAddr, False)) <$> as
-        sets = fmap (\(robAddr, _) -> (robAddr, True)) <$> cs
+        clears = (\(robAddr, _) -> (robAddr, False)) <<$>> as
+        sets = (\(robAddr, _) -> (robAddr, True)) <<$>> cs
         assign f = maybe f (\(addr, v) -> replace addr v f)
 {-# OPAQUE rob #-}

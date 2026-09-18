@@ -2,6 +2,7 @@ module Cuintet.Unit.RegFile (ReadPorts, RegReq (..), RegResp (..), regFile) wher
 
 import Clash.Prelude
 import Cuintet.Eei (DispatchWidth, PRegAddr, WriteBackWidth, XLen)
+import Cuintet.Forwarding (bypass)
 import Cuintet.Unit.MultiRam (multiRam)
 
 type ReadPorts = 2 * DispatchWidth
@@ -21,7 +22,4 @@ regFile req = regOutput <$> req <*> multiRam ((.rsAddrs) <$> req) ((.writes) <$>
 regOutput :: RegReq -> Vec ReadPorts (BitVector XLen) -> RegResp
 regOutput RegReq {..} stored = RegResp $ zipWith readOut rsAddrs stored
   where
-    readOut rs raw = foldl (bypass rs) (if rs == 0 then 0 else raw) writes
-    bypass rs old = \case
-      Just (rd, v) | rd == rs -> v
-      _ -> old
+    readOut rs raw = bypass writes rs (if rs == 0 then 0 else raw)
